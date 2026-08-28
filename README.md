@@ -15,6 +15,13 @@ Discord as the synthesizer produces each chunk.
 The project is intentionally narrow: one caller, one focused Omnigent session,
 one container, and no text or web interface.
 
+Structured JSON logs are written to stdout. When `LOG_FILE` is set, the same
+events are appended to that file for durable retention. Conversation events
+include recognized user transcripts, generated assistant responses, and the
+exact assistant text whose audio begins playing. These logs are intentionally
+sensitive and belong only on private runtime storage; they are never built into
+the image.
+
 The coordinator exposes seven tools: list and focus sessions, read recent
 output, send a message, answer a structured prompt, start a session, and drain
 background updates. The same server can run over stdio with `npm run mcp`; the
@@ -52,4 +59,5 @@ podman run --rm --env-file .env omnigent-voice:dev
 ```
 
 The image has no embedded deployment configuration or credentials. See
-`.env.example` for the runtime interface.
+`.env.example` for the runtime interface. Set `LOG_FILE` to a writable runtime
+path to retain the JSONL event log across process restarts.

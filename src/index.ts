@@ -8,9 +8,12 @@ import { OmnigentClient } from "./omnigent.js";
 import { LocalSpeech } from "./speech.js";
 
 const config = loadConfig(process.env);
-const logger = new Logger(config.logLevel);
+const logger = new Logger(config.logLevel, config.logFile);
 
-logger.info("startup", { celerisEnabled: Boolean(config.celerisApiKey) });
+logger.info("startup", {
+  celerisEnabled: Boolean(config.celerisApiKey),
+  persistentLogEnabled: Boolean(config.logFile),
+});
 
 const speech = await LocalSpeech.create({
   asrModelDir: config.sherpaAsrModelDir,

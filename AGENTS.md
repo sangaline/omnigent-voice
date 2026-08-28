@@ -63,8 +63,18 @@ available through the Omnigent HTTP API and must not be implied. Structured MCP
 elicitations resolve through their dedicated endpoint and may target a child
 session. Direct turns keep a small in-memory history. A stdio MCP entry point is
 available with `npm run mcp`; authenticated remote HTTP transport is deliberately
-deferred. Logs contain timing, character counts, tool names, and event names but
-never transcripts or tool arguments.
+deferred.
+
+Logs are newline-delimited JSON on stdout and, when `LOG_FILE` is configured,
+appended to that runtime file. `conversation.user.recognized` contains each ASR
+transcript. `conversation.assistant.generated` records the response and whether
+it was superseded before playback. `conversation.assistant.playback_started`
+records the exact text whose audio actually began and its retry number. This is
+an intentional conversation audit trail and is sensitive private data. Keep the
+file on private runtime storage, never add it to an image or repository, and
+never log tool arguments, tokens, environment values, or credentials. The
+Kubernetes chart mounts a retained PVC at `/var/lib/omnigent-voice` and sets
+`LOG_FILE=/var/lib/omnigent-voice/events.jsonl`.
 
 The Discord voice channel is currently part of the MVP trust boundary. Before
 using a channel with more than one trusted human, configure
@@ -93,7 +103,9 @@ link or deployment metadata.
 - Commit coherent milestones; stage only owned files.
 - Keep pure state/normalization logic unit tested, but prioritize real voice-loop
   integration.
-- Log timings and opaque operation labels, never transcript contents or secrets.
+- Retain conversation transcripts and assistant speech only in the designated
+  private runtime JSONL log. Never log tool arguments, configuration values, or
+  credentials.
 - The Docker Hub image is public but intentionally has no Hub description,
   README sync, source link, author label, or deployment-specific metadata.
 - Update this file when runtime assumptions or operational procedures change.

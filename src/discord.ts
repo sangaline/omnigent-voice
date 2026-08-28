@@ -198,6 +198,10 @@ export class DiscordVoiceBot {
     }
     if (!transcript) return;
 
+    this.options.logger.info("conversation.user.recognized", {
+      text: transcript,
+      audioMs,
+    });
     this.responseEpoch += 1;
     this.player.stop(true);
     const epoch = this.responseEpoch;
@@ -222,6 +226,10 @@ export class DiscordVoiceBot {
   private async processTurn(transcript: string, epoch: number): Promise<void> {
     try {
       const spoken = await this.options.celeris.respond(transcript);
+      this.options.logger.info("conversation.assistant.generated", {
+        text: spoken,
+        superseded: epoch !== this.responseEpoch,
+      });
       if (epoch !== this.responseEpoch) return;
       await this.speak(spoken, epoch);
     } catch (error) {
@@ -248,6 +256,10 @@ export class DiscordVoiceBot {
         if (playbackStarted === undefined) {
           playbackStarted = performance.now();
           this.player.play(resource);
+          this.options.logger.info("conversation.assistant.playback_started", {
+            text,
+            retry,
+          });
           this.options.logger.info("discord.playback.started");
         }
         return true;

@@ -19,6 +19,7 @@ export interface Config {
   sherpaTtsSpeakerId: number;
   sherpaTtsSpeed: number;
   logLevel: "debug" | "info" | "warn" | "error";
+  logFile?: string | undefined;
 }
 
 const required = (env: NodeJS.ProcessEnv, name: string): string => {
@@ -103,5 +104,6 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     sherpaTtsSpeakerId: nonnegativeInteger(env, "SHERPA_TTS_SPEAKER_ID", 0),
     sherpaTtsSpeed: positiveNumber(env, "SHERPA_TTS_SPEED", 1),
     logLevel: logLevel as Config["logLevel"],
+    logFile: optional(env, "LOG_FILE"),
   };
 };
