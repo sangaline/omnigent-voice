@@ -1,7 +1,9 @@
 import { loadConfig } from "./config.js";
-import { CelerisAdapter } from "./celeris.js";
+import { CelerisConversation } from "./celeris.js";
+import { OmnigentCoordinator } from "./coordinator.js";
 import { DiscordVoiceBot } from "./discord.js";
 import { Logger } from "./log.js";
+import { CoordinatorMcpClient } from "./mcp.js";
 import { OmnigentClient } from "./omnigent.js";
 import { LocalSpeech } from "./speech.js";
 
@@ -27,11 +29,15 @@ const omnigent = new OmnigentClient({
   workspace: config.omnigentWorkspace,
   logger,
 });
-const celeris = new CelerisAdapter({
+const coordinator = new OmnigentCoordinator({ omnigent, logger });
+await coordinator.start();
+const tools = await CoordinatorMcpClient.create(coordinator);
+const celeris = new CelerisConversation({
   apiKey: config.celerisApiKey,
   baseUrl: config.celerisBaseUrl,
   model: config.celerisModel,
   logger,
+  tools,
 });
 const bot = new DiscordVoiceBot({
   token: config.discordBotToken,
@@ -41,16 +47,17 @@ const bot = new DiscordVoiceBot({
   silenceMs: config.discordSilenceMs,
   logger,
   speech,
-  omnigent,
+  coordinator,
   celeris,
 });
 
-await omnigent.start();
 await bot.start();
 
 const shutdown = async (signal: string): Promise<void> => {
   logger.info("shutdown.started", { signal });
   await bot.stop();
+  coordinator.stop();
+  await tools.close();
   process.exit(0);
 };
 

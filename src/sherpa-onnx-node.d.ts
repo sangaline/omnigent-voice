@@ -20,9 +20,12 @@ declare module "sherpa-onnx-node" {
       text: string;
       sid: number;
       speed: number;
+      onProgress?: (info: { samples: Float32Array; progress: number }) =>
+        | number
+        | boolean
+        | void;
     }): Promise<{ samples: Float32Array; sampleRate: number }>;
   }
 
   export const version: string;
 }
-

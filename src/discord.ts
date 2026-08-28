@@ -1,4 +1,4 @@
-import { Readable } from "node:stream";
+import { PassThrough } from "node:stream";
 import {
   AudioPlayerStatus,
   EndBehaviorType,
@@ -27,10 +27,10 @@ import {
   resampleLinear,
   stereoPcm16ToMono16k,
 } from "./audio.js";
-import { CelerisAdapter } from "./celeris.js";
+import { CelerisConversation } from "./celeris.js";
+import { OmnigentCoordinator } from "./coordinator.js";
 import { isCancelCommand } from "./control.js";
 import { Logger } from "./log.js";
-import { OmnigentClient } from "./omnigent.js";
 import { LocalSpeech } from "./speech.js";
 
 interface DiscordVoiceOptions {
@@ -41,8 +41,8 @@ interface DiscordVoiceOptions {
   silenceMs: number;
   logger: Logger;
   speech: LocalSpeech;
-  omnigent: OmnigentClient;
-  celeris: CelerisAdapter;
+  coordinator: OmnigentCoordinator;
+  celeris: CelerisConversation;
 }
 
 export class DiscordVoiceBot {
@@ -196,7 +196,7 @@ export class DiscordVoiceBot {
 
     if (isCancelCommand(transcript)) {
       try {
-        const interrupted = await this.options.omnigent.interrupt();
+        const interrupted = await this.options.coordinator.interruptFocused();
         await this.speak(interrupted ? "Stopped." : "Nothing is running.", epoch);
       } catch (error) {
         this.options.logger.error("omnigent.interrupt.failed", error);
@@ -213,41 +213,44 @@ export class DiscordVoiceBot {
 
   private async processTurn(transcript: string, epoch: number): Promise<void> {
     try {
-      const raw = await this.options.omnigent.query(transcript);
-      if (epoch !== this.responseEpoch) {
-        this.options.logger.info("turn.response.discarded");
-        return;
-      }
-      const spoken = await this.options.celeris.adapt(raw);
+      const spoken = await this.options.celeris.respond(transcript);
       if (epoch !== this.responseEpoch) return;
       await this.speak(spoken, epoch);
     } catch (error) {
-      this.options.logger.error("omnigent.request.failed", error);
+      this.options.logger.error("voice.turn.failed", error);
       if (epoch === this.responseEpoch) {
-        await this.speak("I couldn't reach Omnigent.", epoch);
+        await this.speak("I couldn't reach the coordination layer.", epoch);
       }
     }
   }
 
   private async speak(text: string, epoch: number): Promise<void> {
     if (!text || epoch !== this.responseEpoch) return;
+    const stream = new PassThrough();
+    const resource = createAudioResource(stream, { inputType: StreamType.Raw });
+    let playbackStarted: number | undefined;
     try {
-      const audio = await this.options.speech.synthesize(text);
-      if (epoch !== this.responseEpoch) return;
-      const pcm = monoFloatToStereoPcm16(
-        resampleLinear(audio.samples, audio.sampleRate, 48_000),
-      );
-      const resource = createAudioResource(Readable.from([pcm]), {
-        inputType: StreamType.Raw,
+      await this.options.speech.synthesizeStreaming(text, (audio) => {
+        if (epoch !== this.responseEpoch) return false;
+        const pcm = monoFloatToStereoPcm16(
+          resampleLinear(audio.samples, audio.sampleRate, 48_000),
+        );
+        stream.write(pcm);
+        if (playbackStarted === undefined) {
+          playbackStarted = performance.now();
+          this.player.play(resource);
+          this.options.logger.info("discord.playback.started");
+        }
+        return true;
       });
-      const started = performance.now();
-      this.player.play(resource);
-      this.options.logger.info("discord.playback.started");
+      stream.end();
+      if (epoch !== this.responseEpoch || playbackStarted === undefined) return;
       await entersState(this.player, AudioPlayerStatus.Idle, 15 * 60_000);
       this.options.logger.info("discord.playback.finished", {
-        durationMs: Math.round(performance.now() - started),
+        durationMs: Math.round(performance.now() - playbackStarted),
       });
     } catch (error) {
+      stream.destroy();
       this.options.logger.error("tts.playback.failed", error);
     }
   }

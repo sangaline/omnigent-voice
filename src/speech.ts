@@ -136,4 +136,37 @@ export class LocalSpeech {
     });
     return audio;
   }
+
+  public async synthesizeStreaming(
+    text: string,
+    onChunk: (audio: SynthesizedAudio) => boolean | void,
+  ): Promise<void> {
+    const started = performance.now();
+    let chunks = 0;
+    this.options.logger.info("tts.started", { characters: text.length });
+    const audio = await this.tts.generateAsync({
+      text,
+      sid: this.options.ttsSpeakerId,
+      speed: this.options.ttsSpeed,
+      onProgress: ({ samples }) => {
+        if (samples.length === 0) return true;
+        chunks += 1;
+        if (chunks === 1) {
+          this.options.logger.info("tts.first_chunk", {
+            durationMs: Math.round(performance.now() - started),
+          });
+        }
+        return onChunk({ samples, sampleRate: this.tts.sampleRate }) !== false;
+      },
+    });
+    if (chunks === 0 && audio.samples.length > 0) {
+      onChunk(audio);
+      chunks = 1;
+    }
+    this.options.logger.info("tts.complete", {
+      durationMs: Math.round(performance.now() - started),
+      audioMs: Math.round((audio.samples.length / audio.sampleRate) * 1_000),
+      chunks,
+    });
+  }
 }

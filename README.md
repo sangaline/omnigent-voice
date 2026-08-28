@@ -1,12 +1,20 @@
 # Omnigent Voice
 
 A minimal speech-only Discord interface for Omnigent. One process receives
-Discord voice, transcribes it locally, sends the turn to Omnigent, adapts long
-answers for speech when Celeris is configured, synthesizes speech locally, and
-plays it back in the same voice channel.
+Discord voice, transcribes it locally, and uses Celeris as a fast conversational
+layer. Celeris answers ordinary turns directly and uses a small in-process MCP
+coordinator when a request depends on real sessions or requires agent work.
+Work is queued asynchronously, so the spoken acknowledgement does not wait for
+a coding agent to finish. Speech is synthesized locally and streamed back into
+the same voice channel.
 
-The project is intentionally narrow: one caller, one active conversation, one
-container, and no text or web interface.
+The project is intentionally narrow: one caller, one focused Omnigent session,
+one container, and no text or web interface.
+
+The coordinator exposes seven tools: list and focus sessions, read recent
+output, send a message, answer a structured prompt, start a session, and drain
+background updates. The same server can run over stdio with `npm run mcp`; the
+voice process uses an in-memory MCP transport to avoid network latency.
 
 ## Development
 

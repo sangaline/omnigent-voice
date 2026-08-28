@@ -1,6 +1,6 @@
 import { Logger } from "./log.js";
 
-interface OmnigentOptions {
+export interface OmnigentOptions {
   baseUrl: string;
   refreshToken: string;
   agentName: string;
@@ -9,7 +9,7 @@ interface OmnigentOptions {
   logger: Logger;
 }
 
-interface JsonObject {
+export interface JsonObject {
   [key: string]: unknown;
 }
 
@@ -75,6 +75,103 @@ export class OmnigentClient {
   private activeTurn = false;
 
   public constructor(private readonly options: OmnigentOptions) {}
+
+  public async listSessions(limit = 20): Promise<JsonObject[]> {
+    const query = new URLSearchParams({
+      limit: String(limit),
+      sort_by: "updated_at",
+      order: "desc",
+      kind: "native",
+    });
+    const listing = await this.requestJson(`/v1/sessions?${query.toString()}`);
+    return Array.isArray(listing.data) ? listing.data.filter(isObject) : [];
+  }
+
+  public async getSession(sessionId: string): Promise<JsonObject> {
+    const query = new URLSearchParams({
+      include_items: "false",
+      include_liveness: "false",
+    });
+    return this.requestJson(
+      `/v1/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`,
+    );
+  }
+
+  public async listItems(
+    sessionId: string,
+    limit: number,
+    after?: string,
+  ): Promise<{ data: JsonObject[]; hasMore: boolean; lastId?: string }> {
+    const query = new URLSearchParams({ limit: String(limit), order: "desc" });
+    if (after) query.set("after", after);
+    const listing = await this.requestJson(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/items?${query.toString()}`,
+    );
+    const lastId = typeof listing.last_id === "string" ? listing.last_id : undefined;
+    return {
+      data: Array.isArray(listing.data) ? listing.data.filter(isObject) : [],
+      hasMore: listing.has_more === true,
+      ...(lastId ? { lastId } : {}),
+    };
+  }
+
+  public async sendMessage(sessionId: string, message: string): Promise<JsonObject> {
+    return this.sendEvent(sessionId, {
+      type: "message",
+      data: {
+        role: "user",
+        content: [{ type: "input_text", text: message }],
+      },
+    });
+  }
+
+  public async resolveElicitation(
+    sessionId: string,
+    elicitationId: string,
+    action: "accept" | "decline" | "cancel",
+    content?: Record<string, unknown>,
+  ): Promise<JsonObject> {
+    return this.requestJson(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/elicitations/${encodeURIComponent(elicitationId)}/resolve`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, ...(content ? { content } : {}) }),
+      },
+    );
+  }
+
+  public async createSession(options: {
+    agentName?: string | undefined;
+    workspace?: string | undefined;
+    instruction: string;
+    title?: string | undefined;
+  }): Promise<JsonObject> {
+    const [agentId, hostId] = await Promise.all([
+      this.resolveAgentId(options.agentName),
+      this.resolveHostId(),
+    ]);
+    const snapshot = await this.requestJson("/v1/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agent_id: agentId,
+        host_id: hostId,
+        workspace: options.workspace ?? this.options.workspace,
+        ...(options.title ? { title: options.title } : {}),
+      }),
+    });
+    if (typeof snapshot.id !== "string" || !snapshot.id) {
+      throw new Error("Omnigent session creation returned no session id");
+    }
+    await this.sendMessage(snapshot.id, options.instruction);
+    return snapshot;
+  }
+
+  public async interruptSession(sessionId: string): Promise<void> {
+    await this.sendEvent(sessionId, { type: "interrupt", data: {} });
+    this.options.logger.info("omnigent.interrupt.sent");
+  }
 
   public async start(): Promise<void> {
     await this.ensureAccessToken();
@@ -175,19 +272,11 @@ export class OmnigentClient {
 
   public async interrupt(): Promise<boolean> {
     if (!this.sessionId || !this.activeTurn) return false;
-    await this.requestJson(
-      `/v1/sessions/${encodeURIComponent(this.sessionId)}/events`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: "interrupt", data: {} }),
-      },
-    );
-    this.options.logger.info("omnigent.interrupt.sent");
+    await this.interruptSession(this.sessionId);
     return true;
   }
 
-  private async resolveAgentId(): Promise<string> {
+  private async resolveAgentId(agentName = this.options.agentName): Promise<string> {
     let after: string | undefined;
     do {
       const query = new URLSearchParams({ limit: "1000" });
@@ -197,7 +286,7 @@ export class OmnigentClient {
       for (const candidate of agents) {
         if (
           isObject(candidate) &&
-          candidate.name === this.options.agentName &&
+          candidate.name === agentName &&
           typeof candidate.id === "string"
         ) {
           return candidate.id;
@@ -358,5 +447,13 @@ export class OmnigentClient {
     const payload: unknown = await response.json();
     if (!isObject(payload)) throw new Error("Omnigent API returned malformed JSON");
     return payload;
+  }
+
+  private async sendEvent(sessionId: string, event: JsonObject): Promise<JsonObject> {
+    return this.requestJson(`/v1/sessions/${encodeURIComponent(sessionId)}/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(event),
+    });
   }
 }

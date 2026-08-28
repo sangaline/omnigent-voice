@@ -15,30 +15,41 @@ Minimal, speech-only Discord interface for an existing Omnigent deployment.
 
 ## Architecture
 
-Discord voice receive -> local sherpa-onnx streaming ASR -> one Omnigent session
--> optional Celeris speech adaptation -> local sherpa-onnx TTS -> Discord voice.
+Discord voice receive -> local sherpa-onnx streaming ASR -> Celeris conversation
+layer -> direct spoken reply or small Omnigent MCP coordinator tools -> local
+sherpa-onnx TTS -> Discord voice. Coordinator actions return immediately;
+Celeris never waits for a coding agent to complete work before acknowledging it.
 
 The bundled runtime models are the int8 80 ms NeMo fast-conformer transducer
 and int8 Kokoro English v0.19. Both run on CPU through `sherpa-onnx-node`; model
-archives and checksums belong in the container build, never in git.
+archives and checksums belong in the container build, never in git. TTS progress
+chunks stream into Discord as they are generated; do not regress to buffering a
+complete utterance before playback.
 
 The bot auto-discovers its voice channel only when exactly one accessible guild
 and voice channel exist. Explicit runtime IDs override discovery. A new human
 utterance stops current playback; only explicit cancel language interrupts the
-Omnigent turn.
+focused running Omnigent session.
 
-Omnigent auth uses a runtime refresh token. At boot, the client resolves the
-configured agent name and host, creates one host-launched session, opens and
-primes the no-replay SSE stream before posting a turn, and reuses that session.
-Native Codex sessions may emit an empty `response.completed` before their
-assistant transcript is persisted, so the client briefly reconciles the session
-snapshot when no streamed output is available. Reconciliation excludes item IDs
-that existed before the current turn; response IDs are not reliable for native
-transcript-forwarded messages.
+Omnigent auth uses a runtime refresh token. At boot, the coordinator focuses the
+most recently active native session but does not create one. It polls recent
+session summaries every two seconds and buffers only completion, failure, and
+new-decision events. Each tool drains the buffer in an `updates` array, and the
+voice harness also drains it between turns. `waiting_for_input` is a
+voice-facing filter for a nonzero pending-elicitation count, not an Omnigent
+status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
 
-Celeris is optional and only rewrites long or markup-heavy answers. A failure
-falls back to deterministic markdown cleanup. Logs contain timing, character
-counts, and event names but never transcripts.
+Celeris owns the low-latency conversation and uses its OpenAI-compatible native
+tool-call shape to invoke a real MCP client/server pair connected in memory.
+The seven tools are `list_sessions`, `focus_session`, `get_output`,
+`send_message`, `answer_prompt`, `start_session`, and `check_updates`.
+`get_output` reads `/v1/sessions/{id}/items`; arbitrary tmux scrollback is not
+available through the Omnigent HTTP API and must not be implied. Structured MCP
+elicitations resolve through their dedicated endpoint and may target a child
+session. Direct turns keep a small in-memory history. A stdio MCP entry point is
+available with `npm run mcp`; authenticated remote HTTP transport is deliberately
+deferred. Logs contain timing, character counts, tool names, and event names but
+never transcripts or tool arguments.
 
 ## Commands
 
@@ -48,12 +59,13 @@ npm run check
 npm test
 npm run build
 npm run dev
+npm run mcp
 podman build -t omnigent-voice:dev .
 ```
 
 The final image runs as the unprivileged `node` user. A smoke test should reach
-`speech.models.ready`, `omnigent.session.ready`, and `discord.voice.ready` in
-that order. The image publisher intentionally disables provenance and SBOM
+`speech.models.ready`, `coordinator.ready`, and `discord.voice.ready`. The image
+publisher intentionally disables provenance and SBOM
 attestations because this experiment's Docker Hub page must not expose a source
 link or deployment metadata.
 

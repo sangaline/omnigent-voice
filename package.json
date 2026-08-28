@@ -10,14 +10,17 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/index.ts",
+    "mcp": "node dist/mcp-server.js",
     "start": "node dist/index.js",
     "test": "vitest run"
   },
   "dependencies": {
     "@discordjs/voice": "0.19.2",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "discord.js": "14.27.0",
     "opusscript": "0.0.8",
-    "sherpa-onnx-node": "1.13.6"
+    "sherpa-onnx-node": "1.13.6",
+    "zod": "4.5.1"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
