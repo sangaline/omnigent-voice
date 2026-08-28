@@ -51,6 +51,7 @@ export class DiscordVoiceBot {
     behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
   });
   private readonly recordingUsers = new Set<string>();
+  private readonly recordingSettledWaiters = new Set<() => void>();
   private connection?: VoiceConnection;
   private turnTail: Promise<void> = Promise.resolve();
   private responseEpoch = 0;
@@ -98,6 +99,7 @@ export class DiscordVoiceBot {
     this.player.stop(true);
     this.connection?.destroy();
     this.client.destroy();
+    this.notifyRecordingSettled();
     await this.turnTail.catch(() => undefined);
   }
 
@@ -136,6 +138,7 @@ export class DiscordVoiceBot {
     if (userId === this.client.user?.id) return;
     if (this.options.allowedUserId && userId !== this.options.allowedUserId) return;
 
+    this.playbackEpoch += 1;
     this.player.stop(true);
     this.recordingUsers.add(userId);
     const started = performance.now();
@@ -169,6 +172,7 @@ export class DiscordVoiceBot {
         result = transcription.finish();
       } catch (error) {
         this.options.logger.error("asr.failed", error);
+        this.notifyRecordingSettled();
         return;
       }
       this.options.logger.info("speech.ended", {
@@ -176,6 +180,7 @@ export class DiscordVoiceBot {
         audioMs: result.audioMs,
         peakAmplitude: Number(result.peakAmplitude.toFixed(4)),
       });
+      this.notifyRecordingSettled();
       void this.handleRecording(result.text, result.audioMs, result.peakAmplitude);
     };
     stream.once("end", finalize);
@@ -227,8 +232,8 @@ export class DiscordVoiceBot {
     }
   }
 
-  private async speak(text: string, epoch: number): Promise<void> {
-    if (!text || epoch !== this.responseEpoch || this.recordingUsers.size > 0) return;
+  private async speak(text: string, epoch: number, retry = 0): Promise<void> {
+    if (!text || !(await this.waitForRecordingToSettle(epoch))) return;
     const playbackEpoch = ++this.playbackEpoch;
     const stream = new PassThrough();
     const resource = createAudioResource(stream, { inputType: StreamType.Raw });
@@ -248,12 +253,17 @@ export class DiscordVoiceBot {
         return true;
       });
       stream.end();
-      if (
-        epoch !== this.responseEpoch ||
-        playbackEpoch !== this.playbackEpoch ||
-        playbackStarted === undefined
-      ) return;
+      if (epoch !== this.responseEpoch) return;
+      if (playbackEpoch !== this.playbackEpoch) {
+        if (retry < 2 && (await this.waitForRecordingToSettle(epoch))) {
+          this.options.logger.info("tts.playback.retry", { retry: retry + 1 });
+          await this.speak(text, epoch, retry + 1);
+        }
+        return;
+      }
+      if (playbackStarted === undefined) return;
       await entersState(this.player, AudioPlayerStatus.Idle, 15 * 60_000);
+      if (playbackEpoch !== this.playbackEpoch) return;
       this.options.logger.info("discord.playback.finished", {
         durationMs: Math.round(performance.now() - playbackStarted),
       });
@@ -261,5 +271,27 @@ export class DiscordVoiceBot {
       stream.destroy();
       this.options.logger.error("tts.playback.failed", error);
     }
+  }
+
+  private async waitForRecordingToSettle(epoch: number): Promise<boolean> {
+    while (
+      !this.shuttingDown &&
+      epoch === this.responseEpoch &&
+      this.recordingUsers.size > 0
+    ) {
+      await new Promise<void>((resolve) => {
+        const waiter = (): void => {
+          this.recordingSettledWaiters.delete(waiter);
+          resolve();
+        };
+        this.recordingSettledWaiters.add(waiter);
+      });
+    }
+    return !this.shuttingDown && epoch === this.responseEpoch;
+  }
+
+  private notifyRecordingSettled(): void {
+    if (this.recordingUsers.size > 0 && !this.shuttingDown) return;
+    for (const waiter of [...this.recordingSettledWaiters]) waiter();
   }
 }

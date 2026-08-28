@@ -9,8 +9,8 @@ a coding agent to finish. Speech is synthesized locally and streamed back into
 the same voice channel.
 
 ASR runs incrementally while the caller is speaking. Celeris responses are
-currently short batch completions, while local TTS audio is sent to Discord as
-the synthesizer produces each chunk.
+currently short batch completions, while low-latency Piper TTS audio is sent to
+Discord as the synthesizer produces each chunk.
 
 The project is intentionally narrow: one caller, one focused Omnigent session,
 one container, and no text or web interface.

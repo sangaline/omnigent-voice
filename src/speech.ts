@@ -148,13 +148,13 @@ export class LocalSpeech {
 
     const tts = await sherpa.OfflineTts.createAsync({
       model: {
-        kokoro: {
-          model: findFile(ttsFiles, /^model.*\.onnx$/i, "TTS model"),
-          voices: findFile(ttsFiles, /^voices\.bin$/i, "TTS voices"),
+        vits: {
+          model: findFile(ttsFiles, /^en_US-lessac-medium\.onnx$/i, "TTS model"),
           tokens: findFile(ttsFiles, /^tokens\.txt$/i, "TTS tokens"),
           dataDir: join(options.ttsModelDir, "espeak-ng-data"),
+          noiseScale: 0.667,
+          noiseScaleW: 0.8,
           lengthScale: 1,
-          lang: "en-us",
         },
       },
       maxNumSentences: 1,

@@ -85,7 +85,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     discordGuildId: optional(env, "DISCORD_GUILD_ID"),
     discordVoiceChannelId: optional(env, "DISCORD_VOICE_CHANNEL_ID"),
     allowedDiscordUserId: optional(env, "ALLOWED_DISCORD_USER_ID"),
-    discordSilenceMs: positiveInteger(env, "DISCORD_SILENCE_MS", 700),
+    discordSilenceMs: positiveInteger(env, "DISCORD_SILENCE_MS", 450),
     omnigentBaseUrl: required(env, "OMNIGENT_BASE_URL").replace(/\/$/, ""),
     omnigentRefreshToken: required(env, "OMNIGENT_REFRESH_TOKEN"),
     omnigentAgentName: optional(env, "OMNIGENT_AGENT_NAME") ?? "codex-native-ui",

@@ -28,18 +28,23 @@ sherpa-onnx TTS -> Discord voice. Coordinator actions return immediately;
 Celeris never waits for a coding agent to complete work before acknowledging it.
 
 The bundled runtime models are the int8 80 ms NeMo fast-conformer transducer
-and int8 Kokoro English v0.19. Both run on CPU through `sherpa-onnx-node`; model
+and Piper US English Lessac medium. Both run on CPU through `sherpa-onnx-node`; model
 archives and checksums belong in the container build, never in git. TTS progress
 chunks stream into Discord as they are generated; do not regress to buffering a
 complete utterance before playback. Each Discord utterance also owns a live ASR
 stream: decoded 16 kHz packets are accepted and decoded while the caller is
 still speaking, and end-of-turn performs only right-context padding and a final
 drain. Do not regress to accumulating the full waveform before recognition.
+Piper replaced Kokoro because same-host measurements reduced first TTS audio
+from roughly 0.9-1.2 seconds to 35-52 ms and full generation from 2.2-3.5
+seconds to 87-190 ms for short voice replies.
 
 The bot auto-discovers its voice channel only when exactly one accessible guild
 and voice channel exist. Explicit runtime IDs override discovery. A new human
-utterance stops current playback and cancels further TTS chunk generation; only
-explicit cancel language interrupts the focused running Omnigent session.
+utterance stops current playback and cancels further TTS chunk generation. A
+pending reply waits for recognition: real speech supersedes it, while an empty
+Discord speaking burst lets it retry. Only explicit cancel language interrupts
+the focused running Omnigent session.
 
 Omnigent auth uses a runtime refresh token. At boot, the coordinator focuses the
 most recently active native session but does not create one. It polls recent

@@ -18,11 +18,16 @@ RUN set -eu; \
 RUN set -eu; \
     curl -fsSL --retry 3 \
       -o /tmp/tts.tar.bz2 \
-      https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-en-v0_19.tar.bz2; \
-    echo 'c9f0dd393615805b0bab050c340834d5e684e732aec91c0e860cd30e982c08bd  /tmp/tts.tar.bz2' | sha256sum -c -; \
+      https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2; \
+    echo '9e3febfacf0abf4270172d2958bcec246032b7e88efc2720840cc80c93de334e  /tmp/tts.tar.bz2' | sha256sum -c -; \
     tar -xjf /tmp/tts.tar.bz2; \
-    mv kokoro-int8-en-v0_19 tts; \
-    rm /tmp/tts.tar.bz2
+    mv vits-piper-en_US-lessac-medium tts; \
+    curl -fsSL --retry 3 \
+      -o /tmp/espeak-ng-data.tar.bz2 \
+      https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/espeak-ng-data.tar.bz2; \
+    echo '4135ccf82e1f40613491c0874d4945ae9e9c7840933d8e25a6f9e003d9ebf533  /tmp/espeak-ng-data.tar.bz2' | sha256sum -c -; \
+    tar -xjf /tmp/espeak-ng-data.tar.bz2 -C tts; \
+    rm /tmp/tts.tar.bz2 /tmp/espeak-ng-data.tar.bz2
 
 FROM node:24-bookworm-slim AS build
 
@@ -56,4 +61,3 @@ COPY --from=models /models/tts /opt/models/tts
 
 USER node
 CMD ["node", "dist/index.js"]
-
