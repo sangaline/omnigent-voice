@@ -136,10 +136,8 @@ export class DiscordVoiceBot {
     if (userId === this.client.user?.id) return;
     if (this.options.allowedUserId && userId !== this.options.allowedUserId) return;
 
-    this.responseEpoch += 1;
     this.player.stop(true);
     this.recordingUsers.add(userId);
-    const epoch = this.responseEpoch;
     const started = performance.now();
     this.options.logger.info("speech.started");
     const decoder = new OpusScript(48_000, 2, OpusScript.Application.AUDIO);
@@ -172,13 +170,13 @@ export class DiscordVoiceBot {
         audioMs: Math.round((samples.length / 16_000) * 1_000),
         peakAmplitude: Number(peakAmplitude(samples).toFixed(4)),
       });
-      void this.handleRecording(samples, epoch);
+      void this.handleRecording(samples);
     };
     stream.once("end", finalize);
     stream.once("close", finalize);
   }
 
-  private async handleRecording(samples: Float32Array, epoch: number): Promise<void> {
+  private async handleRecording(samples: Float32Array): Promise<void> {
     if (samples.length < 4_000 || peakAmplitude(samples) < 0.002) {
       this.options.logger.debug("speech.ignored", { samples: samples.length });
       return;
@@ -192,16 +190,17 @@ export class DiscordVoiceBot {
     }
     if (!transcript) return;
 
+    this.responseEpoch += 1;
+    this.player.stop(true);
+    const epoch = this.responseEpoch;
+
     if (isCancelCommand(transcript)) {
-      this.responseEpoch += 1;
-      this.player.stop(true);
-      const cancelEpoch = this.responseEpoch;
       try {
         const interrupted = await this.options.omnigent.interrupt();
-        await this.speak(interrupted ? "Stopped." : "Nothing is running.", cancelEpoch);
+        await this.speak(interrupted ? "Stopped." : "Nothing is running.", epoch);
       } catch (error) {
         this.options.logger.error("omnigent.interrupt.failed", error);
-        await this.speak("I couldn't stop it cleanly.", cancelEpoch);
+        await this.speak("I couldn't stop it cleanly.", epoch);
       }
       return;
     }
