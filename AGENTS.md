@@ -32,7 +32,9 @@ configured agent name and host, creates one host-launched session, opens and
 primes the no-replay SSE stream before posting a turn, and reuses that session.
 Native Codex sessions may emit an empty `response.completed` before their
 assistant transcript is persisted, so the client briefly reconciles the session
-snapshot when no streamed output is available.
+snapshot when no streamed output is available. Reconciliation excludes item IDs
+that existed before the current turn; response IDs are not reliable for native
+transcript-forwarded messages.
 
 Celeris is optional and only rewrites long or markup-heavy answers. A failure
 falls back to deterministic markdown cleanup. Logs contain timing, character

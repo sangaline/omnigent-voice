@@ -51,11 +51,15 @@ const extractAssistantItems = (items: unknown): string => {
     .join("\n");
 };
 
-const latestAssistantText = (snapshot: JsonObject): string => {
+const latestAssistantText = (
+  snapshot: JsonObject,
+  knownItemIds: ReadonlySet<string>,
+): string => {
   if (!Array.isArray(snapshot.items)) return "";
   for (let index = snapshot.items.length - 1; index >= 0; index -= 1) {
     const item = snapshot.items[index];
     if (!isObject(item)) continue;
+    if (typeof item.id !== "string" || knownItemIds.has(item.id)) continue;
     const message = isObject(item.data) ? item.data : item;
     if (message.role !== "assistant") continue;
     const text = extractContentText(message.content);
@@ -98,6 +102,15 @@ export class OmnigentClient {
   public async query(input: string): Promise<string> {
     if (!this.sessionId) await this.start();
     const sessionId = this.sessionId!;
+    const beforeTurn = await this.requestJson(
+      `/v1/sessions/${encodeURIComponent(sessionId)}`,
+    );
+    const knownItemIds = new Set(
+      (Array.isArray(beforeTurn.items) ? beforeTurn.items : [])
+        .filter(isObject)
+        .map((item) => item.id)
+        .filter((id): id is string => typeof id === "string"),
+    );
     const controller = new AbortController();
     let markStreamReady: (() => void) | undefined;
     const streamReady = new Promise<void>((resolve) => {
@@ -143,7 +156,7 @@ export class OmnigentClient {
               .map((item) => (isObject(item) && typeof item.role === "string" ? item.role : "none"))
               .join(","),
           });
-          text = latestAssistantText(snapshot).trim();
+          text = latestAssistantText(snapshot, knownItemIds).trim();
         }
       }
       if (!text && result.terminal?.includes("incomplete")) {

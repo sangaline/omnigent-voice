@@ -132,7 +132,7 @@ export class DiscordVoiceBot {
   }
 
   private onSpeakingStart(userId: string): void {
-    if (this.shuttingDown || this.recordingUsers.has(userId)) return;
+    if (this.shuttingDown || this.recordingUsers.size > 0) return;
     if (userId === this.client.user?.id) return;
     if (this.options.allowedUserId && userId !== this.options.allowedUserId) return;
 
@@ -160,7 +160,10 @@ export class DiscordVoiceBot {
     stream.once("error", (error) => {
       this.options.logger.error("discord.receive.failed", error);
     });
-    stream.once("end", () => {
+    let finalized = false;
+    const finalize = (): void => {
+      if (finalized) return;
+      finalized = true;
       decoder.delete();
       this.recordingUsers.delete(userId);
       const samples = concatFloat32(chunks);
@@ -168,7 +171,9 @@ export class DiscordVoiceBot {
         durationMs: Math.round(performance.now() - started),
       });
       void this.handleRecording(samples, epoch);
-    });
+    };
+    stream.once("end", finalize);
+    stream.once("close", finalize);
   }
 
   private async handleRecording(samples: Float32Array, epoch: number): Promise<void> {
@@ -246,4 +251,3 @@ export class DiscordVoiceBot {
     }
   }
 }
-
