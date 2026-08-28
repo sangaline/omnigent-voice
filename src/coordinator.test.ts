@@ -26,7 +26,7 @@ describe("Omnigent coordinator", () => {
     ).toContain("voice 1/1 Running");
   });
 
-  it("exposes the seven small tools over an in-memory MCP transport", async () => {
+  it("exposes the focused coordinator tools over an in-memory MCP transport", async () => {
     const now = new Date().toISOString();
     const omnigent = {
       listSessions: vi.fn().mockResolvedValue([
@@ -39,7 +39,7 @@ describe("Omnigent coordinator", () => {
         },
       ]),
       getSession: vi.fn(),
-      listItems: vi.fn(),
+      listItems: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
       sendMessage: vi.fn(),
       resolveElicitation: vi.fn(),
       createSession: vi.fn(),
@@ -58,6 +58,7 @@ describe("Omnigent coordinator", () => {
         "list_sessions",
         "focus_session",
         "get_output",
+        "poll_output",
         "send_message",
         "answer_prompt",
         "start_session",
@@ -66,9 +67,83 @@ describe("Omnigent coordinator", () => {
       await expect(
         client.callTool("list_sessions", { status: "waiting_for_input" }),
       ).resolves.toMatchObject({
-        sessions: [{ id: "session-1", name: "Voice MVP", pending_prompts: 1 }],
+        sessions: [
+          { id: "session-1", name: "Voice MVP", pending_prompts: 1, focused: true },
+        ],
+        focused_session: { id: "session-1", name: "Voice MVP" },
         updates: [],
       });
+    } finally {
+      coordinator.stop();
+      await client.close();
+    }
+  });
+
+  it("snapshots new stable output and keeps immediate delivery distinct from queuing", async () => {
+    const now = new Date().toISOString();
+    const session = {
+      id: "session-1",
+      title: "Voice MVP",
+      status: "running",
+      updated_at: now,
+    };
+    const listItems = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [{ id: "old", type: "message", role: "assistant", content: "Old" }],
+        hasMore: false,
+      })
+      .mockResolvedValue({
+        data: [
+          {
+            id: "new",
+            type: "message",
+            role: "assistant",
+            content: "The deployment is ready.",
+          },
+          { id: "old", type: "message", role: "assistant", content: "Old" },
+        ],
+        hasMore: false,
+      });
+    const sendMessage = vi.fn().mockResolvedValue({ queued: true });
+    const omnigent = {
+      listSessions: vi.fn().mockResolvedValue([session]),
+      getSession: vi.fn().mockResolvedValue(session),
+      listItems,
+      sendMessage,
+      resolveElicitation: vi.fn(),
+      createSession: vi.fn(),
+      interruptSession: vi.fn(),
+    } as unknown as OmnigentClient;
+    const coordinator = new OmnigentCoordinator({
+      omnigent,
+      logger: new Logger("error"),
+      pollIntervalMs: 60_000,
+    });
+    await coordinator.start();
+    const client = await CoordinatorMcpClient.create(coordinator);
+    try {
+      await expect(client.callTool("check_updates", {})).resolves.toMatchObject({
+        focused_session: { id: "session-1", name: "Voice MVP" },
+        output_delta: { changed: true, output: "assistant: The deployment is ready." },
+      });
+      const immediate = await client.callTool("send_message", { message: "Continue." });
+      expect(immediate).toMatchObject({
+        accepted: true,
+        delivery: "immediate",
+        target_session: { id: "session-1", name: "Voice MVP" },
+        backend_async_accepted: true,
+      });
+      expect(immediate).not.toHaveProperty("queued");
+      await expect(
+        client.callTool("send_message", { message: "Do this later.", delivery: "queued" }),
+      ).resolves.toMatchObject({
+        accepted: true,
+        delivery: "queued",
+        target_session: { id: "session-1", name: "Voice MVP" },
+        queued_messages: 1,
+      });
+      expect(sendMessage).toHaveBeenCalledTimes(1);
     } finally {
       coordinator.stop();
       await client.close();

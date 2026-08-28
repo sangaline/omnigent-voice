@@ -22,10 +22,17 @@ exact assistant text whose audio begins playing. These logs are intentionally
 sensitive and belong only on private runtime storage; they are never built into
 the image.
 
-The coordinator exposes seven tools: list and focus sessions, read recent
-output, send a message, answer a structured prompt, start a session, and drain
+The coordinator exposes eight tools: list and explicitly focus sessions, read
+recent output, poll only stable new output, send an immediate or deliberately
+queued message, answer a structured prompt, start a session, and drain
 background updates. The same server can run over stdio with `npm run mcp`; the
 voice process uses an in-memory MCP transport to avoid network latency.
+
+A native poll loop keeps collecting focused-session output while audio is
+playing and while the human is speaking. When recognition finalizes, the model
+receives one atomic snapshot of everything collected through that instant.
+Later events stay buffered for the next turn rather than changing an in-flight
+completion.
 
 These tools carry effective remote-code-execution authority through Omnigent.
 There is intentionally no network MCP listener, HTTP port, Service, or Ingress.

@@ -47,17 +47,31 @@ Discord speaking burst lets it retry. Only explicit cancel language interrupts
 the focused running Omnigent session.
 
 Omnigent auth uses a runtime refresh token. At boot, the coordinator focuses the
-most recently active native session but does not create one. It polls recent
-session summaries every two seconds and buffers only completion, failure, and
-new-decision events. Each tool drains the buffer in an `updates` array, and the
-voice harness also drains it between turns. `waiting_for_input` is a
+most recently active native session but does not create one. Focus is sticky:
+reading or listing sessions never changes it, and `focus_session` is only for an
+explicit user-requested switch. Every coordinator result includes the focused
+session, and send acknowledgements include their actual target session.
+
+The coordinator polls recent session summaries and stable conversation items
+every two seconds, including while the human is speaking. At ASR finalization,
+`check_updates` atomically drains the focused session's cursor-backed output
+delta into the model context. Output arriving later remains buffered for the
+next turn. Persisted conversation items exclude transient terminal animations.
+Completion, failure, and new-decision events remain buffered in `updates`.
+`waiting_for_input` is a
 voice-facing filter for a nonzero pending-elicitation count, not an Omnigent
 status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
 
 Celeris owns the low-latency conversation and uses its OpenAI-compatible native
 tool-call shape to invoke a real MCP client/server pair connected in memory.
-The seven tools are `list_sessions`, `focus_session`, `get_output`,
-`send_message`, `answer_prompt`, `start_session`, and `check_updates`.
+The eight tools are `list_sessions`, `focus_session`, `get_output`,
+`poll_output`, `send_message`, `answer_prompt`, `start_session`, and
+`check_updates`. `poll_output` returns only stable new output since its prior
+per-session cursor and never changes focus. `send_message` defaults to
+`delivery: immediate`, the Omnigent create-or-steer path; the backend's HTTP
+`queued: true` response means asynchronous acceptance, not deferred delivery,
+and is exposed as such. `delivery: queued` is an explicit coordinator-managed
+wait until the current session turn becomes idle.
 `get_output` reads `/v1/sessions/{id}/items`; arbitrary tmux scrollback is not
 available through the Omnigent HTTP API and must not be implied. Structured MCP
 elicitations resolve through their dedicated endpoint and may target a child

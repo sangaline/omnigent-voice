@@ -51,7 +51,7 @@ export const createCoordinatorMcpServer = (
     "focus_session",
     {
       description:
-        "Make a session active and return its status plus any structured prompt awaiting an answer.",
+        "Explicitly switch the active session. Only use when the user asked to switch, focus, open, or use a different session; never use merely to read latest output.",
       inputSchema: {
         session_id: z.string().min(1).describe("Session id returned by list_sessions."),
       },
@@ -74,13 +74,29 @@ export const createCoordinatorMcpServer = (
   );
 
   server.registerTool(
+    "poll_output",
+    {
+      description:
+        "Return only stable new output since the previous poll for a session. It never changes focus and ignores transient terminal animations.",
+      inputSchema: {
+        session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
+      },
+    },
+    (args) => toolResult(coordinator, "poll_output", args),
+  );
+
+  server.registerTool(
     "send_message",
     {
       description:
-        "Send the user's request to an existing Omnigent session without waiting for its work to finish.",
+        "Send the user's request to the focused session. Immediate delivery is the default and steers active work at its next safe boundary. Queued delivery waits until the current turn finishes.",
       inputSchema: {
         message: z.string().min(1).describe("The user's complete message in their own intent."),
         session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
+        delivery: z
+          .enum(["immediate", "queued"])
+          .optional()
+          .describe("Defaults to immediate. Use queued only when the user explicitly asks."),
       },
     },
     (args) => toolResult(coordinator, "send_message", args),
