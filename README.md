@@ -32,7 +32,13 @@ A native poll loop keeps collecting focused-session output while audio is
 playing and while the human is speaking. When recognition finalizes, the model
 receives one atomic snapshot of everything collected through that instant.
 Later events stay buffered for the next turn rather than changing an in-flight
-completion.
+completion. Completion, failure, and decision-needed events can also produce a
+proactive spoken update while the channel is idle.
+
+Discord speaking events alone do not stop playback: decoded audio must cross a
+configurable energy threshold, preventing phone echo from truncating speech.
+Adjacent ASR segments are merged briefly before the coordinator snapshot so a
+natural pause does not become two conflicting model turns.
 
 These tools carry effective remote-code-execution authority through Omnigent.
 There is intentionally no network MCP listener, HTTP port, Service, or Ingress.

@@ -48,6 +48,8 @@ const bot = new DiscordVoiceBot({
   voiceChannelId: config.discordVoiceChannelId,
   allowedUserId: config.allowedDiscordUserId,
   silenceMs: config.discordSilenceMs,
+  utteranceMergeMs: config.discordUtteranceMergeMs,
+  bargeInPeak: config.discordBargeInPeak,
   logger,
   speech,
   coordinator,

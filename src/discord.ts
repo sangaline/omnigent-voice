@@ -22,11 +22,12 @@ import {
 import OpusScript from "opusscript";
 import {
   monoFloatToStereoPcm16,
+  peakAmplitude,
   resampleLinear,
   stereoPcm16ToMono16k,
 } from "./audio.js";
 import { CelerisConversation } from "./celeris.js";
-import { OmnigentCoordinator } from "./coordinator.js";
+import { CoordinatorUpdate, OmnigentCoordinator } from "./coordinator.js";
 import { isCancelCommand } from "./control.js";
 import { Logger } from "./log.js";
 import { LocalSpeech } from "./speech.js";
@@ -37,6 +38,8 @@ interface DiscordVoiceOptions {
   voiceChannelId?: string | undefined;
   allowedUserId?: string | undefined;
   silenceMs: number;
+  utteranceMergeMs: number;
+  bargeInPeak: number;
   logger: Logger;
   speech: LocalSpeech;
   coordinator: OmnigentCoordinator;
@@ -52,8 +55,17 @@ export class DiscordVoiceBot {
   });
   private readonly recordingUsers = new Set<string>();
   private readonly recordingSettledWaiters = new Set<() => void>();
+  private readonly pendingCoordinatorUpdates: CoordinatorUpdate[] = [];
   private connection?: VoiceConnection;
   private turnTail: Promise<void> = Promise.resolve();
+  private pendingTranscript = "";
+  private pendingTranscriptAudioMs = 0;
+  private pendingTranscriptEpoch = 0;
+  private transcriptTimer: NodeJS.Timeout | undefined;
+  private notificationTimer: NodeJS.Timeout | undefined;
+  private notificationAbort: AbortController | undefined;
+  private unsubscribeCoordinator?: () => void;
+  private activeUserTurns = 0;
   private responseEpoch = 0;
   private playbackEpoch = 0;
   private shuttingDown = false;
@@ -90,11 +102,18 @@ export class DiscordVoiceBot {
     this.player.on("error", (error) => {
       this.options.logger.error("discord.playback.failed", error);
     });
+    this.unsubscribeCoordinator = this.options.coordinator.subscribeUpdates((update) => {
+      this.queueCoordinatorUpdate(update);
+    });
     this.options.logger.info("discord.voice.ready");
   }
 
   public async stop(): Promise<void> {
     this.shuttingDown = true;
+    if (this.transcriptTimer) clearTimeout(this.transcriptTimer);
+    if (this.notificationTimer) clearTimeout(this.notificationTimer);
+    this.notificationAbort?.abort();
+    this.unsubscribeCoordinator?.();
     this.playbackEpoch += 1;
     this.player.stop(true);
     this.connection?.destroy();
@@ -138,13 +157,16 @@ export class DiscordVoiceBot {
     if (userId === this.client.user?.id) return;
     if (this.options.allowedUserId && userId !== this.options.allowedUserId) return;
 
-    this.playbackEpoch += 1;
-    this.player.stop(true);
+    if (this.transcriptTimer) {
+      clearTimeout(this.transcriptTimer);
+      this.transcriptTimer = undefined;
+    }
     this.recordingUsers.add(userId);
     const started = performance.now();
     this.options.logger.info("speech.started");
     const decoder = new OpusScript(48_000, 2, OpusScript.Application.AUDIO);
     const transcription = this.options.speech.createTranscription();
+    let inputEpoch: number | undefined;
     const stream = this.connection!.receiver.subscribe(userId, {
       end: {
         behavior: EndBehaviorType.AfterSilence,
@@ -153,7 +175,20 @@ export class DiscordVoiceBot {
     });
     stream.on("data", (packet: Buffer) => {
       try {
-        transcription.accept(stereoPcm16ToMono16k(decoder.decode(packet)));
+        const samples = stereoPcm16ToMono16k(decoder.decode(packet));
+        transcription.accept(samples);
+        const packetPeak = peakAmplitude(samples);
+        if (inputEpoch === undefined && packetPeak >= this.options.bargeInPeak) {
+          const interruptedPlayback = this.player.state.status !== AudioPlayerStatus.Idle;
+          inputEpoch = ++this.responseEpoch;
+          this.playbackEpoch += 1;
+          this.player.stop(true);
+          this.notificationAbort?.abort();
+          this.options.logger.info("speech.voice.confirmed", {
+            peakAmplitude: Number(packetPeak.toFixed(4)),
+            interruptedPlayback,
+          });
+        }
       } catch (error) {
         this.options.logger.error("discord.decode.failed", error);
       }
@@ -181,46 +216,93 @@ export class DiscordVoiceBot {
         peakAmplitude: Number(result.peakAmplitude.toFixed(4)),
       });
       this.notifyRecordingSettled();
-      void this.handleRecording(result.text, result.audioMs, result.peakAmplitude);
+      this.queueRecording(result.text, result.audioMs, result.peakAmplitude, inputEpoch);
     };
     stream.once("end", finalize);
     stream.once("close", finalize);
   }
 
-  private async handleRecording(
+  private queueRecording(
     transcript: string,
     audioMs: number,
     peak: number,
-  ): Promise<void> {
+    inputEpoch?: number,
+  ): void {
     if (audioMs < 250 || peak < 0.002) {
       this.options.logger.debug("speech.ignored", { audioMs });
+      this.scheduleTranscriptFlush();
       return;
     }
-    if (!transcript) return;
+    if (!transcript) {
+      this.scheduleTranscriptFlush();
+      return;
+    }
+
+    const epoch = inputEpoch ?? ++this.responseEpoch;
+    if (inputEpoch === undefined) {
+      this.playbackEpoch += 1;
+      this.player.stop(true);
+      this.notificationAbort?.abort();
+    }
+    this.options.logger.info("conversation.user.segment", {
+      text: transcript,
+      audioMs,
+    });
+    this.pendingTranscript = `${this.pendingTranscript} ${transcript}`.trim();
+    this.pendingTranscriptAudioMs += audioMs;
+    this.pendingTranscriptEpoch = epoch;
+    this.scheduleTranscriptFlush();
+  }
+
+  private scheduleTranscriptFlush(): void {
+    if (!this.pendingTranscript || this.recordingUsers.size > 0 || this.shuttingDown) return;
+    if (this.transcriptTimer) clearTimeout(this.transcriptTimer);
+    this.transcriptTimer = setTimeout(() => {
+      this.transcriptTimer = undefined;
+      if (this.recordingUsers.size > 0 || this.shuttingDown) return;
+      const transcript = this.pendingTranscript;
+      const audioMs = this.pendingTranscriptAudioMs;
+      const epoch = this.pendingTranscriptEpoch;
+      this.pendingTranscript = "";
+      this.pendingTranscriptAudioMs = 0;
+      void this.handleUtterance(transcript, audioMs, epoch);
+    }, this.options.utteranceMergeMs);
+  }
+
+  private async handleUtterance(
+    transcript: string,
+    audioMs: number,
+    epoch: number,
+  ): Promise<void> {
+    this.activeUserTurns += 1;
+    this.pendingCoordinatorUpdates.splice(0);
+    this.notificationAbort?.abort();
 
     this.options.logger.info("conversation.user.recognized", {
       text: transcript,
       audioMs,
     });
-    this.responseEpoch += 1;
     this.player.stop(true);
-    const epoch = this.responseEpoch;
-
-    if (isCancelCommand(transcript)) {
-      try {
-        const interrupted = await this.options.coordinator.interruptFocused();
-        await this.speak(interrupted ? "Stopped." : "Nothing is running.", epoch);
-      } catch (error) {
-        this.options.logger.error("omnigent.interrupt.failed", error);
-        await this.speak("I couldn't stop it cleanly.", epoch);
+    try {
+      if (isCancelCommand(transcript)) {
+        try {
+          const interrupted = await this.options.coordinator.interruptFocused();
+          await this.speak(interrupted ? "Stopped." : "Nothing is running.", epoch);
+        } catch (error) {
+          this.options.logger.error("omnigent.interrupt.failed", error);
+          await this.speak("I couldn't stop it cleanly.", epoch);
+        }
+        return;
       }
-      return;
-    }
 
-    this.turnTail = this.turnTail
-      .then(() => this.processTurn(transcript, epoch))
-      .catch((error) => this.options.logger.error("turn.failed", error));
-    await this.turnTail;
+      this.turnTail = this.turnTail
+        .then(() => this.processTurn(transcript, epoch))
+        .catch((error) => this.options.logger.error("turn.failed", error));
+      await this.turnTail;
+    } finally {
+      this.activeUserTurns -= 1;
+      this.scheduleCoordinatorNotification();
+    }
   }
 
   private async processTurn(transcript: string, epoch: number): Promise<void> {
@@ -240,8 +322,8 @@ export class DiscordVoiceBot {
     }
   }
 
-  private async speak(text: string, epoch: number, retry = 0): Promise<void> {
-    if (!text || !(await this.waitForRecordingToSettle(epoch))) return;
+  private async speak(text: string, epoch: number, retry = 0): Promise<boolean> {
+    if (!text || !(await this.waitForRecordingToSettle(epoch))) return false;
     const playbackEpoch = ++this.playbackEpoch;
     const stream = new PassThrough();
     const resource = createAudioResource(stream, { inputType: StreamType.Raw });
@@ -265,23 +347,81 @@ export class DiscordVoiceBot {
         return true;
       });
       stream.end();
-      if (epoch !== this.responseEpoch) return;
+      if (epoch !== this.responseEpoch) return false;
       if (playbackEpoch !== this.playbackEpoch) {
         if (retry < 2 && (await this.waitForRecordingToSettle(epoch))) {
           this.options.logger.info("tts.playback.retry", { retry: retry + 1 });
-          await this.speak(text, epoch, retry + 1);
+          return this.speak(text, epoch, retry + 1);
         }
-        return;
+        return false;
       }
-      if (playbackStarted === undefined) return;
+      if (playbackStarted === undefined) return false;
       await entersState(this.player, AudioPlayerStatus.Idle, 15 * 60_000);
-      if (playbackEpoch !== this.playbackEpoch) return;
+      if (playbackEpoch !== this.playbackEpoch) {
+        this.options.logger.info("discord.playback.interrupted", { retry });
+        return false;
+      }
       this.options.logger.info("discord.playback.finished", {
         durationMs: Math.round(performance.now() - playbackStarted),
       });
+      return true;
     } catch (error) {
       stream.destroy();
       this.options.logger.error("tts.playback.failed", error);
+      return false;
+    }
+  }
+
+  private queueCoordinatorUpdate(update: CoordinatorUpdate): void {
+    if (this.shuttingDown || this.recordingUsers.size > 0 || this.activeUserTurns > 0) return;
+    this.pendingCoordinatorUpdates.push(update);
+    this.scheduleCoordinatorNotification();
+  }
+
+  private scheduleCoordinatorNotification(): void {
+    if (
+      this.shuttingDown ||
+      this.pendingCoordinatorUpdates.length === 0 ||
+      this.notificationTimer
+    ) {
+      return;
+    }
+    this.notificationTimer = setTimeout(() => {
+      this.notificationTimer = undefined;
+      void this.processCoordinatorNotification();
+    }, 250);
+  }
+
+  private async processCoordinatorNotification(): Promise<void> {
+    if (
+      this.shuttingDown ||
+      this.recordingUsers.size > 0 ||
+      this.activeUserTurns > 0 ||
+      this.player.state.status !== AudioPlayerStatus.Idle
+    ) {
+      this.scheduleCoordinatorNotification();
+      return;
+    }
+    const updates = this.pendingCoordinatorUpdates.splice(0);
+    const controller = new AbortController();
+    this.notificationAbort = controller;
+    const epoch = this.responseEpoch;
+    try {
+      const spoken = await this.options.celeris.announceUpdate(updates, controller.signal);
+      if (!spoken || controller.signal.aborted || epoch !== this.responseEpoch) return;
+      this.options.logger.info("conversation.assistant.generated", {
+        text: spoken,
+        superseded: false,
+        source: "background_update",
+      });
+      if (await this.speak(spoken, epoch)) {
+        for (const update of updates) {
+          this.options.coordinator.acknowledgeUpdate(update.event_id);
+        }
+      }
+    } finally {
+      if (this.notificationAbort === controller) this.notificationAbort = undefined;
+      this.scheduleCoordinatorNotification();
     }
   }
 

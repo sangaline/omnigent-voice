@@ -10,6 +10,13 @@ export type SessionFilter =
   | "waiting_for_input";
 
 export interface CoordinatorUpdate extends JsonObject {
+  event_id: number;
+  type: "session_completed" | "decision_needed" | "session_failed";
+  session_id: string;
+  name: string;
+}
+
+interface CoordinatorUpdateInput extends JsonObject {
   type: "session_completed" | "decision_needed" | "session_failed";
   session_id: string;
   name: string;
@@ -25,7 +32,6 @@ interface OutputState {
   seenOrder: string[];
   entries: OutputEntry[];
   contextIndex: number;
-  toolIndex: number;
   notificationIndex: number;
 }
 
@@ -170,6 +176,8 @@ export class OmnigentCoordinator {
   }> = [];
   private readonly outputStates = new Map<string, OutputState>();
   private readonly outputInitializations = new Map<string, Promise<void>>();
+  private readonly updateListeners = new Set<(update: CoordinatorUpdate) => void>();
+  private updateSequence = 0;
   private readonly fingerprints = new Map<string, string>();
   private readonly updates: CoordinatorUpdate[] = [];
   private timer: NodeJS.Timeout | undefined;
@@ -200,6 +208,16 @@ export class OmnigentCoordinator {
   public stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+  }
+
+  public subscribeUpdates(listener: (update: CoordinatorUpdate) => void): () => void {
+    this.updateListeners.add(listener);
+    return () => this.updateListeners.delete(listener);
+  }
+
+  public acknowledgeUpdate(eventId: number): void {
+    const index = this.updates.findIndex((update) => update.event_id === eventId);
+    if (index >= 0) this.updates.splice(index, 1);
   }
 
   public async interruptFocused(): Promise<boolean> {
@@ -328,12 +346,13 @@ export class OmnigentCoordinator {
 
   private async pollOutput(args: Record<string, unknown>): Promise<JsonObject> {
     const id = this.sessionFrom(args);
+    const cursor = typeof args.cursor === "string" ? args.cursor.trim() : "";
     await this.ensureOutputMonitor(id);
     await this.captureOutput(id);
     return {
       target_session: this.sessionSummaries.get(id) ?? null,
       focus_changed: false,
-      ...this.readOutput(id, "toolIndex"),
+      ...this.outputAfterCursor(id, cursor || undefined),
     };
   }
 
@@ -523,7 +542,6 @@ export class OmnigentCoordinator {
           seenOrder: ids,
           entries: [],
           contextIndex: 0,
-          toolIndex: 0,
           notificationIndex: 0,
         });
       })
@@ -558,14 +576,13 @@ export class OmnigentCoordinator {
       const removeCount = state.entries.length - 120;
       state.entries.splice(0, removeCount);
       state.contextIndex = Math.max(0, state.contextIndex - removeCount);
-      state.toolIndex = Math.max(0, state.toolIndex - removeCount);
       state.notificationIndex = Math.max(0, state.notificationIndex - removeCount);
     }
   }
 
   private readOutput(
     id: string,
-    cursor: "contextIndex" | "toolIndex" | "notificationIndex",
+    cursor: "contextIndex" | "notificationIndex",
   ): JsonObject {
     const state = this.outputStates.get(id);
     if (!state) return { changed: false, output: "" };
@@ -576,6 +593,23 @@ export class OmnigentCoordinator {
       changed: entries.length > 0,
       output: text.length > 8_000 ? `${text.slice(-8_000)}\n[older output omitted]` : text,
       cursor: entries.at(-1)?.id ?? null,
+    };
+  }
+
+  private outputAfterCursor(id: string, cursor?: string): JsonObject {
+    const state = this.outputStates.get(id);
+    if (!state) return { changed: false, output: "", cursor: cursor ?? null };
+    const cursorIndex = cursor
+      ? state.entries.findIndex((entry) => entry.id === cursor)
+      : -1;
+    const cursorExpired = Boolean(cursor && cursorIndex < 0);
+    const entries = state.entries.slice(cursorIndex + 1);
+    const text = entries.map((entry) => entry.text).join("\n\n");
+    return {
+      changed: entries.length > 0,
+      output: text.length > 8_000 ? `${text.slice(-8_000)}\n[older output omitted]` : text,
+      cursor: entries.at(-1)?.id ?? cursor ?? null,
+      cursor_expired: cursorExpired,
     };
   }
 
@@ -602,8 +636,13 @@ export class OmnigentCoordinator {
     }
   }
 
-  private pushUpdate(update: CoordinatorUpdate): void {
-    this.updates.push(update);
+  private pushUpdate(update: CoordinatorUpdateInput): void {
+    const sequenced: CoordinatorUpdate = {
+      ...update,
+      event_id: ++this.updateSequence,
+    };
+    this.updates.push(sequenced);
     if (this.updates.length > 50) this.updates.splice(0, this.updates.length - 50);
+    for (const listener of this.updateListeners) listener(sequenced);
   }
 }

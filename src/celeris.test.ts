@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CelerisConversation, CoordinatorToolClient } from "./celeris.js";
+import {
+  allowsFocusChange,
+  CelerisConversation,
+  CoordinatorToolClient,
+} from "./celeris.js";
 import { Logger } from "./log.js";
 
 const response = (message: object): Response =>
@@ -15,8 +19,20 @@ const toolClient = (): CoordinatorToolClient => ({
       description: "Send a message.",
       inputSchema: {
         type: "object",
-        properties: { message: { type: "string" } },
+        properties: {
+          message: { type: "string" },
+          session_id: { type: "string" },
+        },
         required: ["message"],
+      },
+    },
+    {
+      name: "focus_session",
+      description: "Switch sessions.",
+      inputSchema: {
+        type: "object",
+        properties: { session_id: { type: "string" } },
+        required: ["session_id"],
       },
     },
     {
@@ -45,15 +61,38 @@ const conversation = (
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Celeris coordinator conversation", () => {
+  it("only allows focus mutation for an explicit session switch", () => {
+    expect(allowsFocusChange("Use the second one you mentioned.")).toBe(true);
+    expect(allowsFocusChange("Switch to the voice agent session.")).toBe(true);
+    expect(allowsFocusChange("What's the most recent output?")).toBe(false);
+    expect(allowsFocusChange("Check the session we were already in.")).toBe(false);
+  });
+
   it("answers an ordinary conversational turn directly", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ content: "Hello there." }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(conversation("test-key").respond("Hello")).resolves.toBe("Hello there.");
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
-      tools?: unknown[];
+      tools?: Array<{
+        function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
+      }>;
     };
     expect(request.tools).toHaveLength(2);
+    expect(request.tools?.map((tool) => tool.function?.name)).not.toContain("focus_session");
+    const send = request.tools?.find((tool) => tool.function?.name === "send_message");
+    expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");
+  });
+
+  it("offers focus mutation only on an explicit switch turn", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ content: "Voice MVP selected." }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await conversation("test-key").respond("Switch to the Voice MVP session.");
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tools?: Array<{ function?: { name?: string } }>;
+    };
+    expect(request.tools?.map((tool) => tool.function?.name)).toContain("focus_session");
   });
 
   it("executes an MCP coordinator tool and voices the immediate result", async () => {
@@ -98,5 +137,34 @@ describe("Celeris coordinator conversation", () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
     expect(tools.callTool).not.toHaveBeenCalled();
+  });
+
+  it("voices a real backend update without exposing coordinator tools", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(response({ content: "The Voice MVP session is ready for you." }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(
+      conversation("test-key").announceUpdate(
+        [
+          {
+            event_id: 1,
+            type: "session_completed",
+            session_id: "session-1",
+            name: "Voice MVP",
+            output_delta: { changed: true, output: "assistant: Ready." },
+          },
+        ],
+        controller.signal,
+      ),
+    ).resolves.toBe("The Voice MVP session is ready for you.");
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tools?: unknown;
+      tool_choice?: unknown;
+    };
+    expect(request.tools).toBeUndefined();
+    expect(request.tool_choice).toBeUndefined();
   });
 });

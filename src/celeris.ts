@@ -1,5 +1,6 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { sanitizeForSpeech } from "./control.js";
+import { CoordinatorUpdate } from "./coordinator.js";
 import { Logger } from "./log.js";
 import { JsonObject } from "./omnigent.js";
 
@@ -84,6 +85,39 @@ const coordinatorContext = (result: JsonObject): ChatMessage => {
   };
 };
 
+export const allowsFocusChange = (input: string): boolean =>
+  /\b(?:switch|focus|open|select|choose|pick)\b/i.test(input) ||
+  /\b(?:use|want)\s+(?:the\s+)?(?:first|second|third|fourth|last|other|another|one)\b/i.test(
+    input,
+  );
+
+const voiceSafeTool = (tool: OpenAiTool): OpenAiTool => {
+  if (tool.function.name !== "send_message") return tool;
+  return {
+    ...tool,
+    function: {
+      ...tool.function,
+      parameters: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            minLength: 1,
+            description: "The user's complete message in their own intent.",
+          },
+          delivery: {
+            type: "string",
+            enum: ["immediate", "queued"],
+            description: "Defaults to immediate. Use queued only when explicitly requested.",
+          },
+        },
+        required: ["message"],
+        additionalProperties: false,
+      },
+    },
+  };
+};
+
 export class CelerisConversation {
   private readonly history: ChatMessage[] = [];
   private toolDefinitions?: OpenAiTool[];
@@ -103,7 +137,10 @@ export class CelerisConversation {
       coordinatorContext(updates),
       { role: "user", content: input },
     ];
-    const tools = await this.tools();
+    const tools = (await this.tools())
+      .filter((tool) => tool.function.name !== "focus_session" || allowsFocusChange(input))
+      .map(voiceSafeTool);
+    const allowedTools = new Set(tools.map((tool) => tool.function.name));
 
     try {
       for (let round = 0; round < 5; round += 1) {
@@ -132,7 +169,11 @@ export class CelerisConversation {
           }
           this.options.logger.info("celeris.tool.called", { name: call.function.name });
           let result: JsonObject;
-          try {
+          if (!allowedTools.has(call.function.name)) {
+            result = {
+              error: `${call.function.name} is not available for this user turn`,
+            };
+          } else try {
             result = await this.options.tools.callTool(call.function.name, args);
           } catch (error) {
             result = { error: error instanceof Error ? error.message : String(error) };
@@ -148,6 +189,37 @@ export class CelerisConversation {
     } catch (error) {
       this.options.logger.error("celeris.turn.failed", error);
       return "I couldn't reach the coordination layer just now.";
+    }
+  }
+
+  public async announceUpdate(
+    updates: CoordinatorUpdate[],
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    if (!this.options.apiKey || updates.length === 0 || signal.aborted) return undefined;
+    const messages: ChatMessage[] = [
+      { role: "system", content: systemPrompt },
+      ...this.history,
+      {
+        role: "system",
+        content: `A real Omnigent backend notification just arrived. Briefly tell the user what changed and ask for input only if needed. Do not promise future monitoring. Data: ${JSON.stringify(updates)}`,
+      },
+    ];
+    try {
+      const message = await this.complete(messages, "background_update", [], signal);
+      const content = typeof message.content === "string" ? message.content.trim() : "";
+      if (!content) return undefined;
+      const speech = sanitizeForSpeech(content, 300);
+      this.history.push(
+        { role: "system", content: `Omnigent background update: ${JSON.stringify(updates)}` },
+        { role: "assistant", content: speech },
+      );
+      this.trimHistory();
+      return speech;
+    } catch (error) {
+      if (signal.aborted) return undefined;
+      this.options.logger.error("celeris.notification.failed", error);
+      return undefined;
     }
   }
 
@@ -168,6 +240,7 @@ export class CelerisConversation {
     messages: ChatMessage[],
     phase: string,
     tools: OpenAiTool[],
+    externalSignal?: AbortSignal,
   ): Promise<{ content?: unknown; tool_calls?: unknown }> {
     const started = performance.now();
     this.options.logger.info("celeris.request.started", { phase });
@@ -185,10 +258,11 @@ export class CelerisConversation {
           max_tokens: 256,
           temperature: 0.2,
           messages,
-          tools,
-          tool_choice: "auto",
+          ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
         }),
-        signal: controller.signal,
+        signal: externalSignal
+          ? AbortSignal.any([controller.signal, externalSignal])
+          : controller.signal,
       });
       if (!response.ok) throw new Error(`Celeris returned HTTP ${response.status}`);
       const payload = (await response.json()) as {
@@ -226,6 +300,10 @@ export class CelerisConversation {
       { role: "user", content: user },
       { role: "assistant", content: assistant },
     );
+    this.trimHistory();
+  }
+
+  private trimHistory(): void {
     while (
       this.history.length > 10 ||
       this.history.reduce((total, message) => total + (message.content?.length ?? 0), 0) > 3_500

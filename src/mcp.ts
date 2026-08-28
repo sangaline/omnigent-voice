@@ -77,9 +77,14 @@ export const createCoordinatorMcpServer = (
     "poll_output",
     {
       description:
-        "Return only stable new output since the previous poll for a session. It never changes focus and ignores transient terminal animations.",
+        "Return stable output after an explicit cursor. Pass the returned cursor next time. It never changes focus and ignores transient terminal animations.",
       inputSchema: {
         session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
+        cursor: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Opaque cursor returned by the prior poll; omit for buffered output."),
       },
     },
     (args) => toolResult(coordinator, "poll_output", args),

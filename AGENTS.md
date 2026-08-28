@@ -40,11 +40,15 @@ from roughly 0.9-1.2 seconds to 35-52 ms and full generation from 2.2-3.5
 seconds to 87-190 ms for short voice replies.
 
 The bot auto-discovers its voice channel only when exactly one accessible guild
-and voice channel exist. Explicit runtime IDs override discovery. A new human
-utterance stops current playback and cancels further TTS chunk generation. A
-pending reply waits for recognition: real speech supersedes it, while an empty
-Discord speaking burst lets it retry. Only explicit cancel language interrupts
-the focused running Omnigent session.
+and voice channel exist. Explicit runtime IDs override discovery. Discord's raw
+speaking event does not stop playback; decoded audio must cross
+`DISCORD_BARGE_IN_PEAK` (default `0.08`). This rejects the short low-energy
+phone echo bursts that previously cut speech off mid-word. Confirmed human
+speech stops playback and cancels further TTS generation, but backend output
+polling continues. Adjacent recognized segments are joined for
+`DISCORD_UTTERANCE_MERGE_MS` (default 350 ms) before one model turn, preventing
+natural pauses from superseding half an utterance. Only explicit cancel
+language interrupts the focused running Omnigent session.
 
 Omnigent auth uses a runtime refresh token. At boot, the coordinator focuses the
 most recently active native session but does not create one. Focus is sticky:
@@ -58,16 +62,28 @@ every two seconds, including while the human is speaking. At ASR finalization,
 delta into the model context. Output arriving later remains buffered for the
 next turn. Persisted conversation items exclude transient terminal animations.
 Completion, failure, and new-decision events remain buffered in `updates`.
+When the channel is idle, those real events are sent to Celeris without tools
+and spoken proactively; a human turn takes priority and receives any unspoken
+event in its frozen context. Proactive delivery acknowledgement removes the
+event only after playback completes.
 `waiting_for_input` is a
 voice-facing filter for a nonzero pending-elicitation count, not an Omnigent
 status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
 
 Celeris owns the low-latency conversation and uses its OpenAI-compatible native
 tool-call shape to invoke a real MCP client/server pair connected in memory.
+The voice harness removes `send_message.session_id` from the model-visible
+schema so messages can only target the focused session. It also withholds and
+rejects `focus_session` unless the current transcript explicitly requests a
+switch/select/open/focus action or an ordinal selection. This is a runtime
+safety guard in addition to the prompt; ordinary latest/current-output language
+cannot mutate focus.
 The eight tools are `list_sessions`, `focus_session`, `get_output`,
 `poll_output`, `send_message`, `answer_prompt`, `start_session`, and
-`check_updates`. `poll_output` returns only stable new output since its prior
-per-session cursor and never changes focus. `send_message` defaults to
+`check_updates`. `poll_output` accepts and returns an explicit opaque cursor,
+returns only stable newer output, and never changes focus. This makes the tool
+usable by stateless remote MCP clients; omission returns the bounded buffered
+window. `send_message` defaults to
 `delivery: immediate`, the Omnigent create-or-steer path; the backend's HTTP
 `queued: true` response means asynchronous acceptance, not deferred delivery,
 and is exposed as such. `delivery: queued` is an explicit coordinator-managed

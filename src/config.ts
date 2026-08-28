@@ -4,6 +4,8 @@ export interface Config {
   discordVoiceChannelId?: string | undefined;
   allowedDiscordUserId?: string | undefined;
   discordSilenceMs: number;
+  discordUtteranceMergeMs: number;
+  discordBargeInPeak: number;
   omnigentBaseUrl: string;
   omnigentRefreshToken: string;
   omnigentAgentName: string;
@@ -87,6 +89,12 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     discordVoiceChannelId: optional(env, "DISCORD_VOICE_CHANNEL_ID"),
     allowedDiscordUserId: optional(env, "ALLOWED_DISCORD_USER_ID"),
     discordSilenceMs: positiveInteger(env, "DISCORD_SILENCE_MS", 450),
+    discordUtteranceMergeMs: nonnegativeInteger(
+      env,
+      "DISCORD_UTTERANCE_MERGE_MS",
+      350,
+    ),
+    discordBargeInPeak: positiveNumber(env, "DISCORD_BARGE_IN_PEAK", 0.08),
     omnigentBaseUrl: required(env, "OMNIGENT_BASE_URL").replace(/\/$/, ""),
     omnigentRefreshToken: required(env, "OMNIGENT_REFRESH_TOKEN"),
     omnigentAgentName: optional(env, "OMNIGENT_AGENT_NAME") ?? "codex-native-ui",

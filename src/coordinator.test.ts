@@ -127,6 +127,21 @@ describe("Omnigent coordinator", () => {
         focused_session: { id: "session-1", name: "Voice MVP" },
         output_delta: { changed: true, output: "assistant: The deployment is ready." },
       });
+      const firstPoll = await client.callTool("poll_output", {});
+      expect(firstPoll).toMatchObject({
+        changed: true,
+        output: "assistant: The deployment is ready.",
+        cursor: "new",
+        cursor_expired: false,
+      });
+      await expect(
+        client.callTool("poll_output", { cursor: firstPoll.cursor }),
+      ).resolves.toMatchObject({
+        changed: false,
+        output: "",
+        cursor: "new",
+        cursor_expired: false,
+      });
       const immediate = await client.callTool("send_message", { message: "Continue." });
       expect(immediate).toMatchObject({
         accepted: true,
