@@ -81,7 +81,7 @@ export class OmnigentClient {
       limit: String(limit),
       sort_by: "updated_at",
       order: "desc",
-      kind: "native",
+      kind: "default",
     });
     const listing = await this.requestJson(`/v1/sessions?${query.toString()}`);
     return Array.isArray(listing.data) ? listing.data.filter(isObject) : [];
