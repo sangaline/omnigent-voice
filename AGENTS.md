@@ -10,6 +10,13 @@ Minimal, speech-only Discord interface for an existing Omnigent deployment.
   variables. Never use Docker build arguments for secrets.
 - The deployed application is one outbound-only container. It exposes no HTTP
   service and needs no Kubernetes Service or Ingress.
+- Treat the coordinator tools as remote-code-execution authority: messages can
+  cause coding agents to run commands. The voice runtime must use only its
+  in-process MCP transport, and the standalone server must remain stdio-only.
+  Never add a public listener, Service, Ingress, or unauthenticated remote MCP
+  transport. Any future network transport requires an explicit security review,
+  private reachability, strong user authentication, narrow authorization, and
+  auditable caller identity before it is enabled.
 - Keep the interaction voice-first: no web UI, buttons, menus, or required slash
   commands.
 
@@ -53,6 +60,10 @@ session. Direct turns keep a small in-memory history. A stdio MCP entry point is
 available with `npm run mcp`; authenticated remote HTTP transport is deliberately
 deferred. Logs contain timing, character counts, tool names, and event names but
 never transcripts or tool arguments.
+
+The Discord voice channel is currently part of the MVP trust boundary. Before
+using a channel with more than one trusted human, configure
+`ALLOWED_DISCORD_USER_ID`; do not rely on Celeris to authenticate callers.
 
 ## Commands
 

@@ -20,6 +20,10 @@ output, send a message, answer a structured prompt, start a session, and drain
 background updates. The same server can run over stdio with `npm run mcp`; the
 voice process uses an in-memory MCP transport to avoid network latency.
 
+These tools carry effective remote-code-execution authority through Omnigent.
+There is intentionally no network MCP listener, HTTP port, Service, or Ingress.
+The stdio transport is for trusted local processes only.
+
 ## Development
 
 Requires Node.js 22.12 or newer.
