@@ -14,12 +14,44 @@ export interface Config {
   celerisModel: string;
   sherpaAsrModelDir: string;
   sherpaTtsModelDir: string;
+  sherpaAsrThreads: number;
+  sherpaTtsThreads: number;
+  sherpaTtsSpeakerId: number;
+  sherpaTtsSpeed: number;
   logLevel: "debug" | "info" | "warn" | "error";
 }
 
 const required = (env: NodeJS.ProcessEnv, name: string): string => {
   const value = env[name]?.trim();
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+};
+
+const nonnegativeInteger = (
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number,
+): number => {
+  const raw = optional(env, name);
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${name} must be a nonnegative integer`);
+  }
+  return value;
+};
+
+const positiveNumber = (
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number,
+): number => {
+  const raw = optional(env, name);
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} must be a positive number`);
+  }
   return value;
 };
 
@@ -66,6 +98,10 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     celerisModel: optional(env, "CELERIS_MODEL") ?? "celeris-1",
     sherpaAsrModelDir: required(env, "SHERPA_ASR_MODEL_DIR"),
     sherpaTtsModelDir: required(env, "SHERPA_TTS_MODEL_DIR"),
+    sherpaAsrThreads: positiveInteger(env, "SHERPA_ASR_THREADS", 4),
+    sherpaTtsThreads: positiveInteger(env, "SHERPA_TTS_THREADS", 4),
+    sherpaTtsSpeakerId: nonnegativeInteger(env, "SHERPA_TTS_SPEAKER_ID", 0),
+    sherpaTtsSpeed: positiveNumber(env, "SHERPA_TTS_SPEED", 1),
     logLevel: logLevel as Config["logLevel"],
   };
 };
