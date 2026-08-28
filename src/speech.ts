@@ -107,6 +107,10 @@ export class LocalSpeech {
     const started = performance.now();
     const stream = this.recognizer.createStream();
     stream.acceptWaveform({ samples, sampleRate: 16_000 });
+    // The streaming transducer needs acoustic context to flush the last token,
+    // especially for short Discord utterances. Keep this padding out of the
+    // reported audio duration because it is decoder context, not caller audio.
+    stream.acceptWaveform({ samples: new Float32Array(8_000), sampleRate: 16_000 });
     stream.inputFinished();
     while (this.recognizer.isReady(stream)) this.recognizer.decode(stream);
     const text = this.recognizer.getResult(stream).text?.trim() ?? "";

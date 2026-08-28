@@ -169,6 +169,8 @@ export class DiscordVoiceBot {
       const samples = concatFloat32(chunks);
       this.options.logger.info("speech.ended", {
         durationMs: Math.round(performance.now() - started),
+        audioMs: Math.round((samples.length / 16_000) * 1_000),
+        peakAmplitude: Number(peakAmplitude(samples).toFixed(4)),
       });
       void this.handleRecording(samples, epoch);
     };
