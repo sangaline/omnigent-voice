@@ -49,6 +49,12 @@ npm run dev
 podman build -t omnigent-voice:dev .
 ```
 
+The final image runs as the unprivileged `node` user. A smoke test should reach
+`speech.models.ready`, `omnigent.session.ready`, and `discord.voice.ready` in
+that order. The image publisher intentionally disables provenance and SBOM
+attestations because this experiment's Docker Hub page must not expose a source
+link or deployment metadata.
+
 ## Development rules
 
 - Commit coherent milestones; stage only owned files.
