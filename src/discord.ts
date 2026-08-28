@@ -21,9 +21,7 @@ import {
 } from "discord.js";
 import OpusScript from "opusscript";
 import {
-  concatFloat32,
   monoFloatToStereoPcm16,
-  peakAmplitude,
   resampleLinear,
   stereoPcm16ToMono16k,
 } from "./audio.js";
@@ -56,6 +54,7 @@ export class DiscordVoiceBot {
   private connection?: VoiceConnection;
   private turnTail: Promise<void> = Promise.resolve();
   private responseEpoch = 0;
+  private playbackEpoch = 0;
   private shuttingDown = false;
 
   public constructor(private readonly options: DiscordVoiceOptions) {}
@@ -95,6 +94,7 @@ export class DiscordVoiceBot {
 
   public async stop(): Promise<void> {
     this.shuttingDown = true;
+    this.playbackEpoch += 1;
     this.player.stop(true);
     this.connection?.destroy();
     this.client.destroy();
@@ -141,7 +141,7 @@ export class DiscordVoiceBot {
     const started = performance.now();
     this.options.logger.info("speech.started");
     const decoder = new OpusScript(48_000, 2, OpusScript.Application.AUDIO);
-    const chunks: Float32Array[] = [];
+    const transcription = this.options.speech.createTranscription();
     const stream = this.connection!.receiver.subscribe(userId, {
       end: {
         behavior: EndBehaviorType.AfterSilence,
@@ -150,7 +150,7 @@ export class DiscordVoiceBot {
     });
     stream.on("data", (packet: Buffer) => {
       try {
-        chunks.push(stereoPcm16ToMono16k(decoder.decode(packet)));
+        transcription.accept(stereoPcm16ToMono16k(decoder.decode(packet)));
       } catch (error) {
         this.options.logger.error("discord.decode.failed", error);
       }
@@ -164,28 +164,31 @@ export class DiscordVoiceBot {
       finalized = true;
       decoder.delete();
       this.recordingUsers.delete(userId);
-      const samples = concatFloat32(chunks);
+      let result;
+      try {
+        result = transcription.finish();
+      } catch (error) {
+        this.options.logger.error("asr.failed", error);
+        return;
+      }
       this.options.logger.info("speech.ended", {
         durationMs: Math.round(performance.now() - started),
-        audioMs: Math.round((samples.length / 16_000) * 1_000),
-        peakAmplitude: Number(peakAmplitude(samples).toFixed(4)),
+        audioMs: result.audioMs,
+        peakAmplitude: Number(result.peakAmplitude.toFixed(4)),
       });
-      void this.handleRecording(samples);
+      void this.handleRecording(result.text, result.audioMs, result.peakAmplitude);
     };
     stream.once("end", finalize);
     stream.once("close", finalize);
   }
 
-  private async handleRecording(samples: Float32Array): Promise<void> {
-    if (samples.length < 4_000 || peakAmplitude(samples) < 0.002) {
-      this.options.logger.debug("speech.ignored", { samples: samples.length });
-      return;
-    }
-    let transcript: string;
-    try {
-      transcript = this.options.speech.transcribe(samples);
-    } catch (error) {
-      this.options.logger.error("asr.failed", error);
+  private async handleRecording(
+    transcript: string,
+    audioMs: number,
+    peak: number,
+  ): Promise<void> {
+    if (audioMs < 250 || peak < 0.002) {
+      this.options.logger.debug("speech.ignored", { audioMs });
       return;
     }
     if (!transcript) return;
@@ -225,13 +228,14 @@ export class DiscordVoiceBot {
   }
 
   private async speak(text: string, epoch: number): Promise<void> {
-    if (!text || epoch !== this.responseEpoch) return;
+    if (!text || epoch !== this.responseEpoch || this.recordingUsers.size > 0) return;
+    const playbackEpoch = ++this.playbackEpoch;
     const stream = new PassThrough();
     const resource = createAudioResource(stream, { inputType: StreamType.Raw });
     let playbackStarted: number | undefined;
     try {
       await this.options.speech.synthesizeStreaming(text, (audio) => {
-        if (epoch !== this.responseEpoch) return false;
+        if (epoch !== this.responseEpoch || playbackEpoch !== this.playbackEpoch) return false;
         const pcm = monoFloatToStereoPcm16(
           resampleLinear(audio.samples, audio.sampleRate, 48_000),
         );
@@ -244,7 +248,11 @@ export class DiscordVoiceBot {
         return true;
       });
       stream.end();
-      if (epoch !== this.responseEpoch || playbackStarted === undefined) return;
+      if (
+        epoch !== this.responseEpoch ||
+        playbackEpoch !== this.playbackEpoch ||
+        playbackStarted === undefined
+      ) return;
       await entersState(this.player, AudioPlayerStatus.Idle, 15 * 60_000);
       this.options.logger.info("discord.playback.finished", {
         durationMs: Math.round(performance.now() - playbackStarted),

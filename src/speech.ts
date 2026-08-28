@@ -22,6 +22,78 @@ export interface SynthesizedAudio {
   sampleRate: number;
 }
 
+export interface TranscriptionResult {
+  text: string;
+  audioMs: number;
+  peakAmplitude: number;
+}
+
+export class StreamingTranscription {
+  private readonly stream: ReturnType<OnlineRecognizer["createStream"]>;
+  private readonly started = performance.now();
+  private sampleCount = 0;
+  private peak = 0;
+  private firstPartialLogged = false;
+  private finished = false;
+
+  public constructor(
+    private readonly recognizer: OnlineRecognizer,
+    private readonly logger: Logger,
+  ) {
+    this.stream = recognizer.createStream();
+  }
+
+  public accept(samples: Float32Array): void {
+    if (this.finished) throw new Error("Cannot add audio to a finished ASR stream");
+    this.sampleCount += samples.length;
+    for (const sample of samples) this.peak = Math.max(this.peak, Math.abs(sample));
+    this.stream.acceptWaveform({ samples, sampleRate: 16_000 });
+    this.decodeReady();
+  }
+
+  public finish(): TranscriptionResult {
+    if (this.finished) throw new Error("ASR stream was already finished");
+    this.finished = true;
+    const finalizeStarted = performance.now();
+    // The transducer needs right-hand acoustic context to flush its last token.
+    // This is decoder padding, not caller audio, so it is excluded from audioMs.
+    this.stream.acceptWaveform({ samples: new Float32Array(8_000), sampleRate: 16_000 });
+    this.stream.inputFinished();
+    this.decodeReady();
+    const text = this.recognizer.getResult(this.stream).text?.trim() ?? "";
+    const result = {
+      text,
+      audioMs: Math.round((this.sampleCount / 16_000) * 1_000),
+      peakAmplitude: this.peak,
+    };
+    this.logger.info("asr.final", {
+      finalizeMs: Math.round(performance.now() - finalizeStarted),
+      streamMs: Math.round(performance.now() - this.started),
+      audioMs: result.audioMs,
+      characters: text.length,
+    });
+    return result;
+  }
+
+  private decodeReady(): void {
+    let decoded = false;
+    while (this.recognizer.isReady(this.stream)) {
+      this.recognizer.decode(this.stream);
+      decoded = true;
+    }
+    if (decoded && !this.firstPartialLogged) {
+      const partial = this.recognizer.getResult(this.stream).text?.trim() ?? "";
+      if (partial) {
+        this.firstPartialLogged = true;
+        this.logger.info("asr.first_partial", {
+          durationMs: Math.round(performance.now() - this.started),
+          characters: partial.length,
+        });
+      }
+    }
+  }
+}
+
 const walkFiles = (directory: string): string[] => {
   const files: string[] = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -104,22 +176,13 @@ export class LocalSpeech {
   }
 
   public transcribe(samples: Float32Array): string {
-    const started = performance.now();
-    const stream = this.recognizer.createStream();
-    stream.acceptWaveform({ samples, sampleRate: 16_000 });
-    // The streaming transducer needs acoustic context to flush the last token,
-    // especially for short Discord utterances. Keep this padding out of the
-    // reported audio duration because it is decoder context, not caller audio.
-    stream.acceptWaveform({ samples: new Float32Array(8_000), sampleRate: 16_000 });
-    stream.inputFinished();
-    while (this.recognizer.isReady(stream)) this.recognizer.decode(stream);
-    const text = this.recognizer.getResult(stream).text?.trim() ?? "";
-    this.options.logger.info("asr.final", {
-      durationMs: Math.round(performance.now() - started),
-      audioMs: Math.round((samples.length / 16_000) * 1_000),
-      characters: text.length,
-    });
-    return text;
+    const transcription = this.createTranscription();
+    transcription.accept(samples);
+    return transcription.finish().text;
+  }
+
+  public createTranscription(): StreamingTranscription {
+    return new StreamingTranscription(this.recognizer, this.options.logger);
   }
 
   public async synthesize(text: string): Promise<SynthesizedAudio> {
