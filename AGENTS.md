@@ -70,8 +70,11 @@ conventional autoregressive provider is still generating later text. Celeris-1
 itself is a diffusion model and currently returns its whole completion in one
 burst: a live 279-character probe delivered the first speech segment at 474 ms
 and completed at 475 ms. Its SSE support therefore provides protocol symmetry,
-not token-level overlap. Do not add fake typing delays or wait to synthesize the
-whole assistant response after that burst. Named tool forcing stays buffered
+not token-level overlap. Adjacent segments received within 15 ms are coalesced
+into one Pocket request; this retains immediate synthesis for the current
+same-burst response while avoiding per-sentence silence and prosody resets.
+Genuinely incremental content still streams in later batches. Do not add fake
+typing delays. Named tool forcing stays buffered
 because Celeris rejects forced tools on streaming requests. Startup sends the
 documented authenticated `/echo` warmup with a five-second best-effort timeout;
 it invokes no model and establishes the network connection before the caller's
@@ -89,7 +92,9 @@ The bot auto-discovers its voice channel only when exactly one accessible guild
 and voice channel exist. Explicit runtime IDs override discovery. Discord's raw
 speaking event does not stop playback; decoded audio must cross
 `DISCORD_BARGE_IN_PEAK` (default `0.08`). This rejects the short low-energy
-phone echo bursts that previously cut speech off mid-word. Confirmed human
+phone echo bursts that previously cut speech off mid-word. Production overrides
+it to `0.18` after live empty receive bursts at `0.099` and `0.104` interrupted
+playback while confirmed phone speech peaked above `0.73`. Confirmed human
 speech stops playback and cancels further TTS generation, but backend output
 polling continues. A Discord receive stream remains provisional until decoded
 audio crosses `0.002` peak amplitude. Zero-energy tail streams therefore never

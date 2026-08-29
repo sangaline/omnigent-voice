@@ -12,8 +12,10 @@ ASR runs incrementally while the caller is speaking. Non-forced Celeris rounds
 use its SSE interface and complete natural speech segments feed one continuous
 TTS queue. Celeris-1 currently generates a complete diffusion-model response in
 one burst rather than token by token, so there is normally no model-generation
-window to overlap; Pocket starts on the first segment as soon as that burst
-arrives. The persistent dynamically quantized Pocket runtime begins natural 24 kHz speech in
+window to overlap. Segments delivered within a 15 ms grace window are rendered
+as one Pocket utterance, preserving prosody and avoiding synthetic sentence
+gaps without delaying a completed response; genuinely later content continues
+as another streaming batch. The persistent dynamically quantized Pocket runtime begins natural 24 kHz speech in
 roughly 34-39 ms. Every generated 80 ms audio chunk is sent to Discord
 immediately; the complete audio reply is never buffered before playback.
 If the caller barges in, Discord playback and the in-progress Pocket generation

@@ -1439,3 +1439,30 @@ warmed Pocket in 5.33 seconds, selected the state without fallback, reached all
 coordinator and Discord readiness events, and restarted zero times. This is
 zero-shot conditioning rather than weight fine-tuning; subjective speaker
 similarity remains a live-listening evaluation.
+
+### 2026-08-29 — Clone-path latency and Discord gap isolation
+
+Hypothesis H50: private conditioning made the staged pipeline materially slower
+and starved Discord playback. Fresh live timing contradicted it. Across the
+recognized test turns, Celeris took 303–625 ms, Pocket produced first audio in
+39–51 ms, and end-of-ASR to playback took 373–690 ms. Long synthesis ran about
+five to seven times faster than its audio duration. The cloned model therefore
+had enough generation margin and was not the source of an underrun.
+
+The trace exposed two independent continuity failures. Celeris's same-millisecond
+diffusion burst was split into separate Pocket requests at sentence boundaries,
+resetting prosody and admitting model-owned silence between them. Two empty
+receive streams with peaks of 0.099 and 0.104 also crossed the production 0.08
+barge-in threshold and cancelled live playback; confirmed phone speech in the
+same trace peaked from 0.73 to 0.96. A 15 ms synthesis grace now coalesces
+same-burst sentence segments into one utterance while preserving streaming for
+content that genuinely arrives later. Production raises only its runtime
+barge-in threshold to 0.18.
+
+A replacement private prompt arrived already clean at -20.6 dB RMS and -2.1 dB
+peak, so it was only mixed to mono and resampled rather than normalized. Its
+generic probe rendered at -25.4 dB RMS and -5.9 dB peak, began in 46–66 ms, and
+was recovered exactly by the bundled Nemotron recognizer. The compatible state
+was provisioned privately and the replacement pod reached Pocket, coordinator,
+and Discord readiness with zero restarts. Three batching regressions bring the
+conventional gate to 105 passing tests with clean typecheck and build.

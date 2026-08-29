@@ -36,6 +36,7 @@ import { Logger } from "./log.js";
 import { shouldScheduleCoordinatorNotification } from "./notification.js";
 import { ConfirmedRecordingTracker, MIN_RECORDING_PEAK } from "./recording.js";
 import { LocalSpeech } from "./speech.js";
+import { SpeechSegmentBatcher } from "./speech-batcher.js";
 import {
   KameS2SRuntime,
   DelayedS2SInput,
@@ -614,22 +615,19 @@ export class DiscordVoiceBot {
     let playbackStarted: number | undefined;
     let accepting = true;
     let queuedSegments = 0;
-    let tail: Promise<void> = Promise.resolve();
+    let synthesisBatches = 0;
 
     const active = (): boolean =>
       accepting &&
       epoch === this.responseEpoch &&
       playbackEpoch === this.playbackEpoch;
 
-    const enqueue = (text: string): void => {
-      const segment = text.trim();
-      if (!segment || !active()) return;
-      queuedSegments += 1;
-      const segmentNumber = queuedSegments;
-      tail = tail.then(async () => {
+    const segmentBatcher = new SpeechSegmentBatcher(
+      async (segment) => {
         if (!active()) return;
+        synthesisBatches += 1;
         this.options.logger.info("tts.text_segment.started", {
-          segment: segmentNumber,
+          segment: synthesisBatches,
           characters: segment.length,
         });
         await this.options.speech.synthesizeStreaming(segment, (audio) => {
@@ -650,18 +648,27 @@ export class DiscordVoiceBot {
           }
           return true;
         });
-      });
+      },
+      15,
+    );
+
+    const enqueue = (text: string): void => {
+      const segment = text.trim();
+      if (!segment || !active()) return;
+      queuedSegments += 1;
+      segmentBatcher.enqueue(segment);
     };
 
     const cancel = (): void => {
       if (!accepting) return;
       accepting = false;
+      segmentBatcher.cancel();
       audioStream.destroy();
     };
 
     const finish = async (): Promise<boolean> => {
       try {
-        await tail;
+        await segmentBatcher.finish();
         if (!active()) {
           cancel();
           return false;
@@ -678,6 +685,7 @@ export class DiscordVoiceBot {
           durationMs: Math.round(performance.now() - playbackStarted),
           streamed: true,
           segments: queuedSegments,
+          synthesisBatches,
         });
         return true;
       } catch (error) {
