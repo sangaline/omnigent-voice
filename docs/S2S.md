@@ -23,6 +23,15 @@ spoken result replaces the current oracle stream. This preserves the existing
 session tools and action invariants while KAME supplies low-latency continuous
 speech and barge-in behavior.
 
+Proactive coordinator updates use the same audible KAME voice. After the
+channel has been idle, the local TTS engine synthesizes a short input-side
+question and feeds it only to KAME; that trigger is never played to Discord.
+Once the hidden input drains, the coordinator's verified update becomes the
+oracle guidance. Output energy must show real speech followed by eight silent
+frames before the coordinator event cursor advances. This avoids both an
+audible voice swap and the earlier false success condition where accepting
+oracle tokens was mistaken for speaking them.
+
 ## Runtime files
 
 No speech-to-speech weights or deployment-specific values belong in the image.
@@ -78,6 +87,10 @@ stream and an independent local ASR pass both recovered, “I hear you clearly.
 The guided real-time voice path is working.” The bridge logs every frame over
 the 80 ms deadline separately so cold-start and recurrent misses cannot hide in
 a rolling percentile. The target driver incurs a roughly 617 ms first-frame
-shader warmup; the Node runtime sends and discards 20 silent frames before
-Discord connects. That warmup completed in 1.84 seconds in the container smoke
-test, after which the production Node fd3/fd4 client accepted live guidance.
+shader warmup. A controlled follow-up found that 20 frames warmed the GPU but
+did not always establish enough idle dialogue context for an immediate first
+turn. The deployed runtime therefore primes 64 discarded silent frames before
+Discord connects. With the longer idle lead-in, both the known public-speech
+fixture and a hidden local-TTS trigger produced 34-37 active output frames, and
+independent local ASR recovered the guided sentence exactly. The hidden trigger
+keeps KAME as the only voice audible to the caller.

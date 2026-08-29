@@ -340,9 +340,10 @@ projection tensors. A paced public-audio smoke test injected oracle text after
 the caller stopped, and both KAME's generated token stream and independent
 local ASR recovered the intended guided sentence. Treat this as the native
 runtime gate, not as a substitute for a live Discord/phone test. RADV's first
-inference frame takes roughly 617 ms to compile/initialize; `KameS2SRuntime`
-therefore sends and discards 20 silent frames before the Discord bot connects.
-Do not remove that startup warmup or expose its output to callers.
+inference frame takes roughly 617 ms to compile/initialize. Twenty frames warmed
+the shader but did not reliably prime an immediate first dialogue turn, so
+`KameS2SRuntime` sends and discards 64 silent frames before the Discord bot
+connects. Do not shorten that startup priming or expose its output to callers.
 
 The guided native experiment is implemented behind `VOICE_RUNTIME=kame`; the
 default remains `staged`. `native/moshi-kame.patch` adds KAME's oracle embedding
@@ -353,6 +354,14 @@ guidance/events on descriptors 3/4. `src/s2s.ts` owns the subprocess and
 runs in parallel. Celeris tool results replace oracle guidance; KAME's generated
 text and rolling frame tails are retained in structured runtime logs. Model
 weights remain external runtime mounts. See `docs/S2S.md`.
+
+Unsolicited coordinator updates retain one audible voice. Local TTS generates a
+short input-side question that is fed only into KAME after idle; the user never
+hears that trigger. The verified Celeris update is injected when the hidden
+input drains. KAME output must cross the speech-energy threshold and then
+produce eight silent frames before the event cursor advances. Normal guided
+replies are tracked with the same detector for durable playback logs. Merely
+accepting oracle tokens is not evidence that Discord received speech.
 
 ## Commands
 

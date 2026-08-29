@@ -448,3 +448,30 @@ scenarios. There were no invalid model-service trials. One-round model turns in
 the linked sweep were generally 105–237 ms, two-round reads were 222–356 ms,
 and the short proactive update plus typed partial-failure verification required
 zero model rounds. This candidate is accepted for deployment.
+
+### 2026-08-29 — Native KAME turn priming and truthful playback evidence
+
+Hypothesis H17: accepting an oracle update is sufficient evidence that the
+native runtime spoke it. This was false. Two controlled probes queued guidance
+after immediately supplied speech and produced no meaningful output: zero
+frames crossed a 0.02 peak threshold, maximum peaks stayed near 0.0004, and
+local ASR returned an empty transcript. This also explained an idle proactive
+notification that was marked spoken even though no guided response followed.
+
+The earlier successful fixture differed in one important way: it contained
+5.19 seconds of idle audio before its 3.21-second caller segment. Replaying that
+exact shape restored 34 active response frames with a 0.618 peak, and local ASR
+recovered the injected sentence exactly. A second test used 50 idle frames and
+a locally synthesized 1.57-second input-side question; it produced 37 active
+frames with a 0.547 peak and the same exact ASR result. The hidden question is
+never sent to Discord, so KAME remains the only audible voice.
+
+The runtime now primes 64 discarded silent frames before connecting Discord.
+For proactive events it feeds the hidden local question into KAME, injects the
+verified coordinator update when that input drains, and advances the event
+cursor only after output speech is followed by eight silent frames. Normal
+human-turn guidance uses the same detector for exact playback-start and finish
+logging without blocking the conversation loop. Unguided native text fragments
+are retained only as counts outside a bounded post-guidance window. The code
+gate is 52 conventional tests plus a clean typecheck and build; live Discord
+and proactive-event verification remain required after image rollout.

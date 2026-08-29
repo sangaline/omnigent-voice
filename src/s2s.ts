@@ -19,6 +19,28 @@ export interface S2SReady {
   frameSize: number;
 }
 
+export interface S2SSpeechTurnState {
+  started: boolean;
+  silentFrames: number;
+}
+
+export const acceptS2SSpeechTurnFrame = (
+  state: S2SSpeechTurnState,
+  audio: Float32Array,
+  threshold = 0.01,
+  trailingSilentFrames = 8,
+): boolean => {
+  let peak = 0;
+  for (const sample of audio) peak = Math.max(peak, Math.abs(sample));
+  if (peak >= threshold) {
+    state.started = true;
+    state.silentFrames = 0;
+  } else if (state.started) {
+    state.silentFrames += 1;
+  }
+  return state.started && state.silentFrames >= trailingSilentFrames;
+};
+
 export const decodeS2SReady = (payload: string): S2SReady => {
   const wire = JSON.parse(payload) as Partial<S2SReady> & {
     sample_rate?: number;
@@ -70,6 +92,7 @@ export class KameS2SRuntime {
   private readyState: S2SReady | undefined;
   private audioPending = Buffer.alloc(0);
   private readonly audioListeners = new Set<(audio: Float32Array) => void>();
+  private guidedTranscriptDeadline = 0;
   private stopping = false;
 
   public constructor(private readonly options: S2SRuntimeOptions) {}
@@ -177,7 +200,10 @@ export class KameS2SRuntime {
     audio.on("data", (chunk: Buffer) => this.acceptOutput(chunk));
     audio.on("error", (error) => this.options.logger.error("s2s.audio.failed", error));
     const metadata = await ready;
-    await this.warmup(20);
+    // Shader compilation settles on the first frame, but KAME also needs a few
+    // seconds of idle dialogue context before the first caller turn. Sixty-four
+    // discarded frames cover both requirements without leaking startup audio.
+    await this.warmup(64);
     return metadata;
   }
 
@@ -206,11 +232,59 @@ export class KameS2SRuntime {
   public guide(text: string, reset = true): boolean {
     if (!this.control || !this.readyState) return false;
     const accepted = this.control.write(encodeS2SGuidance(text, reset));
+    this.guidedTranscriptDeadline = performance.now() + 30_000;
     this.options.logger.info("s2s.guidance.sent", {
       characters: text.length,
       reset,
     });
     return accepted;
+  }
+
+  public waitForSpeechTurn(options: {
+    signal?: AbortSignal | undefined;
+    timeoutMs?: number | undefined;
+    onStarted?: (() => void) | undefined;
+  } = {}): Promise<boolean> {
+    if (!this.readyState || options.signal?.aborted) return Promise.resolve(false);
+    const timeoutMs = options.timeoutMs ?? 20_000;
+    return new Promise<boolean>((resolve) => {
+      const state: S2SSpeechTurnState = { started: false, silentFrames: 0 };
+      const started = performance.now();
+      let announcedStart = false;
+      let settled = false;
+      let unsubscribe = (): void => undefined;
+      const finish = (completed: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        options.signal?.removeEventListener("abort", abort);
+        if (completed) {
+          this.options.logger.info("s2s.output.speech_finished", {
+            durationMs: Math.round(performance.now() - started),
+          });
+        }
+        resolve(completed);
+      };
+      const abort = (): void => finish(false);
+      const timer = setTimeout(() => {
+        this.options.logger.warn("s2s.output.speech_timeout", { timeoutMs });
+        finish(false);
+      }, timeoutMs);
+      unsubscribe = this.subscribeAudio((audio) => {
+        const wasStarted = state.started;
+        const completed = acceptS2SSpeechTurnFrame(state, audio);
+        if (!wasStarted && state.started && !announcedStart) {
+          announcedStart = true;
+          this.options.logger.info("s2s.output.speech_started", {
+            waitMs: Math.round(performance.now() - started),
+          });
+          options.onStarted?.();
+        }
+        if (completed) finish(true);
+      });
+      options.signal?.addEventListener("abort", abort, { once: true });
+    });
   }
 
   public async stop(): Promise<void> {
@@ -283,8 +357,16 @@ export class KameS2SRuntime {
       return;
     }
     if (kind === "T") {
+      const text = payload.trim();
+      if (!text) return;
+      if (performance.now() > this.guidedTranscriptDeadline) {
+        this.options.logger.debug("s2s.transcript.unprompted", {
+          characters: text.length,
+        });
+        return;
+      }
       this.options.logger.info("conversation.assistant.s2s_transcript", {
-        text: payload.trim(),
+        text,
       });
       return;
     }

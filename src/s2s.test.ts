@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { decodeS2SReady, encodeS2SGuidance } from "./s2s.js";
+import {
+  acceptS2SSpeechTurnFrame,
+  decodeS2SReady,
+  encodeS2SGuidance,
+} from "./s2s.js";
 
 describe("KAME S2S control protocol", () => {
   it("encodes replacement guidance as one safe line", () => {
@@ -10,6 +14,16 @@ describe("KAME S2S control protocol", () => {
 
   it("can append guidance without resetting queued tokens", () => {
     expect(encodeS2SGuidance("next", false)).toBe("A\tnext\n");
+  });
+
+  it("confirms a speech turn only after trailing silence", () => {
+    const state = { started: false, silentFrames: 0 };
+    expect(acceptS2SSpeechTurnFrame(state, new Float32Array([0.001]))).toBe(false);
+    expect(acceptS2SSpeechTurnFrame(state, new Float32Array([0.2]))).toBe(false);
+    for (let frame = 0; frame < 7; frame += 1) {
+      expect(acceptS2SSpeechTurnFrame(state, new Float32Array([0.001]))).toBe(false);
+    }
+    expect(acceptS2SSpeechTurnFrame(state, new Float32Array([0.001]))).toBe(true);
   });
 
   it("decodes the native snake-case readiness protocol", () => {

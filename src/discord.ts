@@ -74,6 +74,8 @@ export class DiscordVoiceBot {
   private readonly s2sInputChunks: Float32Array[] = [];
   private s2sInputOffset = 0;
   private s2sQueuedSamples = 0;
+  private s2sResponseAbort: AbortController | undefined;
+  private s2sResponseActive = false;
   private activeUserTurns = 0;
   private responseEpoch = 0;
   private playbackEpoch = 0;
@@ -124,6 +126,7 @@ export class DiscordVoiceBot {
     if (this.notificationTimer) clearTimeout(this.notificationTimer);
     if (this.s2sTimer) clearTimeout(this.s2sTimer);
     this.notificationAbort?.abort();
+    this.s2sResponseAbort?.abort();
     this.unsubscribeCoordinator?.();
     this.unsubscribeS2SAudio?.();
     this.s2sOutput?.end();
@@ -203,12 +206,12 @@ export class DiscordVoiceBot {
     });
   }
 
-  private queueS2SInput(samples: Float32Array): void {
+  private queueS2SInput(samples: Float32Array, warnOnBacklog = true): void {
     if (!this.options.s2s || samples.length === 0) return;
     this.s2sInputChunks.push(samples);
     this.s2sQueuedSamples += samples.length;
     const queuedMs = (this.s2sQueuedSamples / this.options.s2s.ready.sampleRate) * 1_000;
-    if (queuedMs > 500) {
+    if (warnOnBacklog && queuedMs > 500) {
       this.options.logger.warn("s2s.input.audio_backlog", {
         queuedMs: Math.round(queuedMs),
       });
@@ -232,6 +235,34 @@ export class DiscordVoiceBot {
       }
     }
     return output;
+  }
+
+  private clearS2SInput(): void {
+    this.s2sInputChunks.splice(0);
+    this.s2sInputOffset = 0;
+    this.s2sQueuedSamples = 0;
+  }
+
+  private async waitForS2SInputDrain(
+    epoch: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const deadline = performance.now() + 15_000;
+    while (
+      this.s2sQueuedSamples > 0 &&
+      !this.shuttingDown &&
+      epoch === this.responseEpoch &&
+      !signal?.aborted &&
+      performance.now() < deadline
+    ) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+    return (
+      this.s2sQueuedSamples === 0 &&
+      !this.shuttingDown &&
+      epoch === this.responseEpoch &&
+      !signal?.aborted
+    );
   }
 
   private onSpeakingStart(userId: string): void {
@@ -265,10 +296,12 @@ export class DiscordVoiceBot {
         if (inputEpoch === undefined && packetPeak >= this.options.bargeInPeak) {
           const interruptedPlayback = this.player.state.status !== AudioPlayerStatus.Idle;
           inputEpoch = ++this.responseEpoch;
+          this.s2sResponseAbort?.abort();
           if (!this.options.s2s) {
             this.playbackEpoch += 1;
             this.player.stop(true);
           }
+          if (this.options.s2s && this.notificationAbort) this.clearS2SInput();
           this.notificationAbort?.abort();
           this.options.logger.info("speech.voice.confirmed", {
             peakAmplitude: Number(packetPeak.toFixed(4)),
@@ -416,10 +449,103 @@ export class DiscordVoiceBot {
   private async deliverSpeech(text: string, epoch: number): Promise<boolean> {
     if (!text || epoch !== this.responseEpoch) return false;
     if (this.options.s2s) {
-      this.options.s2s.guide(text, true);
-      return true;
+      return this.guideS2S(text, epoch, false);
     }
     return this.speak(text, epoch);
+  }
+
+  private async guideS2S(
+    text: string,
+    epoch: number,
+    waitForCompletion: boolean,
+    parentSignal?: AbortSignal,
+  ): Promise<boolean> {
+    const s2s = this.options.s2s;
+    if (!s2s || !text || epoch !== this.responseEpoch || parentSignal?.aborted) {
+      return false;
+    }
+    this.s2sResponseAbort?.abort();
+    const controller = new AbortController();
+    this.s2sResponseAbort = controller;
+    const abort = (): void => controller.abort();
+    parentSignal?.addEventListener("abort", abort, { once: true });
+    this.s2sResponseActive = true;
+    let playbackStarted: number | undefined;
+    const completion = s2s.waitForSpeechTurn({
+      signal: controller.signal,
+      onStarted: () => {
+        playbackStarted = performance.now();
+        this.options.logger.info("conversation.assistant.playback_started", {
+          text,
+          retry: 0,
+          runtime: "kame",
+        });
+        this.options.logger.info("discord.playback.started", { runtime: "kame" });
+      },
+    });
+    if (!s2s.guide(text, true)) controller.abort();
+
+    const settle = async (): Promise<boolean> => {
+      const completed = await completion;
+      parentSignal?.removeEventListener("abort", abort);
+      if (this.s2sResponseAbort === controller) {
+        this.s2sResponseAbort = undefined;
+        this.s2sResponseActive = false;
+      }
+      if (completed && playbackStarted !== undefined) {
+        this.options.logger.info("discord.playback.finished", {
+          durationMs: Math.round(performance.now() - playbackStarted),
+          runtime: "kame",
+        });
+      } else if (playbackStarted !== undefined) {
+        this.options.logger.info("discord.playback.interrupted", {
+          runtime: "kame",
+        });
+      } else if (!controller.signal.aborted) {
+        this.options.logger.warn("s2s.response.unconfirmed", {
+          characters: text.length,
+        });
+      }
+      this.scheduleCoordinatorNotification();
+      return completed;
+    };
+    if (waitForCompletion) return settle();
+    void settle();
+    return !controller.signal.aborted;
+  }
+
+  private async deliverProactiveSpeech(
+    text: string,
+    epoch: number,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (!this.options.s2s) return this.speak(text, epoch);
+    if (!(await this.waitForRecordingToSettle(epoch)) || signal.aborted) return false;
+    let samples = 0;
+    try {
+      await this.options.speech.synthesizeStreaming(
+        "Can you give me the update?",
+        (audio) => {
+          if (signal.aborted || epoch !== this.responseEpoch) return false;
+          const trigger = resampleLinear(
+            audio.samples,
+            audio.sampleRate,
+            this.options.s2s!.ready.sampleRate,
+          );
+          samples += trigger.length;
+          this.queueS2SInput(trigger, false);
+          return true;
+        },
+      );
+    } catch (error) {
+      this.options.logger.error("s2s.proactive.trigger_failed", error);
+      return false;
+    }
+    if (samples === 0 || !(await this.waitForS2SInputDrain(epoch, signal))) return false;
+    this.options.logger.info("s2s.proactive.trigger_complete", {
+      audioMs: Math.round((samples / this.options.s2s.ready.sampleRate) * 1_000),
+    });
+    return this.guideS2S(text, epoch, true, signal);
   }
 
   private async speak(text: string, epoch: number, retry = 0): Promise<boolean> {
@@ -497,6 +623,7 @@ export class DiscordVoiceBot {
       this.shuttingDown ||
       this.recordingUsers.size > 0 ||
       this.activeUserTurns > 0 ||
+      this.s2sResponseActive ||
       (!this.options.s2s && this.player.state.status !== AudioPlayerStatus.Idle)
     ) {
       this.scheduleCoordinatorNotification();
@@ -514,7 +641,7 @@ export class DiscordVoiceBot {
         superseded: false,
         source: "background_update",
       });
-      if (await this.deliverSpeech(spoken, epoch)) {
+      if (await this.deliverProactiveSpeech(spoken, epoch, controller.signal)) {
         this.options.celeris.acknowledgeSpokenUpdates(updates, spoken);
       }
     } finally {
