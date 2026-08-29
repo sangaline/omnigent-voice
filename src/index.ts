@@ -56,6 +56,7 @@ const celeris = new CelerisConversation({
     compactionIdleMs: config.celerisHistoryCompactionIdleMs,
   },
 });
+await celeris.warmup();
 const s2s =
   config.voiceRuntime === "kame"
     ? new KameS2SRuntime({

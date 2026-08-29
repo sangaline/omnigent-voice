@@ -16,6 +16,7 @@ import {
   missingMultiSourceNames,
   requestsPositiveFocusAction,
   serializeToolResult,
+  StreamingSpeechSegmenter,
   successfulActionSpeech,
   targetsFocusedSession,
   verifiedActionFollowupSpeech,
@@ -36,6 +37,19 @@ const response = (message: object): Response =>
     status: 200,
     headers: { "content-type": "application/json" },
   });
+
+const streamingResponse = (...payloads: Array<object | "[DONE]">): Response =>
+  new Response(
+    payloads
+      .map((payload) =>
+        `data: ${payload === "[DONE]" ? payload : JSON.stringify(payload)}\n\n`
+      )
+      .join(""),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream; charset=utf-8" },
+    },
+  );
 
 const toolClient = (): CoordinatorToolClient => ({
   listTools: vi.fn().mockResolvedValue([
@@ -132,6 +146,119 @@ const conversation = (
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Celeris coordinator conversation", () => {
+  it("segments generated text at natural boundaries with a hard speech limit", () => {
+    const segmenter = new StreamingSpeechSegmenter(54, 30);
+    expect(segmenter.push("The first sentence arrives. The second")).toEqual([
+      "The first sentence arrives.",
+    ]);
+    expect(segmenter.push(" one is long enough, and keeps moving")).toEqual([
+      "The second one is long enou…",
+    ]);
+    expect(segmenter.finish()).toEqual([]);
+    expect(() => segmenter.push("late")).toThrow("already finalized");
+  });
+
+  it("streams content deltas into speech segments while retaining the full reply", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      streamingResponse(
+        {
+          choices: [{ delta: { content: "The first sentence. " }, finish_reason: null }],
+          usage: { prompt_tokens: 100, completion_tokens: 4 },
+        },
+        {
+          choices: [{ delta: { content: "The second sentence." }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 100, completion_tokens: 8 },
+        },
+        "[DONE]",
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const segments: string[] = [];
+
+    await expect(
+      conversation("test-key").respond("Explain it briefly.", (segment) => {
+        segments.push(segment);
+      }),
+    ).resolves.toBe("The first sentence. The second sentence.");
+    expect(segments).toEqual(["The first sentence.", "The second sentence."]);
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      stream?: boolean;
+      stream_options?: { include_usage?: boolean };
+    };
+    expect(request).toMatchObject({
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+  });
+
+  it("assembles streamed tool-call fragments without speaking tool arguments", async () => {
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string, args) =>
+      Promise.resolve(
+        name === "check_updates"
+          ? {
+              focused_session: { id: "session-primary", name: "Primary Work" },
+              known_sessions: [{ id: "session-primary", name: "Primary Work" }],
+              updates: [],
+            }
+          : {
+              accepted: true,
+              delivery: "immediate",
+              target_session: { id: String(args.session_id), name: "Primary Work" },
+              updates: [],
+            },
+      ),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        streamingResponse(
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call-streamed",
+                      type: "function",
+                      function: { name: "send_message", arguments: '{"message":"run' },
+                    },
+                  ],
+                },
+                finish_reason: null,
+              },
+            ],
+          },
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    { index: 0, function: { arguments: ' it now"}' } },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+          },
+          "[DONE]",
+        ),
+      ),
+    );
+    const segments: string[] = [];
+
+    await expect(
+      conversation("test-key", tools).respond("Tell it to run it now.", (segment) => {
+        segments.push(segment);
+      }),
+    ).resolves.toBe("I sent that to Primary Work.");
+    expect(segments).toEqual([]);
+    expect(tools.callTool).toHaveBeenCalledWith("send_message", {
+      message: "run it now",
+    });
+  });
+
   it("keeps oversized tool results as valid structured JSON", () => {
     const serialized = serializeToolResult({
       focused_session: { id: "session-1", name: "Voice MVP" },
@@ -568,6 +695,22 @@ describe("Celeris coordinator conversation", () => {
       ]),
     ).toEqual({ mode: "ambiguous", candidates: ["Primary Work", "Side Beta"] });
     expect(
+      voiceMessageRouting(
+        "tell build worker to rerun phone audio and tell docs worker to record first audio",
+        [
+          { id: "session-build", name: "Build Worker" },
+          { id: "session-docs", name: "Docs Worker" },
+        ],
+      ),
+    ).toEqual({
+      mode: "multiple",
+      candidates: ["Build Worker", "Docs Worker"],
+      targets: [
+        { id: "session-build", name: "Build Worker" },
+        { id: "session-docs", name: "Docs Worker" },
+      ],
+    });
+    expect(
       voiceFocusRouting("switch me over to side beta", [
         { id: "session-primary", name: "Primary Work" },
         { id: "session-beta", name: "Side Beta" },
@@ -948,6 +1091,97 @@ describe("Celeris coordinator conversation", () => {
     };
     const send = request.tools?.find((tool) => tool.function?.name === "send_message");
     expect(send?.function?.description).toContain("Side Beta");
+    expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes distinct instructions to multiple explicit names without exposing ids", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-build",
+            type: "function",
+            function: {
+              name: "send_message",
+              arguments: JSON.stringify({
+                target: "Build Worker",
+                message: "rerun phone audio",
+                delivery: "immediate",
+              }),
+            },
+          },
+          {
+            id: "call-docs",
+            type: "function",
+            function: {
+              name: "send_message",
+              arguments: JSON.stringify({
+                target: "Docs Worker",
+                message: "record first audio",
+                delivery: "queued",
+              }),
+            },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string, args) => {
+      if (name === "check_updates") {
+        return Promise.resolve({
+          focused_session: { id: "session-primary", name: "Primary Work" },
+          known_sessions: [
+            { id: "session-primary", name: "Primary Work" },
+            { id: "session-build", name: "Build Worker" },
+            { id: "session-docs", name: "Docs Worker" },
+          ],
+          updates: [],
+        });
+      }
+      const target = args.session_id === "session-build" ? "Build Worker" : "Docs Worker";
+      return Promise.resolve({
+        accepted: true,
+        delivery: args.delivery,
+        target_session: { id: args.session_id, name: target },
+        updates: [],
+      });
+    });
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "tell build worker to rerun phone audio and queue docs worker a message to record first audio don't switch",
+      ),
+    ).resolves.toBe("I sent that to Build Worker. I queued that for Docs Worker.");
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "send_message", {
+      message: "rerun phone audio",
+      delivery: "immediate",
+      session_id: "session-build",
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(3, "send_message", {
+      message: "record first audio",
+      delivery: "queued",
+      session_id: "session-docs",
+    });
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tools?: Array<{
+        function?: {
+          name?: string;
+          parameters?: {
+            required?: string[];
+            properties?: Record<string, { enum?: string[] }>;
+          };
+        };
+      }>;
+    };
+    const send = request.tools?.find((tool) => tool.function?.name === "send_message");
+    expect(send?.function?.parameters?.required).toContain("target");
+    expect(send?.function?.parameters?.properties?.target?.enum).toEqual([
+      "Build Worker",
+      "Docs Worker",
+    ]);
     expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

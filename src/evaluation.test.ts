@@ -116,6 +116,31 @@ describe("voice harness evaluation", () => {
     });
   });
 
+  it("matches queued frozen results to the requested server-owned session", async () => {
+    const executor = new FrozenCoordinatorExecutor(
+      { focused_session: { id: "session-primary", name: "Primary Work" } },
+      {
+        send_message: [
+          {
+            accepted: true,
+            target_session: { id: "session-build", name: "Build Worker" },
+          },
+          {
+            accepted: true,
+            target_session: { id: "session-docs", name: "Docs Worker" },
+          },
+        ],
+      },
+    );
+
+    await expect(
+      executor.execute("send_message", { session_id: "session-docs" }),
+    ).resolves.toMatchObject({ target_session: { id: "session-docs" } });
+    await expect(
+      executor.execute("send_message", { session_id: "session-build" }),
+    ).resolves.toMatchObject({ target_session: { id: "session-build" } });
+  });
+
   it("replays only coordinator updates newer than the MCP consumer cursor", async () => {
     const executor = new FrozenCoordinatorExecutor({
       focused_session: { id: "session-primary", name: "Primary Work" },
@@ -298,6 +323,50 @@ describe("voice harness evaluation", () => {
         ],
       }).failures,
     ).toEqual(expect.arrayContaining([expect.stringContaining("message omitted")]));
+  });
+
+  it("matches unordered calls of the same tool by target session", () => {
+    const compound: VoiceEvalCase = {
+      ...testCase,
+      expected: {
+        toolSequence: ["send_message", "send_message"],
+        unorderedCallExpectations: [
+          {
+            name: "send_message",
+            sessionId: "session-build",
+            messageTerms: ["phone audio"],
+          },
+          {
+            name: "send_message",
+            sessionId: "session-docs",
+            messageTerms: ["latency numbers"],
+          },
+        ],
+      },
+    };
+    expect(
+      scoreVoiceEval(compound, {
+        ...observation,
+        toolCalls: [
+          {
+            name: "send_message",
+            arguments: {
+              session_id: "session-docs",
+              message: "Write down the latency numbers",
+            },
+            result: { accepted: true },
+          },
+          {
+            name: "send_message",
+            arguments: {
+              session_id: "session-build",
+              message: "Rerun with phone audio",
+            },
+            result: { accepted: true },
+          },
+        ],
+      }).passed,
+    ).toBe(true);
   });
 
   it("rejects invented spoken numbers while allowing configured thresholds", () => {

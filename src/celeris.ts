@@ -95,6 +95,209 @@ interface OpenAiTool {
   };
 }
 
+export class StreamingSpeechSegmenter {
+  private buffer = "";
+  private emittedCharacters = 0;
+  private closed = false;
+
+  public constructor(
+    private readonly maximumCharacters = 300,
+    private readonly preferredChunkCharacters = 120,
+  ) {
+    if (maximumCharacters < 1 || preferredChunkCharacters < 1) {
+      throw new Error("Streaming speech limits must be positive");
+    }
+  }
+
+  public push(fragment: string): string[] {
+    if (this.closed) throw new Error("Streaming speech was already finalized");
+    if (!fragment) return [];
+    this.buffer += fragment;
+    return this.drain(false);
+  }
+
+  public finish(): string[] {
+    if (this.closed) return [];
+    this.closed = true;
+    return this.drain(true);
+  }
+
+  public discard(): void {
+    this.buffer = "";
+    this.closed = true;
+  }
+
+  private drain(final: boolean): string[] {
+    const segments: string[] = [];
+    while (this.buffer && this.emittedCharacters < this.maximumCharacters) {
+      const boundary = this.nextBoundary(final);
+      if (boundary === undefined) break;
+      const raw = this.buffer.slice(0, boundary);
+      this.buffer = this.buffer.slice(boundary).trimStart();
+      const remaining = this.maximumCharacters - this.emittedCharacters;
+      const speech = sanitizeForSpeech(raw, remaining);
+      if (!speech) continue;
+      segments.push(speech);
+      this.emittedCharacters += speech.length;
+      if (this.emittedCharacters >= this.maximumCharacters) this.buffer = "";
+    }
+    return segments;
+  }
+
+  private nextBoundary(final: boolean): number | undefined {
+    const sentence = /[.!?](?:["')\]]+)?(?=\s|$)/g;
+    for (const match of this.buffer.matchAll(sentence)) {
+      const end = (match.index ?? 0) + match[0].length;
+      if (end >= 12 || final) return end;
+    }
+    if (final) return this.buffer.length;
+    if (this.buffer.length < this.preferredChunkCharacters) return undefined;
+
+    const window = this.buffer.slice(0, this.preferredChunkCharacters + 24);
+    const softBoundary = Math.max(
+      window.lastIndexOf(", "),
+      window.lastIndexOf("; "),
+      window.lastIndexOf(": "),
+    );
+    if (softBoundary >= Math.floor(this.preferredChunkCharacters / 2)) {
+      return softBoundary + 1;
+    }
+    const whitespace = window.lastIndexOf(" ");
+    return whitespace > 0 ? whitespace : Math.min(this.buffer.length, this.preferredChunkCharacters);
+  }
+}
+
+interface StreamedCompletion {
+  message: { content?: unknown; tool_calls?: unknown };
+  finishReason: string;
+  promptTokens?: number | undefined;
+  completionTokens?: number | undefined;
+}
+
+interface StreamedToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+const consumeCompletionStream = async (
+  response: Response,
+  onContentDelta: (fragment: string) => void,
+): Promise<StreamedCompletion> => {
+  if (!response.body) throw new Error("Celeris returned an empty stream");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const toolCalls = new Map<number, StreamedToolCall>();
+  let buffer = "";
+  let content = "";
+  let finishReason = "unknown";
+  let promptTokens: number | undefined;
+  let completionTokens: number | undefined;
+
+  const acceptPayload = (data: string): void => {
+    if (!data || data === "[DONE]") return;
+    const payload = JSON.parse(data) as {
+      error?: { message?: unknown } | unknown;
+      choices?: Array<{
+        finish_reason?: unknown;
+        delta?: {
+          content?: unknown;
+          tool_calls?: unknown;
+        };
+      }>;
+      usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+    };
+    if (payload.error) {
+      const detail =
+        typeof payload.error === "object" &&
+        payload.error !== null &&
+        "message" in payload.error &&
+        typeof payload.error.message === "string"
+          ? payload.error.message
+          : "stream error";
+      throw new Error(`Celeris returned a ${detail}`);
+    }
+    if (typeof payload.usage?.prompt_tokens === "number") {
+      promptTokens = payload.usage.prompt_tokens;
+    }
+    if (typeof payload.usage?.completion_tokens === "number") {
+      completionTokens = payload.usage.completion_tokens;
+    }
+    const choice = payload.choices?.[0];
+    if (!choice) return;
+    if (typeof choice.finish_reason === "string") finishReason = choice.finish_reason;
+    const delta = choice.delta;
+    if (!delta) return;
+    if (typeof delta.content === "string" && delta.content) {
+      content += delta.content;
+      onContentDelta(delta.content);
+    }
+    if (!Array.isArray(delta.tool_calls)) return;
+    for (const [fallbackIndex, raw] of delta.tool_calls.entries()) {
+      if (!raw || typeof raw !== "object") continue;
+      const part = raw as {
+        index?: unknown;
+        id?: unknown;
+        type?: unknown;
+        function?: { name?: unknown; arguments?: unknown };
+      };
+      const index = Number.isSafeInteger(part.index) ? Number(part.index) : fallbackIndex;
+      const existing = toolCalls.get(index) ?? {
+        id: "",
+        type: "function" as const,
+        function: { name: "", arguments: "" },
+      };
+      if (typeof part.id === "string") existing.id = part.id;
+      if (typeof part.function?.name === "string") {
+        existing.function.name = existing.function.name
+          ? `${existing.function.name}${part.function.name}`
+          : part.function.name;
+      }
+      if (typeof part.function?.arguments === "string") {
+        existing.function.arguments += part.function.arguments;
+      }
+      toolCalls.set(index, existing);
+    }
+  };
+
+  const acceptEvent = (event: string): void => {
+    const data = event
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+    acceptPayload(data);
+  };
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    let boundary = /\r?\n\r?\n/.exec(buffer);
+    while (boundary?.index !== undefined) {
+      acceptEvent(buffer.slice(0, boundary.index));
+      buffer = buffer.slice(boundary.index + boundary[0].length);
+      boundary = /\r?\n\r?\n/.exec(buffer);
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) acceptEvent(buffer);
+
+  const completedCalls = [...toolCalls.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, call]) => call);
+  return {
+    message: {
+      ...(content ? { content } : {}),
+      ...(completedCalls.length > 0 ? { tool_calls: completedCalls } : {}),
+    },
+    finishReason,
+    ...(promptTokens !== undefined ? { promptTokens } : {}),
+    ...(completionTokens !== undefined ? { completionTokens } : {}),
+  };
+};
+
 export interface VerifiedToolWorkflowOutcome {
   ordered_steps: Array<
     | { operation: "read"; tool: "get_output" | "poll_output"; session: string }
@@ -110,7 +313,7 @@ recent_actions is the authoritative bounded ledger of coordinator actions even w
 last_verified_action_outcome, when present, is the exact voice-harness receipt for the most recent action turn, including any typed failure alongside actions that did succeed. Use it to answer an immediate follow-up about which parts happened; current focused_session remains authoritative for where the user is now.
 last_verified_tool_workflow, when present, is the ordered typed record of successful reads and actions from the most recent tool-using voice turn. Use it to answer whether named sessions were actually read before an action. Never claim a read or ordering absent from that record, and never perform a new read merely to prove what happened in a prior turn.
 pending_decisions is the authoritative list of unresolved structured prompts across sessions. For approval, decline, or cancellation, copy the exact prompt_id and session_id from that list into answer_prompt. Never invent either identifier from a spoken name. A prompt can belong to a session other than the sticky focus; resolving it does not change focus.
-known_sessions is the bounded current name-to-ID map used by the voice harness. A message request that clearly names exactly one known session is routed to that session without changing sticky focus, even though the model-visible send_message schema has no session_id. Use the actual target returned by the tool in your acknowledgement. Never call focus_session merely to deliver a message to an explicitly named session.
+known_sessions is the bounded current name-to-ID map used by the voice harness. A message request that clearly names exactly one known session is routed to that session without changing sticky focus, even though the model-visible send_message schema has no session_id. If the human explicitly gives different instructions to multiple named sessions, call send_message once per destination using only the required target-name enum exposed for that turn. Use the actual targets returned by the tools in your acknowledgement. Never call focus_session merely to deliver a message to an explicitly named session.
 Use list_sessions only when the user asks for a list or explicitly wants a different session that has not been resolved. The coordinator state is a fresh atomic snapshot taken after the human finished speaking. Use its output_delta when it answers a latest/current-state question; call poll_output for stable output that arrived after the previous snapshot, or get_output when older context is needed. get_output page 1 is the most recent page, with typed timestamped items ordered oldest-to-newest like incremental output. Distinguish conversation messages from internal tool or terminal activity. latest_message is the generic newest message and its role says whether it came from the user or assistant. Never claim that state is fresh without coordinator data from this turn.
 send_message defaults to immediate delivery into the focused session. Use queued delivery only when the user explicitly asks to wait until the current turn finishes. After sending, acknowledge the exact target session name returned by the tool. Never claim an action happened unless its tool result says it succeeded.
 Use archive_session only when the user explicitly asks to archive the focused session. Its result deterministically restores the previous focus; tell the user both what was archived and which session is active now.
@@ -128,7 +331,7 @@ If the immediately preceding assistant speech announced a different session, ans
 If the human states that a requested message was missing, not sent, or not received, repeat send_message with the intended message. A declarative correction such as “I don't see the message” after you claimed to send it is a missed-action complaint and requires send_message. An actual question asking whether a message is visible or recent, or explicitly asking to inspect or verify output, is instead a read request: use get_output and never send a message for that question.
 No coordinator action has happened in this human turn yet. If the human asks for an action, or if answering requires current coordinator data, your next output must be the appropriate tool call, not prose. Only a successful tool result later in this turn proves the action happened. The recent_actions ledger describes prior turns and never satisfies a new request. “Another,” “again,” “retry,” “now,” and corrections that an action was missed require a new tool call. Execute tools before speaking. Never say that you will need to pull or check data, offer to check it, ask permission for a read-only check, or promise to perform a tool action after the response; call the tool now.
 An explicit request to switch, focus, or open another session requires focus_session before any speech. Never narrate a focus change from the request alone; only the tool result proves the active session changed.
-voice_message_routing is computed deterministically from this human transcript and known_sessions. When its mode is named, call send_message normally; the harness supplies that exact target without changing focus. When its mode is ambiguous, do not claim to send anything and ask the human to name one target.
+voice_message_routing is computed deterministically from this human transcript and known_sessions. When its mode is named, call send_message normally; the harness supplies that exact target without changing focus. When its mode is multiple, call send_message once for each separately addressed destination and select its exact enum name; the harness resolves every name to a server-owned ID and requires all destinations before speech. When its mode is ambiguous, do not claim to send anything and ask the human to name one target.
 voice_read_routing also resolves a deictic read against authoritative notification history. When its mode is named, call the read tool normally and the harness supplies that exact session. When its mode is ambiguous, do not read or guess; ask the human which named session they mean.
 When the requested message content depends on a missing fact about what a different session found, said, or is doing, first call get_output for that source session. Only after receiving the source result may you call send_message with the grounded finding; never send a placeholder telling the destination merely to inspect or review the source session. If more than one source must be compared, complete every requested read before the send, name each source in the outbound comparison, and preserve the decisive counts, outcomes, and causes. If the human already states the complete finding to relay in the current request, send that supplied content directly without rereading the source.
 The coordinator snapshot immediately above is already current data for this turn. output_delta is the chronological stable output newly available since the prior human snapshot. When output_delta.changed is true and its content answers “latest,” “current,” “what's new,” or “since then,” answer directly from it and do not call get_output. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.
@@ -314,8 +517,9 @@ export const targetsFocusedSession = (input: string, focusedName: unknown): bool
 };
 
 interface VoiceMessageRouting {
-  mode: "focused" | "named" | "ambiguous";
+  mode: "focused" | "named" | "multiple" | "ambiguous";
   target?: { id: string; name: string } | undefined;
+  targets?: Array<{ id: string; name: string }> | undefined;
   candidates?: string[] | undefined;
 }
 
@@ -493,8 +697,21 @@ export const voiceMessageRouting = (
     return { mode: "named", target: directlyAddressed[0] };
   }
   if (directlyAddressed.length > 1) {
+    const eachHasInstruction = directlyAddressed.every(({ name }) => {
+      const phrase = words(name).join(" ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return (
+        new RegExp(`\\b(?:tell|ask|have|steer)(?: the)? ${phrase} to\\b`).test(
+          normalized,
+        ) ||
+        new RegExp(`\\bmessage(?: the)? ${phrase} (?:to|that)\\b`).test(normalized) ||
+        new RegExp(`\\bqueue(?: the)? ${phrase} (?:(?:a )?message )?to\\b`).test(
+          normalized,
+        )
+      );
+    });
     return {
-      mode: "ambiguous",
+      mode: eachHasInstruction ? "multiple" : "ambiguous",
+      ...(eachHasInstruction ? { targets: directlyAddressed } : {}),
       candidates: directlyAddressed.map(({ name }) => name),
     };
   }
@@ -728,6 +945,8 @@ const voiceSafeTool = (
       description:
         routing.mode === "named" && routing.target
           ? `Send the user's request to the explicitly named ${routing.target.name} session without changing focus. The voice harness supplies and verifies the target.`
+          : routing.mode === "multiple" && routing.targets
+            ? `Send one of the user's separate requests to its named destination without changing focus. Select only one of: ${routing.targets.map(({ name }) => name).join(", ")}. The voice harness verifies the name and supplies its server-owned ID.`
           : tool.function.description,
       parameters: {
         type: "object",
@@ -742,8 +961,21 @@ const voiceSafeTool = (
             enum: ["immediate", "queued"],
             description: "Defaults to immediate. Use queued only when explicitly requested.",
           },
+          ...(routing.mode === "multiple" && routing.targets
+            ? {
+                target: {
+                  type: "string",
+                  enum: routing.targets.map(({ name }) => name),
+                  description:
+                    "The exact explicitly addressed session name for this one message.",
+                },
+              }
+            : {}),
         },
-        required: ["message"],
+        required: [
+          "message",
+          ...(routing.mode === "multiple" ? ["target"] : []),
+        ],
         additionalProperties: false,
       },
     },
@@ -1262,7 +1494,37 @@ export class CelerisConversation {
     this.history.push(...messages.map((message) => ({ ...message })));
   }
 
-  public async respond(input: string): Promise<string> {
+  public async warmup(): Promise<void> {
+    if (!this.options.apiKey) return;
+    const started = performance.now();
+    const endpoint = `${this.options.baseUrl.replace(/\/v1\/?$/, "")}/echo`;
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.options.apiKey}`,
+          "content-type": "text/plain",
+        },
+        body: "warm",
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) throw new Error(`Celeris warmup returned HTTP ${response.status}`);
+      await response.arrayBuffer();
+      this.options.logger.info("celeris.connection.warmed", {
+        durationMs: Math.round(performance.now() - started),
+      });
+    } catch (error) {
+      this.options.logger.warn("celeris.connection.warmup_failed", {
+        durationMs: Math.round(performance.now() - started),
+        reason: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  }
+
+  public async respond(
+    input: string,
+    onSpeechSegment?: ((segment: string) => void) | undefined,
+  ): Promise<string> {
     if (!this.options.apiKey) return "Celeris isn't configured right now.";
     this.preemptCompaction();
 
@@ -1414,6 +1676,9 @@ export class CelerisConversation {
       allowedTools.has("focus_session")
         ? ["send_message", "focus_session"]
         : [];
+    const requiredMessageTargets = messageRouting.mode === "multiple"
+      ? (messageRouting.targets ?? [])
+      : [];
     const needsFocusLookup =
       requestsPositiveFocusAction(input) &&
       focusRouting.mode === "model" &&
@@ -1426,6 +1691,7 @@ export class CelerisConversation {
       let forcedToolName: string | undefined = needsFocusLookup
         ? "list_sessions"
         : undefined;
+      const attemptedMessageTargetIds = new Set<string>();
       const executedAcrossRounds: Array<{ name: string; result: JsonObject }> = [];
       const verifiedActionReceipts = (): string[] =>
         executedAcrossRounds
@@ -1442,6 +1708,18 @@ export class CelerisConversation {
           forcedToolName ??
           (round === 0 && missedSendCorrection ? "send_message" : undefined);
         forcedToolName = undefined;
+        // Celeris accepts automatic tool selection on streamed requests, but
+        // named/required tool forcing is deliberately non-streaming.
+        const speechSegmenter = onSpeechSegment && !forcedThisRound
+          ? new StreamingSpeechSegmenter(300)
+          : undefined;
+        let streamedSegments = 0;
+        const emitSegments = (segments: readonly string[]): void => {
+          for (const segment of segments) {
+            streamedSegments += 1;
+            onSpeechSegment?.(segment);
+          }
+        };
         const message = await this.complete(
           messages,
           `round_${round + 1}`,
@@ -1449,11 +1727,15 @@ export class CelerisConversation {
           undefined,
           256,
           forcedThisRound,
+          speechSegmenter
+            ? (fragment) => emitSegments(speechSegmenter.push(fragment))
+            : undefined,
         );
         const calls = Array.isArray(message.tool_calls)
           ? message.tool_calls.map(extractToolCall).filter((call): call is ToolCall => Boolean(call))
           : [];
         if (calls.length === 0) {
+          if (speechSegmenter) emitSegments(speechSegmenter.finish());
           const content = typeof message.content === "string" ? message.content.trim() : "";
           if (!content && !retriedEmptyCompletion) {
             retriedEmptyCompletion = true;
@@ -1476,6 +1758,16 @@ export class CelerisConversation {
           return speech;
         }
 
+        if (speechSegmenter) {
+          speechSegmenter.discard();
+          if (streamedSegments > 0) {
+            this.options.logger.warn("celeris.stream.mixed_tool_content", {
+              phase: `round_${round + 1}`,
+              streamedSegments,
+            });
+          }
+        }
+
         messages.push({ role: "assistant", content: null, tool_calls: calls });
         const executedThisRound: Array<{ name: string; result: JsonObject }> = [];
         const readsInSameCompletion = calls.some(
@@ -1487,6 +1779,7 @@ export class CelerisConversation {
         const deferredMissingSourceNames = new Set<string>();
         for (const call of calls) {
           let args: Record<string, unknown> = {};
+          let resolvedMultipleMessageTarget: VoiceSessionTarget | undefined;
           try {
             const parsed: unknown = JSON.parse(call.function.arguments);
             if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -1501,6 +1794,21 @@ export class CelerisConversation {
             messageRouting.target
           ) {
             args = { ...args, session_id: messageRouting.target.id };
+          }
+          if (
+            call.function.name === "send_message" &&
+            messageRouting.mode === "multiple"
+          ) {
+            const requestedTarget = typeof args.target === "string"
+              ? args.target.trim().toLocaleLowerCase()
+              : "";
+            resolvedMultipleMessageTarget = requiredMessageTargets.find(
+              ({ name }) => name.toLocaleLowerCase() === requestedTarget,
+            );
+            const { target: _target, session_id: _sessionId, ...safeArgs } = args;
+            args = resolvedMultipleMessageTarget
+              ? { ...safeArgs, session_id: resolvedMultipleMessageTarget.id }
+              : safeArgs;
           }
           if (
             call.function.name === "send_message" &&
@@ -1527,6 +1835,27 @@ export class CelerisConversation {
           }
           if (call.function.name === "start_session" && startInstruction) {
             args = { ...args, instruction: startInstruction };
+          }
+          if (
+            call.function.name === "send_message" &&
+            messageRouting.mode === "multiple" &&
+            !resolvedMultipleMessageTarget
+          ) {
+            this.options.logger.info("celeris.tool.deferred", {
+              name: call.function.name,
+              reason: "invalid_multi_target",
+              allowedCount: requiredMessageTargets.length,
+            });
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: JSON.stringify({
+                deferred: true,
+                reason: "No message was sent because target was not an allowed name.",
+                allowed_targets: requiredMessageTargets.map(({ name }) => name),
+              }),
+            });
+            continue;
           }
           if (
             call.function.name === "send_message" &&
@@ -1575,6 +1904,28 @@ export class CelerisConversation {
               });
               continue;
             }
+          }
+          if (
+            call.function.name === "send_message" &&
+            resolvedMultipleMessageTarget
+          ) {
+            if (attemptedMessageTargetIds.has(resolvedMultipleMessageTarget.id)) {
+              this.options.logger.info("celeris.tool.deferred", {
+                name: call.function.name,
+                reason: "duplicate_multi_target",
+              });
+              messages.push({
+                role: "tool",
+                tool_call_id: call.id,
+                content: JSON.stringify({
+                  deferred: true,
+                  reason:
+                    "No duplicate message was sent; this destination was already attempted in the current turn.",
+                }),
+              });
+              continue;
+            }
+            attemptedMessageTargetIds.add(resolvedMultipleMessageTarget.id);
           }
           this.options.logger.info("celeris.tool.called", { name: call.function.name });
           let result: JsonObject;
@@ -1655,6 +2006,19 @@ export class CelerisConversation {
         const missingCompoundActions = [...requiredActions].filter(
           (name) => !attemptedActions.has(name),
         );
+        const missingMessageTargets = requiredMessageTargets.filter(
+          ({ id }) => !attemptedMessageTargetIds.has(id),
+        );
+        if (missingMessageTargets.length > 0) {
+          forcedToolName = "send_message";
+          messages.push({
+            role: "system",
+            content:
+              `The human explicitly requested separate messages to multiple sessions. ` +
+              `Do not answer yet: call send_message once for each remaining destination: ${missingMessageTargets.map(({ name }) => name).join(", ")}. Use each destination's different requested instruction and exact target enum.`,
+          });
+          continue;
+        }
         if (missingCompoundActions.length > 0) {
           if (missingCompoundActions.length === 1) {
             forcedToolName = missingCompoundActions[0];
@@ -1667,7 +2031,8 @@ export class CelerisConversation {
           });
           continue;
         }
-        const receiptExecutions = requiredCompoundActions.length > 0
+        const receiptExecutions =
+          requiredCompoundActions.length > 0 || messageRouting.mode === "multiple"
           ? executedAcrossRounds
           : executedThisRound;
         const failedTools = receiptExecutions
@@ -1856,6 +2221,7 @@ export class CelerisConversation {
     externalSignal?: AbortSignal,
     maxTokens = 256,
     forcedToolName?: string,
+    onContentDelta?: ((fragment: string) => void) | undefined,
   ): Promise<{ content?: unknown; tool_calls?: unknown }> {
     const started = performance.now();
     this.options.logger.info("celeris.request.started", { phase });
@@ -1874,6 +2240,9 @@ export class CelerisConversation {
           temperature: this.options.temperature ?? 0,
           seed: this.options.seed ?? 7,
           messages,
+          ...(onContentDelta
+            ? { stream: true, stream_options: { include_usage: true } }
+            : {}),
           ...(tools.length > 0
             ? {
                 tools,
@@ -1888,6 +2257,41 @@ export class CelerisConversation {
           : controller.signal,
       });
       if (!response.ok) throw new Error(`Celeris returned HTTP ${response.status}`);
+      if (
+        onContentDelta &&
+        response.headers.get("content-type")?.toLocaleLowerCase().includes("text/event-stream")
+      ) {
+        let firstContentLogged = false;
+        const streamed = await consumeCompletionStream(response, (fragment) => {
+          if (!firstContentLogged) {
+            firstContentLogged = true;
+            this.options.logger.info("celeris.response.first_content", {
+              phase,
+              durationMs: Math.round(performance.now() - started),
+            });
+          }
+          onContentDelta(fragment);
+        });
+        const durationMs = Math.round(performance.now() - started);
+        this.options.logger.info("celeris.response.received", {
+          phase,
+          durationMs,
+          finishReason: streamed.finishReason,
+          promptTokens: streamed.promptTokens,
+          completionTokens: streamed.completionTokens,
+          streamed: true,
+        });
+        this.options.trace?.({
+          type: "completion",
+          phase,
+          durationMs,
+          finishReason: streamed.finishReason,
+          promptTokens: streamed.promptTokens,
+          completionTokens: streamed.completionTokens,
+          message: streamed.message,
+        });
+        return streamed.message;
+      }
       const payload = (await response.json()) as {
         choices?: Array<{
           finish_reason?: unknown;
@@ -1898,6 +2302,9 @@ export class CelerisConversation {
       const choice = payload.choices?.[0];
       const message = choice?.message;
       if (!message) throw new Error("Celeris returned no message");
+      if (onContentDelta && typeof message.content === "string" && message.content) {
+        onContentDelta(message.content);
+      }
       const durationMs = Math.round(performance.now() - started);
       const finishReason =
         typeof choice.finish_reason === "string" ? choice.finish_reason : "unknown";

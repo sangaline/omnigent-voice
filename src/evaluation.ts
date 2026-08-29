@@ -131,7 +131,26 @@ export class FrozenCoordinatorExecutor implements CoordinatorExecutor {
       return { ...this.state, updates: updatesAfter(this.state, afterEventId) };
     }
     const envelope = authoritativeEnvelope(this.state, afterEventId);
-    const supplied = this.resultQueues.get(name)?.shift();
+    const queue = this.resultQueues.get(name);
+    let supplied: unknown;
+    if (queue && queue.length > 0) {
+      const requestedSessionId = typeof args.session_id === "string"
+        ? args.session_id
+        : undefined;
+      const matchingIndex = requestedSessionId
+        ? queue.findIndex((candidate) => {
+            if (!isJsonObject(candidate)) return false;
+            if (candidate.session_id === requestedSessionId) return true;
+            const target = isJsonObject(candidate.target_session)
+              ? candidate.target_session
+              : undefined;
+            return target?.id === requestedSessionId;
+          })
+        : -1;
+      [supplied] = matchingIndex >= 0
+        ? queue.splice(matchingIndex, 1)
+        : queue.splice(0, 1);
+    }
     if (isJsonObject(supplied)) {
       const result = { ...envelope, ...supplied };
       for (const key of [
@@ -315,9 +334,12 @@ export const scoreVoiceEval = (
   }
   const unmatchedCalls = [...observation.toolCalls];
   for (const expectedCall of testCase.expected.unorderedCallExpectations ?? []) {
-    const callIndex = expectedCall.name
-      ? unmatchedCalls.findIndex((call) => call.name === expectedCall.name)
-      : 0;
+    const callIndex = unmatchedCalls.findIndex(
+      (call) =>
+        (!expectedCall.name || call.name === expectedCall.name) &&
+        (!expectedCall.sessionId ||
+          call.arguments.session_id === expectedCall.sessionId),
+    );
     const [call] = callIndex >= 0 ? unmatchedCalls.splice(callIndex, 1) : [];
     scoreExpectedCall(expectedCall, call, `named ${expectedCall.name ?? "call"}`);
   }

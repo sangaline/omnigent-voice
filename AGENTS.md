@@ -49,6 +49,20 @@ from the Discord chunk callback sends a real cancellation to the warm bridge;
 do not regress to rendering an unheard long reply before accepting the next TTS
 request. Piper remains selectable with `TTS_RUNTIME=piper`.
 
+Production Celeris requests use OpenAI-compatible SSE whenever the round is not
+forcing a named tool. Complete natural speech segments are queued into one
+continuous Discord/Pocket stream, so the first segment may synthesize while a
+conventional autoregressive provider is still generating later text. Celeris-1
+itself is a diffusion model and currently returns its whole completion in one
+burst: a live 279-character probe delivered the first speech segment at 474 ms
+and completed at 475 ms. Its SSE support therefore provides protocol symmetry,
+not token-level overlap. Do not add fake typing delays or wait to synthesize the
+whole assistant response after that burst. Named tool forcing stays buffered
+because Celeris rejects forced tools on streaming requests. Startup sends the
+documented authenticated `/echo` warmup with a five-second best-effort timeout;
+it invokes no model and establishes the network connection before the caller's
+first turn.
+
 Nemotron replaced the smaller 80 ms NeMo fast-conformer after the live Discord
 transcript showed severe omissions and substitutions. On the host, the 560 ms
 int8 model loaded in about 1.24 seconds at roughly 951 MiB RSS, decoded bundled
@@ -218,8 +232,12 @@ with whether the sent user item appears in the read result.
 The voice harness removes `send_message.session_id` from the model-visible
 schema. Messages default to the focused session; when one known destination is
 explicitly named, deterministic grammar resolves its server-owned ID and the
-harness injects that target without changing focus. Multiple direct
-destinations fail closed. `queue` is message-action language too: ASR phrasing
+harness injects that target without changing focus. If the human gives a clear,
+separate instruction to each of several known destinations, the voice schema
+exposes only those names as a required enum and the harness resolves each to a
+server-owned ID, deduplicates attempts, and requires every destination before
+speech. Merely mentioning several sessions without one clear instruction per
+target still fails closed. `queue` is message-action language too: ASR phrasing
 such as “when Side Worker wraps this one, queue it to …” receives the same named
 ID injection instead of silently defaulting to sticky focus. When a message
 depends on another session's output,

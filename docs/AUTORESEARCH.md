@@ -971,3 +971,65 @@ replays across 21 turns. The mixed form/completion flow separately passed five
 of five after its zero-round paths were added. Every one of the 20 linked
 scenarios therefore has clean post-change evidence without counting transport
 failures as quality results.
+
+### 2026-08-29 — Explicit multi-destination dispatch
+
+Hypothesis H35: the existing fail-closed multi-name routing was sufficient for
+compound voice work. A new ASR-style scenario asked for different instructions
+to Build Worker and Docs Worker without changing sticky focus. The unchanged
+harness completed zero of five scenarios: four model completions contained both
+semantically correct calls, but the safety layer rejected both because it could
+not bind each call to an authoritative destination; one completion omitted a
+destination. This is a harness contract gap rather than a prompt-quality gap.
+
+For a turn that contains one clear tell, ask, message, steer, or queue clause per
+known destination, the voice-facing `send_message` schema now exposes only those
+session names as a required enum. The model never sees an opaque ID. The harness
+resolves the selected name against server-owned state, rejects unknown names,
+deduplicates a repeated destination, and forces another tool round if any
+requested destination was omitted. Multi-name turns without a separate action
+clause for each target remain ambiguous and make no coordinator mutation.
+
+The first scenario passed ten of ten repeated runs. A held-out mixed-delivery
+case initially completed zero of five because normalized ASR grammar removed an
+article before “message to”; widening that exact grammar moved it to four of
+five. The remaining failure was evaluator order bias: the model correctly sent
+both messages in reverse order, while the frozen coordinator assigned FIFO
+results and the judge matched two same-name calls by position. Frozen results
+and unordered call expectations now bind by `session_id`. Both scenarios then
+passed ten of ten runs, including the immediate-versus-queued distinction and a
+typed follow-up audit with unchanged sticky focus.
+
+### 2026-08-29 — Staged text-to-speech overlap audit
+
+Hypothesis H36: the staged path still buffered caller audio or the complete TTS
+waveform. Inspection falsified both possibilities. Every Discord Opus packet is
+already decoded into the same live Nemotron stream while the caller speaks;
+end-of-turn only adds transducer right-context padding and drains final tokens.
+Pocket already emits 80 ms audio chunks directly into Discord. The remaining
+batch boundary was the Celeris JSON completion: Pocket did not start until the
+full assistant text had returned.
+
+Non-forced production rounds now request OpenAI-compatible SSE, assemble
+fragmented content and tool calls, and feed natural speech segments into one
+continuous cancellable Pocket/Discord stream. A tool-bearing round never speaks
+its argument fragments. Named tool forcing remains non-streaming because the
+service rejects forced tools on a streaming request. Startup also issues the
+documented best-effort authenticated `/echo` call, which consumes no inference
+quota and warms DNS, TLS, and the HTTP connection before the first voice turn.
+
+The expected token-level gain was not available from this model. Celeris-1 is a
+diffusion model whose [latency contract](https://docs.celeris.ai/cookbook/latency)
+says the whole reply normally arrives in one burst. A production-shaped live
+probe confirmed it: a 279-character, three-sentence answer emitted its first
+speech segment at 474 ms and completed at 475 ms; all three segments arrived in
+the same millisecond. The correct low-latency behavior is therefore to start
+Pocket immediately on that burst, not invent progressive delays. If the API
+later produces granular deltas, the same queue will overlap later text with
+first-sentence synthesis without another architecture change.
+
+Result: accepted as a deployment candidate. The conventional gate is a clean
+typecheck and 85 tests. The isolated harness corpus passed all 29 cases; two HTTP
+429 trials were excluded and passed on immediate individual reruns. The full
+stateful gate passed 22 of 22 scenarios and all 82 linked turns, while both new
+multi-destination scenarios also passed ten of ten stability runs separately.

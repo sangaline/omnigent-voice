@@ -3316,5 +3316,301 @@
         }
       }
     ]
+  },
+  {
+    "id": "two_explicit_destination_sends",
+    "description": "Send two different user-supplied instructions to two explicitly named background sessions in one ASR-style turn, preserve sticky focus, and audit both typed deliveries.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false },
+        { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "okay tell build worker to rerun the barge in test with phone audio and tell docs worker to write down the latency numbers but don't switch me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false },
+            { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": [
+            {
+              "accepted": true,
+              "delivery": "immediate",
+              "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "recent_actions": [
+                {
+                  "action_id": 321,
+                  "type": "message_sent",
+                  "session_id": "session-build",
+                  "name": "Build Worker",
+                  "delivery": "immediate",
+                  "message": "Rerun the barge-in test with phone audio.",
+                  "summary": "Sent immediately to Build Worker: rerun the barge-in test with phone audio."
+                }
+              ]
+            },
+            {
+              "accepted": true,
+              "delivery": "immediate",
+              "target_session": { "id": "session-docs", "name": "Docs Worker", "status": "idle" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "recent_actions": [
+                {
+                  "action_id": 321,
+                  "type": "message_sent",
+                  "session_id": "session-build",
+                  "name": "Build Worker",
+                  "delivery": "immediate",
+                  "message": "Rerun the barge-in test with phone audio.",
+                  "summary": "Sent immediately to Build Worker: rerun the barge-in test with phone audio."
+                },
+                {
+                  "action_id": 322,
+                  "type": "message_sent",
+                  "session_id": "session-docs",
+                  "name": "Docs Worker",
+                  "delivery": "immediate",
+                  "message": "Write down the latency numbers.",
+                  "summary": "Sent immediately to Docs Worker: write down the latency numbers."
+                }
+              ]
+            }
+          ]
+        },
+        "expected": {
+          "toolSequence": ["send_message", "send_message"],
+          "forbiddenTools": ["focus_session"],
+          "unorderedCallExpectations": [
+            {
+              "name": "send_message",
+              "sessionId": "session-build",
+              "messageTerms": ["rerun", "barge", "phone audio"],
+              "delivery": "not_queued"
+            },
+            {
+              "name": "send_message",
+              "sessionId": "session-docs",
+              "messageTerms": ["write", "latency numbers"],
+              "delivery": "not_queued"
+            }
+          ],
+          "speechTerms": ["build worker", "docs worker"],
+          "speechAnyTerms": [["sent", "told"]],
+          "maxRounds": 3
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait did both of those really happen and where am i now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false },
+            { "id": "session-docs", "name": "Docs Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 321,
+              "type": "message_sent",
+              "session_id": "session-build",
+              "name": "Build Worker",
+              "delivery": "immediate",
+              "message": "Rerun the barge-in test with phone audio.",
+              "summary": "Sent immediately to Build Worker: rerun the barge-in test with phone audio."
+            },
+            {
+              "action_id": 322,
+              "type": "message_sent",
+              "session_id": "session-docs",
+              "name": "Docs Worker",
+              "delivery": "immediate",
+              "message": "Write down the latency numbers.",
+              "summary": "Sent immediately to Docs Worker: write down the latency numbers."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["send_message", "focus_session"],
+          "speechTerms": ["build worker", "docs worker", "primary work"],
+          "speechAnyTerms": [["sent", "happened", "recorded"]],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "two_destinations_mixed_delivery",
+    "description": "Route distinct instructions to two explicitly named background sessions with different delivery timing, preserve sticky focus, and audit which destination was queued.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "uh tell docs worker to record the first audio timing and queue build worker a message to rerun the long reply after this turn don't move me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": [
+            {
+              "accepted": true,
+              "delivery": "immediate",
+              "target_session": { "id": "session-docs", "name": "Docs Worker", "status": "idle" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "recent_actions": [
+                {
+                  "action_id": 331,
+                  "type": "message_sent",
+                  "session_id": "session-docs",
+                  "name": "Docs Worker",
+                  "delivery": "immediate",
+                  "message": "Record the first-audio timing.",
+                  "summary": "Sent immediately to Docs Worker: record the first-audio timing."
+                }
+              ]
+            },
+            {
+              "accepted": true,
+              "delivery": "queued",
+              "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "recent_actions": [
+                {
+                  "action_id": 331,
+                  "type": "message_sent",
+                  "session_id": "session-docs",
+                  "name": "Docs Worker",
+                  "delivery": "immediate",
+                  "message": "Record the first-audio timing.",
+                  "summary": "Sent immediately to Docs Worker: record the first-audio timing."
+                },
+                {
+                  "action_id": 332,
+                  "type": "message_queued",
+                  "session_id": "session-build",
+                  "name": "Build Worker",
+                  "delivery": "queued",
+                  "message": "Rerun the long reply after the current turn.",
+                  "summary": "Queued for Build Worker after its current turn: rerun the long reply."
+                }
+              ]
+            }
+          ]
+        },
+        "expected": {
+          "toolSequence": ["send_message", "send_message"],
+          "forbiddenTools": ["focus_session"],
+          "unorderedCallExpectations": [
+            {
+              "name": "send_message",
+              "sessionId": "session-docs",
+              "messageTerms": ["record", "first audio", "timing"],
+              "delivery": "not_queued"
+            },
+            {
+              "name": "send_message",
+              "sessionId": "session-build",
+              "messageTerms": ["rerun", "long reply"],
+              "delivery": "queued"
+            }
+          ],
+          "speechTerms": ["docs worker", "build worker"],
+          "speechAnyTerms": [["queued"], ["sent", "told"]],
+          "maxRounds": 3
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay which one did you queue and which one went now and where am i",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-docs", "name": "Docs Worker", "status": "running", "focused": false },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 331,
+              "type": "message_sent",
+              "session_id": "session-docs",
+              "name": "Docs Worker",
+              "delivery": "immediate",
+              "message": "Record the first-audio timing.",
+              "summary": "Sent immediately to Docs Worker: record the first-audio timing."
+            },
+            {
+              "action_id": 332,
+              "type": "message_queued",
+              "session_id": "session-build",
+              "name": "Build Worker",
+              "delivery": "queued",
+              "message": "Rerun the long reply after the current turn.",
+              "summary": "Queued for Build Worker after its current turn: rerun the long reply."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["send_message", "focus_session", "get_output"],
+          "speechTerms": ["build worker", "docs worker", "primary work"],
+          "speechAnyTerms": [["queued"], ["sent", "immediate", "went"]],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

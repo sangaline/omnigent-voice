@@ -8,10 +8,14 @@ Work is queued asynchronously, so the spoken acknowledgement does not wait for
 a coding agent to finish. Speech is synthesized locally and streamed back into
 the same voice channel.
 
-ASR runs incrementally while the caller is speaking. Celeris responses are
-short completions, then a persistent, int8 Pocket TTS runtime begins natural
-24 kHz speech in roughly 34-39 ms. Every generated 80 ms audio chunk is sent to
-Discord immediately; the complete reply is never buffered before playback.
+ASR runs incrementally while the caller is speaking. Non-forced Celeris rounds
+use its SSE interface and complete natural speech segments feed one continuous
+TTS queue. Celeris-1 currently generates a complete diffusion-model response in
+one burst rather than token by token, so there is normally no model-generation
+window to overlap; Pocket starts on the first segment as soon as that burst
+arrives. The persistent int8 Pocket runtime begins natural 24 kHz speech in
+roughly 34-39 ms. Every generated 80 ms audio chunk is sent to Discord
+immediately; the complete audio reply is never buffered before playback.
 If the caller barges in, Discord playback and the in-progress Pocket generation
 are both cancelled so the next turn does not wait behind discarded audio.
 Piper remains available with `TTS_RUNTIME=piper` as a lower-quality fallback.

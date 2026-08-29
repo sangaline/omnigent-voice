@@ -59,6 +59,13 @@ interface DiscordVoiceOptions {
   s2s?: KameS2SRuntime | undefined;
 }
 
+interface StagedSpeechStream {
+  enqueue(text: string): void;
+  finish(): Promise<boolean>;
+  cancel(): void;
+  readonly queuedSegments: number;
+}
+
 export class DiscordVoiceBot {
   private readonly client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
@@ -536,20 +543,125 @@ export class DiscordVoiceBot {
   }
 
   private async processTurn(transcript: string, epoch: number): Promise<void> {
+    const stagedSpeech = this.options.s2s
+      ? undefined
+      : this.beginStagedSpeechStream(epoch);
     try {
-      const spoken = await this.options.celeris.respond(transcript);
+      const spoken = await this.options.celeris.respond(transcript, (segment) => {
+        if (epoch !== this.responseEpoch) return;
+        stagedSpeech?.enqueue(segment);
+      });
       this.options.logger.info("conversation.assistant.generated", {
         text: spoken,
         superseded: epoch !== this.responseEpoch,
+        streamedSegments: stagedSpeech?.queuedSegments ?? 0,
       });
-      if (epoch !== this.responseEpoch) return;
-      await this.deliverSpeech(spoken, epoch);
+      if (epoch !== this.responseEpoch) {
+        stagedSpeech?.cancel();
+        return;
+      }
+      if (stagedSpeech) {
+        if (stagedSpeech.queuedSegments === 0) stagedSpeech.enqueue(spoken);
+        await stagedSpeech.finish();
+      } else {
+        await this.deliverSpeech(spoken, epoch);
+      }
     } catch (error) {
+      stagedSpeech?.cancel();
       this.options.logger.error("voice.turn.failed", error);
       if (epoch === this.responseEpoch) {
         await this.deliverSpeech("I couldn't reach the coordination layer.", epoch);
       }
     }
+  }
+
+  private beginStagedSpeechStream(epoch: number): StagedSpeechStream {
+    const playbackEpoch = ++this.playbackEpoch;
+    const audioStream = new PassThrough();
+    const resource = createAudioResource(audioStream, { inputType: StreamType.Raw });
+    let playbackStarted: number | undefined;
+    let accepting = true;
+    let queuedSegments = 0;
+    let tail: Promise<void> = Promise.resolve();
+
+    const active = (): boolean =>
+      accepting &&
+      epoch === this.responseEpoch &&
+      playbackEpoch === this.playbackEpoch;
+
+    const enqueue = (text: string): void => {
+      const segment = text.trim();
+      if (!segment || !active()) return;
+      queuedSegments += 1;
+      const segmentNumber = queuedSegments;
+      tail = tail.then(async () => {
+        if (!active()) return;
+        this.options.logger.info("tts.text_segment.started", {
+          segment: segmentNumber,
+          characters: segment.length,
+        });
+        await this.options.speech.synthesizeStreaming(segment, (audio) => {
+          if (!active()) return false;
+          const pcm = monoFloatToStereoPcm16(
+            resampleLinear(audio.samples, audio.sampleRate, 48_000),
+          );
+          audioStream.write(pcm);
+          if (playbackStarted === undefined) {
+            playbackStarted = performance.now();
+            this.player.play(resource);
+            this.options.logger.info("conversation.assistant.playback_started", {
+              text: segment,
+              retry: 0,
+              streamed: true,
+            });
+            this.options.logger.info("discord.playback.started", { streamed: true });
+          }
+          return true;
+        });
+      });
+    };
+
+    const cancel = (): void => {
+      if (!accepting) return;
+      accepting = false;
+      audioStream.destroy();
+    };
+
+    const finish = async (): Promise<boolean> => {
+      try {
+        await tail;
+        if (!active()) {
+          cancel();
+          return false;
+        }
+        accepting = false;
+        audioStream.end();
+        if (playbackStarted === undefined) return false;
+        await entersState(this.player, AudioPlayerStatus.Idle, 15 * 60_000);
+        if (playbackEpoch !== this.playbackEpoch || epoch !== this.responseEpoch) {
+          this.options.logger.info("discord.playback.interrupted", { streamed: true });
+          return false;
+        }
+        this.options.logger.info("discord.playback.finished", {
+          durationMs: Math.round(performance.now() - playbackStarted),
+          streamed: true,
+          segments: queuedSegments,
+        });
+        return true;
+      } catch (error) {
+        cancel();
+        throw error;
+      }
+    };
+
+    return {
+      enqueue,
+      finish,
+      cancel,
+      get queuedSegments() {
+        return queuedSegments;
+      },
+    };
   }
 
   private async deliverSpeech(text: string, epoch: number): Promise<boolean> {
