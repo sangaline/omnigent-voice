@@ -27,8 +27,9 @@ layer -> direct spoken reply or small Omnigent MCP coordinator tools -> local
 sherpa-onnx TTS -> Discord voice. Coordinator actions return immediately;
 Celeris never waits for a coding agent to complete work before acknowledging it.
 
-The bundled runtime models are the int8 80 ms NeMo fast-conformer transducer
-and Piper US English Lessac medium. Both run on CPU through `sherpa-onnx-node`; model
+The bundled runtime models are the int8 0.6B Nemotron English streaming
+transducer with 560 ms chunks and Piper US English Lessac medium. Both run on
+CPU through `sherpa-onnx-node`; model
 archives and checksums belong in the container build, never in git. TTS progress
 chunks stream into Discord as they are generated; do not regress to buffering a
 complete utterance before playback. Each Discord utterance also owns a live ASR
@@ -38,6 +39,14 @@ drain. Do not regress to accumulating the full waveform before recognition.
 Piper replaced Kokoro because same-host measurements reduced first TTS audio
 from roughly 0.9-1.2 seconds to 35-52 ms and full generation from 2.2-3.5
 seconds to 87-190 ms for short voice replies.
+
+Nemotron replaced the smaller 80 ms NeMo fast-conformer after the live Discord
+transcript showed severe omissions and substitutions. On the host, the 560 ms
+int8 model loaded in about 1.24 seconds at roughly 951 MiB RSS, decoded bundled
+samples at about 0.08 realtime, and flushed final tokens in about 42 ms. Its
+chunk latency is overlapped with live speech. The verified model archive is
+463,945,051 bytes; accuracy must be judged through live phone tests because the
+formal bundled samples were transcribed correctly by both models.
 
 The bot auto-discovers its voice channel only when exactly one accessible guild
 and voice channel exist. Explicit runtime IDs override discovery. Discord's raw

@@ -9,10 +9,10 @@ WORKDIR /models
 RUN set -eu; \
     curl -fsSL --retry 3 \
       -o /tmp/asr.tar.bz2 \
-      https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8.tar.bz2; \
-    echo '7bd33a914e93370a1ba9c2066d9e841bdcad8613fa2a00537c1ae15d851a14d8  /tmp/asr.tar.bz2' | sha256sum -c -; \
+      https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2; \
+    echo '78e2b79fcf7271553a74402a76b771b09ea40117a39566a79f52235b23db6358  /tmp/asr.tar.bz2' | sha256sum -c -; \
     tar -xjf /tmp/asr.tar.bz2; \
-    mv sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8 asr; \
+    mv sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25 asr; \
     rm /tmp/asr.tar.bz2
 
 RUN set -eu; \
