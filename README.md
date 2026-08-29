@@ -17,11 +17,13 @@ one container, and no text or web interface.
 
 An optional guided speech-to-speech experiment keeps the same coordinator but
 replaces staged playback with native KAME Q4/Vulkan audio. Discord audio is fed
-to KAME and local streaming ASR concurrently; verified Celeris results are
-injected into KAME's oracle-text stream. Set `VOICE_RUNTIME=kame` and mount the
-required model files to enable it. `VOICE_RUNTIME=staged` retains the original
+to local streaming ASR immediately and through a short bounded delay before
+KAME, allowing verified Celeris results to reach the oracle-text stream before
+the model observes the user's endpoint. Native audio is fail-closed outside a
+verified response. Set `VOICE_RUNTIME=kame` and mount the required model files
+to enable the experiment. `VOICE_RUNTIME=staged` retains the original
 ASR/Celeris/Piper path as an immediate fallback. See `docs/S2S.md` for the
-native protocol and safety gate.
+native protocol, incident record, and live-test gates.
 
 Structured JSON logs are written to stdout. When `LOG_FILE` is set, the same
 events are appended to that file for durable retention. Conversation events

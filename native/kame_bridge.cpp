@@ -25,6 +25,8 @@ struct Options {
     const char * device = "Vulkan0";
     const char * prompt = nullptr;
     int context = 3000;
+    float depth_temperature = 0.8f;
+    float text_temperature = 0.7f;
     int benchmark_frames = 0;
     int warmup_frames = 20;
 };
@@ -33,6 +35,7 @@ struct Options {
     std::fprintf(stderr,
         "usage: %s --config PATH --model PATH --mimi PATH --tokenizer PATH "
         "[--device NAME] [--context FRAMES] [--prompt TEXT] "
+        "[--depth-temperature N] [--text-temperature N] "
         "[--benchmark-frames N] [--warmup-frames N]\n",
         program);
     std::exit(2);
@@ -51,6 +54,11 @@ Options parse_options(int argc, char ** argv) {
         else if (argument == "--device") options.device = value;
         else if (argument == "--prompt") options.prompt = value;
         else if (argument == "--context") options.context = std::atoi(value);
+        else if (argument == "--depth-temperature") {
+            options.depth_temperature = std::strtof(value, nullptr);
+        } else if (argument == "--text-temperature") {
+            options.text_temperature = std::strtof(value, nullptr);
+        }
         else if (argument == "--benchmark-frames") {
             options.benchmark_frames = std::atoi(value);
         } else if (argument == "--warmup-frames") {
@@ -59,7 +67,8 @@ Options parse_options(int argc, char ** argv) {
         else usage(argv[0]);
     }
     if (!options.config || !options.model || !options.mimi || !options.tokenizer ||
-        options.context <= 0 || options.benchmark_frames < 0 ||
+        options.context <= 0 || options.depth_temperature <= 0.0f ||
+        options.text_temperature <= 0.0f || options.benchmark_frames < 0 ||
         options.warmup_frames < 0) {
         usage(argv[0]);
     }
@@ -222,7 +231,8 @@ int main(int argc, char ** argv) {
     moshi_lm_kame_oracle_text(generator, tokenizer, "warmup", true);
     moshi_lm_kame_oracle_text(
         generator, tokenizer, options.prompt ? options.prompt : "", true);
-    moshi_lm_start(moshi, generator, 0.8f, 0.7f);
+    moshi_lm_start(moshi, generator, options.depth_temperature,
+        options.text_temperature);
 
     const int control_flags = ::fcntl(kControlFd, F_GETFL);
     if (control_flags >= 0) ::fcntl(kControlFd, F_SETFL, control_flags | O_NONBLOCK);

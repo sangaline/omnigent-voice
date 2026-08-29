@@ -429,19 +429,27 @@ and one-token-per-frame queue to pinned `Codes4Fun/moshi.cpp`, while
 `native/kame_bridge.cpp` exposes raw 24 kHz float32 audio over stdin/stdout and
 guidance/events on descriptors 3/4. `src/s2s.ts` owns the subprocess and
 `src/discord.ts` clocks 80 ms full-duplex frames while the existing local ASR
-runs in parallel. Celeris tool results replace oracle guidance; KAME's generated
+runs in parallel. Local ASR sees packets immediately, while KAME receives them
+through `KAME_INPUT_DELAY_MS` (640 ms by default) so final verified Celeris
+guidance arrives before KAME observes the caller endpoint. Celeris tool results replace oracle guidance; KAME's generated
 text and rolling frame tails are retained in structured runtime logs. Model
 weights remain external runtime mounts. See `docs/S2S.md`.
 
+Native Discord output is fail-closed: all frames are dropped outside a verified
+guided transaction, and the gate closes immediately on completion, timeout,
+barge-in, abort, or shutdown. Normal completion is eight silent frames. The
+10-120 second guidance-length-scaled completion timeout is only a runaway
+watchdog; never replace normal endpointing with a fixed response-duration cap.
+
 Unsolicited coordinator updates retain one audible voice. Local TTS generates a
 short input-side question that is fed only into KAME after idle; the user never
-hears that trigger. The verified Celeris update is injected when the hidden
-input drains. KAME output must cross the speech-energy threshold and then
+hears that trigger. The verified Celeris update is injected while the hidden
+input enters KAME. KAME output must cross the speech-energy threshold and then
 produce eight silent frames before the event cursor advances. Normal guided
 replies are tracked with the same detector for durable playback logs. Merely
 accepting oracle tokens is not evidence that Discord received speech.
-Proactive KAME output has a five-second speech-start deadline and a separate
-30-second completion deadline once speech begins. If the first hidden-input
+Proactive KAME output has a five-second speech-start deadline and the same
+guidance-scaled completion watchdog once speech begins. If the first hidden-input
 turn produces no speech, retry it once with a fresh hidden input. If both
 attempts fail, retain and requeue the coordinator event; never advance its
 cursor or silently discard it. A human turn may preempt this retry normally.
@@ -453,12 +461,19 @@ A live contention probe produced three queued audible KAME transactions with no
 overlap between their `delivery_started`/`delivery_finished` intervals; the
 probe sessions were archived after verification.
 
-The first live Discord deployment verified two proactive turns end to end.
-Hidden-trigger synthesis took 90-97 ms, KAME speech began 1.17-1.82 seconds
-after guidance, and detected output lasted 6.32-10.72 seconds. Rolling
-steady-state means were 63.96-64.42 ms with p95 no higher than 65.38 ms and no
-post-warmup frame above 71.92 ms. A real phone conversation is still required
-for subjective voice, barge-in, and noise evaluation.
+The first live phone rollout failed despite earlier proactive probes. Discord
+received and ASR recognized three real turns, but the implementation forwarded
+KAME's continuous unguided output from startup. Four responses timed out, seven
+were interrupted, and 52 input-backlog warnings occurred. The deployment was
+stopped. Never cite the earlier proactive probe as a live quality gate.
+
+The post-incident four-turn offline test independently transcribes gated KAME
+audio. A 720 ms input delay with a conservative 400 ms simulated guidance cost
+passed two sequences totaling seven turns with 77.8-100% guidance-word recall.
+A 28-word answer produced 12.8 seconds of audio, ended naturally, and scored
+96.4%. A 400 ms delay missed turns and is rejected. Use `npm run s2s:smoke`
+inside an isolated GPU runtime with the model path variables; Discord must stay
+disconnected during this test. A controlled live phone test remains mandatory.
 
 ## Commands
 
@@ -471,6 +486,7 @@ npm run eval -- --api-key-file /private/path/celeris-key
 npm run eval:scenarios -- --api-key-file /private/path/celeris-key
 npm run dev
 npm run mcp
+npm run s2s:smoke
 podman build -t omnigent-voice:dev .
 experiments/personaplex/run-benchmark.sh --mode both
 ```

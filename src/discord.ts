@@ -34,7 +34,12 @@ import { SemanticEndpointRuntime, TailAudioBuffer } from "./endpoint.js";
 import { Logger } from "./log.js";
 import { shouldScheduleCoordinatorNotification } from "./notification.js";
 import { LocalSpeech } from "./speech.js";
-import { KameS2SRuntime } from "./s2s.js";
+import {
+  KameS2SRuntime,
+  DelayedS2SInput,
+  S2SAudioGate,
+  s2sCompletionTimeoutMs,
+} from "./s2s.js";
 
 interface DiscordVoiceOptions {
   token: string;
@@ -46,6 +51,7 @@ interface DiscordVoiceOptions {
   bargeInPeak: number;
   endpointFallbackMs: number;
   endpoint?: SemanticEndpointRuntime | undefined;
+  s2sInputDelayMs: number;
   logger: Logger;
   speech: LocalSpeech;
   coordinator: OmnigentCoordinator;
@@ -76,11 +82,10 @@ export class DiscordVoiceBot {
   private unsubscribeS2SAudio?: () => void;
   private s2sTimer?: NodeJS.Timeout | undefined;
   private s2sOutput?: PassThrough;
-  private readonly s2sInputChunks: Float32Array[] = [];
-  private s2sInputOffset = 0;
-  private s2sQueuedSamples = 0;
+  private readonly s2sInput = new DelayedS2SInput();
   private s2sResponseAbort: AbortController | undefined;
   private s2sResponseActive = false;
+  private readonly s2sOutputGate = new S2SAudioGate();
   private activeUserTurns = 0;
   private responseEpoch = 0;
   private playbackEpoch = 0;
@@ -132,6 +137,7 @@ export class DiscordVoiceBot {
     if (this.s2sTimer) clearTimeout(this.s2sTimer);
     this.notificationAbort?.abort();
     this.s2sResponseAbort?.abort();
+    this.s2sOutputGate.close();
     this.unsubscribeCoordinator?.();
     this.unsubscribeS2SAudio?.();
     this.s2sOutput?.end();
@@ -179,7 +185,7 @@ export class DiscordVoiceBot {
     this.s2sOutput = output;
     this.player.play(createAudioResource(output, { inputType: StreamType.Raw }));
     this.unsubscribeS2SAudio = s2s.subscribeAudio((audio) => {
-      if (this.shuttingDown) return;
+      if (this.shuttingDown || !this.s2sOutputGate.isOpen) return;
       const pcm = monoFloatToStereoPcm16(
         resampleLinear(audio, s2s.ready.sampleRate, 48_000),
       );
@@ -211,63 +217,28 @@ export class DiscordVoiceBot {
     });
   }
 
-  private queueS2SInput(samples: Float32Array, warnOnBacklog = true): void {
+  private queueS2SInput(
+    samples: Float32Array,
+    warnOnBacklog = true,
+    delayMs = this.options.s2sInputDelayMs,
+  ): void {
     if (!this.options.s2s || samples.length === 0) return;
-    this.s2sInputChunks.push(samples);
-    this.s2sQueuedSamples += samples.length;
-    const queuedMs = (this.s2sQueuedSamples / this.options.s2s.ready.sampleRate) * 1_000;
-    if (warnOnBacklog && queuedMs > 500) {
+    const now = performance.now();
+    this.s2sInput.push(samples, now + delayMs);
+    const lagMs = this.s2sInput.lagMs(now);
+    if (warnOnBacklog && lagMs > 500) {
       this.options.logger.warn("s2s.input.audio_backlog", {
-        queuedMs: Math.round(queuedMs),
+        queuedMs: Math.round(lagMs),
       });
     }
   }
 
   private takeS2SInputFrame(frameSize: number): Float32Array {
-    const output = new Float32Array(frameSize);
-    let written = 0;
-    while (written < frameSize && this.s2sInputChunks.length > 0) {
-      const chunk = this.s2sInputChunks[0]!;
-      const available = chunk.length - this.s2sInputOffset;
-      const count = Math.min(frameSize - written, available);
-      output.set(chunk.subarray(this.s2sInputOffset, this.s2sInputOffset + count), written);
-      written += count;
-      this.s2sInputOffset += count;
-      this.s2sQueuedSamples -= count;
-      if (this.s2sInputOffset >= chunk.length) {
-        this.s2sInputChunks.shift();
-        this.s2sInputOffset = 0;
-      }
-    }
-    return output;
+    return this.s2sInput.take(frameSize, performance.now());
   }
 
   private clearS2SInput(): void {
-    this.s2sInputChunks.splice(0);
-    this.s2sInputOffset = 0;
-    this.s2sQueuedSamples = 0;
-  }
-
-  private async waitForS2SInputDrain(
-    epoch: number,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const deadline = performance.now() + 15_000;
-    while (
-      this.s2sQueuedSamples > 0 &&
-      !this.shuttingDown &&
-      epoch === this.responseEpoch &&
-      !signal?.aborted &&
-      performance.now() < deadline
-    ) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    }
-    return (
-      this.s2sQueuedSamples === 0 &&
-      !this.shuttingDown &&
-      epoch === this.responseEpoch &&
-      !signal?.aborted
-    );
+    this.s2sInput.clear();
   }
 
   private onSpeakingStart(userId: string): void {
@@ -393,7 +364,9 @@ export class DiscordVoiceBot {
         transcription.accept(samples);
         const packetPeak = peakAmplitude(samples);
         if (inputEpoch === undefined && packetPeak >= this.options.bargeInPeak) {
-          const interruptedPlayback = this.player.state.status !== AudioPlayerStatus.Idle;
+          const interruptedPlayback = this.options.s2s
+            ? this.s2sOutputGate.isOpen
+            : this.player.state.status !== AudioPlayerStatus.Idle;
           inputEpoch = ++this.responseEpoch;
           this.s2sResponseAbort?.abort();
           if (!this.options.s2s) {
@@ -551,7 +524,7 @@ export class DiscordVoiceBot {
   private async deliverSpeech(text: string, epoch: number): Promise<boolean> {
     if (!text || epoch !== this.responseEpoch) return false;
     if (this.options.s2s) {
-      return this.guideS2S(text, epoch, false);
+      return this.guideS2S(text, epoch, false, undefined, undefined, true);
     }
     return this.speak(text, epoch);
   }
@@ -562,23 +535,34 @@ export class DiscordVoiceBot {
     waitForCompletion: boolean,
     parentSignal?: AbortSignal,
     timeouts?: { startMs: number; completionMs: number },
+    allowSilentRetry = false,
   ): Promise<boolean> {
     const s2s = this.options.s2s;
     if (!s2s || !text || epoch !== this.responseEpoch || parentSignal?.aborted) {
       return false;
     }
     this.s2sResponseAbort?.abort();
+    const outputGeneration = this.s2sOutputGate.begin();
     const controller = new AbortController();
     this.s2sResponseAbort = controller;
     const abort = (): void => controller.abort();
     parentSignal?.addEventListener("abort", abort, { once: true });
+    controller.signal.addEventListener(
+      "abort",
+      () => this.s2sOutputGate.close(outputGeneration),
+      { once: true },
+    );
     this.s2sResponseActive = true;
     let playbackStarted: number | undefined;
     const completion = s2s.waitForSpeechTurn({
       signal: controller.signal,
-      startTimeoutMs: timeouts?.startMs,
-      completionTimeoutMs: timeouts?.completionMs,
+      startTimeoutMs: timeouts?.startMs ?? 3_000,
+      completionTimeoutMs: Math.min(
+        timeouts?.completionMs ?? Number.POSITIVE_INFINITY,
+        s2sCompletionTimeoutMs(text),
+      ),
       onStarted: () => {
+        if (!this.s2sOutputGate.open(outputGeneration)) return;
         playbackStarted = performance.now();
         this.options.logger.info("conversation.assistant.playback_started", {
           text,
@@ -592,6 +576,7 @@ export class DiscordVoiceBot {
 
     const settle = async (): Promise<boolean> => {
       const completed = await completion;
+      this.s2sOutputGate.close(outputGeneration);
       parentSignal?.removeEventListener("abort", abort);
       if (this.s2sResponseAbort === controller) {
         this.s2sResponseAbort = undefined;
@@ -611,12 +596,58 @@ export class DiscordVoiceBot {
           characters: text.length,
         });
       }
+      if (
+        allowSilentRetry &&
+        !completed &&
+        playbackStarted === undefined &&
+        !controller.signal.aborted &&
+        !parentSignal?.aborted &&
+        epoch === this.responseEpoch
+      ) {
+        this.options.logger.warn("s2s.response.retry", { reason: "no_speech" });
+        return this.retrySilentS2SResponse(text, epoch, parentSignal);
+      }
       this.scheduleCoordinatorNotification();
       return completed;
     };
     if (waitForCompletion) return settle();
     void settle();
     return !controller.signal.aborted;
+  }
+
+  private async retrySilentS2SResponse(
+    text: string,
+    epoch: number,
+    parentSignal?: AbortSignal,
+  ): Promise<boolean> {
+    if (!this.options.s2s || parentSignal?.aborted || epoch !== this.responseEpoch) {
+      return false;
+    }
+    this.clearS2SInput();
+    let samples = 0;
+    try {
+      await this.options.speech.synthesizeStreaming("Could you answer that?", (audio) => {
+        if (parentSignal?.aborted || epoch !== this.responseEpoch) return false;
+        const trigger = resampleLinear(
+          audio.samples,
+          audio.sampleRate,
+          this.options.s2s!.ready.sampleRate,
+        );
+        samples += trigger.length;
+        this.queueS2SInput(trigger, false, 0);
+        return true;
+      });
+    } catch (error) {
+      this.options.logger.error("s2s.response.retry_trigger_failed", error);
+      return false;
+    }
+    if (samples === 0 || parentSignal?.aborted || epoch !== this.responseEpoch) {
+      return false;
+    }
+    return this.guideS2S(text, epoch, true, parentSignal, {
+      startMs: 5_000,
+      completionMs: s2sCompletionTimeoutMs(text),
+    });
   }
 
   private async deliverProactiveSpeech(
@@ -626,6 +657,7 @@ export class DiscordVoiceBot {
   ): Promise<boolean> {
     if (!this.options.s2s) return this.speak(text, epoch);
     if (!(await this.waitForRecordingToSettle(epoch)) || signal.aborted) return false;
+    this.clearS2SInput();
     let samples = 0;
     try {
       await this.options.speech.synthesizeStreaming(
@@ -638,7 +670,10 @@ export class DiscordVoiceBot {
             this.options.s2s!.ready.sampleRate,
           );
           samples += trigger.length;
-          this.queueS2SInput(trigger, false);
+          // Guidance is already known for proactive turns. Queue the hidden
+          // stimulus immediately, then install oracle text while that audio is
+          // still entering KAME rather than waiting until its endpoint.
+          this.queueS2SInput(trigger, false, 0);
           return true;
         },
       );
@@ -646,7 +681,7 @@ export class DiscordVoiceBot {
       this.options.logger.error("s2s.proactive.trigger_failed", error);
       return false;
     }
-    if (samples === 0 || !(await this.waitForS2SInputDrain(epoch, signal))) return false;
+    if (samples === 0 || signal.aborted || epoch !== this.responseEpoch) return false;
     this.options.logger.info("s2s.proactive.trigger_complete", {
       audioMs: Math.round((samples / this.options.s2s.ready.sampleRate) * 1_000),
     });

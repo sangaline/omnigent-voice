@@ -777,3 +777,31 @@ test and log terms. Those flows then passed five of five and ten of ten targeted
 runs respectively. The final promotion sweep passed all 69 turns across 17
 linked scenarios with no invalid trials. Keep treating exact outbound content
 as a held-out fidelity dimension despite the clean final gate.
+
+### 2026-08-29 — Live KAME audio containment and guidance alignment
+
+Hypothesis H28: the native KAME control that passed paced synthetic audio was
+safe to expose continuously in Discord. The first phone test falsified it.
+Three human turns reached local ASR, but the Discord player forwarded every
+native frame from process startup, including unguided model output. Four turns
+hit 20-30 second completion timeouts, seven playbacks were interrupted, and 52
+input-backlog warnings occurred. The user heard continuous multilingual-like
+gibberish. The pod and GitOps replica were taken to zero before further work.
+
+The audio path now has a generation-scoped fail-closed gate. Idle, stale,
+aborted, timed-out, and post-completion frames cannot reach Discord. A fixed
+12-second circuit breaker was tested and rejected because it clipped legitimate
+long responses. Normal endpointing remains trailing acoustic silence; the
+watchdog now scales from 10 to 120 seconds with guidance length.
+
+Code inspection of official KAME showed the missing alignment mechanism: its
+reference server starts overlapping oracle LLM streams from interim ASR every
+roughly 500 ms. Our verified coordinator cannot safely speculate about tool
+actions, so the harness instead delays only KAME input while local ASR remains
+live. At 400 ms, an offline turn escaped before guidance. At 560-720 ms,
+multi-turn runs consistently produced intelligible guided English. Two
+conservative 720 ms / 400 ms-guidance sequences passed all seven turns with
+77.8-100% independent ASR word recall. A 28-word response ran 12.8 seconds,
+ended naturally, and scored 96.4%. The live rollout gate is now explicit:
+offline silence containment, English fidelity, multi-turn termination, then a
+controlled phone test; synthetic probes alone do not promote KAME.

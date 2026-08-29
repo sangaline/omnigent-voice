@@ -10,6 +10,8 @@ export interface S2SRuntimeOptions {
   tokenizerPath: string;
   device: string;
   contextFrames: number;
+  depthTemperature?: number | undefined;
+  textTemperature?: number | undefined;
   logger: Logger;
 }
 
@@ -22,7 +24,111 @@ export interface S2SReady {
 export interface S2SSpeechTurnState {
   started: boolean;
   silentFrames: number;
+  maxPeak?: number | undefined;
 }
+
+export class S2SAudioGate {
+  private generation = 0;
+  private openGeneration: number | undefined;
+
+  public begin(): number {
+    this.openGeneration = undefined;
+    this.generation += 1;
+    return this.generation;
+  }
+
+  public open(generation: number): boolean {
+    if (generation !== this.generation) return false;
+    this.openGeneration = generation;
+    return true;
+  }
+
+  public close(generation?: number): void {
+    if (generation !== undefined && generation !== this.generation) return;
+    this.openGeneration = undefined;
+    if (generation === undefined) this.generation += 1;
+  }
+
+  public get isOpen(): boolean {
+    return this.openGeneration === this.generation;
+  }
+}
+
+interface DelayedAudioChunk {
+  samples: Float32Array;
+  readyAt: number;
+}
+
+export class DelayedS2SInput {
+  private readonly chunks: DelayedAudioChunk[] = [];
+  private offset = 0;
+  private queuedSamples = 0;
+
+  public push(samples: Float32Array, readyAt: number): void {
+    if (samples.length === 0) return;
+    this.chunks.push({ samples, readyAt });
+    this.queuedSamples += samples.length;
+  }
+
+  public take(frameSize: number, now: number): Float32Array {
+    const output = new Float32Array(frameSize);
+    let written = 0;
+    while (
+      written < frameSize &&
+      this.chunks.length > 0 &&
+      this.chunks[0]!.readyAt <= now
+    ) {
+      const chunk = this.chunks[0]!.samples;
+      const available = chunk.length - this.offset;
+      const count = Math.min(frameSize - written, available);
+      output.set(chunk.subarray(this.offset, this.offset + count), written);
+      written += count;
+      this.offset += count;
+      this.queuedSamples -= count;
+      if (this.offset >= chunk.length) {
+        this.chunks.shift();
+        this.offset = 0;
+      }
+    }
+    return output;
+  }
+
+  public clear(): void {
+    this.chunks.splice(0);
+    this.offset = 0;
+    this.queuedSamples = 0;
+  }
+
+  public get samples(): number {
+    return this.queuedSamples;
+  }
+
+  public lagMs(now: number): number {
+    const first = this.chunks[0];
+    return first ? Math.max(0, now - first.readyAt) : 0;
+  }
+}
+
+export const s2sCompletionTimeoutMs = (text: string): number => {
+  const words = text.trim().split(/\s+/u).filter(Boolean).length;
+  // This is a last-resort runaway watchdog, not normal endpointing. Normal
+  // completion still comes from trailing acoustic silence. Leave enough room
+  // for long guidance and the eight silent frames required to confirm a turn.
+  return Math.min(120_000, Math.max(10_000, 3_000 + words * 650));
+};
+
+export const guidanceWordRecall = (guidance: string, transcript: string): number => {
+  const words = (text: string): string[] =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9' ]+/gu, " ")
+      .split(/\s+/u)
+      .filter(Boolean);
+  const expected = words(guidance);
+  const actual = new Set(words(transcript));
+  if (expected.length === 0) return 1;
+  return expected.filter((word) => actual.has(word)).length / expected.length;
+};
 
 export const acceptS2SSpeechTurnFrame = (
   state: S2SSpeechTurnState,
@@ -32,6 +138,7 @@ export const acceptS2SSpeechTurnFrame = (
 ): boolean => {
   let peak = 0;
   for (const sample of audio) peak = Math.max(peak, Math.abs(sample));
+  state.maxPeak = Math.max(state.maxPeak ?? 0, peak);
   if (peak >= threshold) {
     state.started = true;
     state.silentFrames = 0;
@@ -119,6 +226,10 @@ export class KameS2SRuntime {
         this.options.device,
         "--context",
         String(this.options.contextFrames),
+        "--depth-temperature",
+        String(this.options.depthTemperature ?? 0.8),
+        "--text-temperature",
+        String(this.options.textTemperature ?? 0.7),
       ],
       { stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"] },
     );
@@ -278,6 +389,7 @@ export class KameS2SRuntime {
           this.options.logger.warn("s2s.output.speech_timeout", {
             timeoutMs: durationMs,
             phase,
+            peakAmplitude: Number((state.maxPeak ?? 0).toFixed(4)),
           });
           finish(false);
         }, durationMs);

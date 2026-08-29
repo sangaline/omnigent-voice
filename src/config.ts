@@ -42,6 +42,7 @@ export interface Config {
   kameTokenizerPath?: string | undefined;
   kameDevice: string;
   kameContextFrames: number;
+  kameInputDelayMs: number;
   logLevel: "debug" | "info" | "warn" | "error";
   logFile?: string | undefined;
 }
@@ -215,6 +216,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     kameTokenizerPath,
     kameDevice: optional(env, "KAME_DEVICE") ?? "Vulkan0",
     kameContextFrames: positiveInteger(env, "KAME_CONTEXT_FRAMES", 3_000),
+    kameInputDelayMs: nonnegativeInteger(env, "KAME_INPUT_DELAY_MS", 640),
     logLevel: logLevel as Config["logLevel"],
     logFile: optional(env, "LOG_FILE"),
   };

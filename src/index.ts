@@ -88,6 +88,7 @@ const bot = new DiscordVoiceBot({
   utteranceMergeMs: config.discordUtteranceMergeMs,
   bargeInPeak: config.discordBargeInPeak,
   endpointFallbackMs: config.endpointFallbackMs,
+  s2sInputDelayMs: config.kameInputDelayMs,
   endpoint,
   logger,
   speech,
