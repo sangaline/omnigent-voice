@@ -9,3 +9,7 @@ __pycache__/
 models/
 *.log
 .personaplex-results/
+
+# Private voice prompts and derived cloning state never belong in the public repo.
+*.wav
+*.safetensors
