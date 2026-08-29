@@ -29,6 +29,17 @@ RUN set -eu; \
     tar -xjf /tmp/espeak-ng-data.tar.bz2 -C tts; \
     rm /tmp/tts.tar.bz2 /tmp/espeak-ng-data.tar.bz2
 
+RUN set -eu; \
+    mkdir -p endpoint; \
+    curl -fsSL --retry 3 \
+      -o endpoint/silero_vad.onnx \
+      https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx; \
+    echo '9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6  endpoint/silero_vad.onnx' | sha256sum -c -; \
+    curl -fsSL --retry 3 \
+      -o endpoint/smart-turn-v3.2-cpu.onnx \
+      https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-cpu.onnx; \
+    echo '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f  endpoint/smart-turn-v3.2-cpu.onnx' | sha256sum -c -
+
 FROM debian:trixie-slim AS native
 
 RUN apt-get update \
@@ -109,12 +120,14 @@ FROM node:24-trixie-slim
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       libgomp1 libsentencepiece0 libvulkan1 mesa-vulkan-drivers \
+      python3 python3-numpy python3-onnxruntime \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
     SHERPA_ASR_MODEL_DIR=/opt/models/asr \
     SHERPA_TTS_MODEL_DIR=/opt/models/tts \
     KAME_BRIDGE_PATH=/opt/omnigent-voice/bin/kame-bridge \
+    SMART_TURN_BRIDGE_PATH=/opt/omnigent-voice/smart-turn/bridge.py \
     LD_LIBRARY_PATH=/opt/omnigent-voice/bin
 
 WORKDIR /app
@@ -123,7 +136,9 @@ COPY --from=build /app/dist ./dist
 COPY package.json ./package.json
 COPY --from=models /models/asr /opt/models/asr
 COPY --from=models /models/tts /opt/models/tts
+COPY --from=models /models/endpoint /opt/models/endpoint
 COPY --from=native /out/ /opt/omnigent-voice/bin/
+COPY runtime/smart-turn /opt/omnigent-voice/smart-turn
 
 USER node
 CMD ["node", "dist/index.js"]

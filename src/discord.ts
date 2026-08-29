@@ -30,6 +30,7 @@ import {
 import { CelerisConversation } from "./celeris.js";
 import { CoordinatorUpdate, OmnigentCoordinator } from "./coordinator.js";
 import { isCancelCommand } from "./control.js";
+import { SemanticEndpointRuntime, TailAudioBuffer } from "./endpoint.js";
 import { Logger } from "./log.js";
 import { LocalSpeech } from "./speech.js";
 import { KameS2SRuntime } from "./s2s.js";
@@ -42,6 +43,8 @@ interface DiscordVoiceOptions {
   silenceMs: number;
   utteranceMergeMs: number;
   bargeInPeak: number;
+  endpointFallbackMs: number;
+  endpoint?: SemanticEndpointRuntime | undefined;
   logger: Logger;
   speech: LocalSpeech;
   coordinator: OmnigentCoordinator;
@@ -279,17 +282,111 @@ export class DiscordVoiceBot {
     this.options.logger.info("speech.started");
     const decoder = new OpusScript(48_000, 2, OpusScript.Application.AUDIO);
     const transcription = this.options.speech.createTranscription();
+    const endpoint = this.options.endpoint;
+    const vad = endpoint?.createVad();
+    const endpointAudio = endpoint ? new TailAudioBuffer(8 * 16_000) : undefined;
+    const vadWindow = new Float32Array(512);
+    const vadSilence = new Float32Array(512);
+    let vadWindowOffset = 0;
+    let vadSpeaking = false;
+    let speechGeneration = 0;
+    let smartTurnRunning = false;
+    let smartTurnQueued = false;
+    let lastPacketAt = performance.now();
+    let endpointReason = endpoint ? "hard_fallback" : "discord_silence";
+    let endpointFallbackTimer: NodeJS.Timeout | undefined;
+    let vadSilenceTimer: NodeJS.Timeout | undefined;
     let inputEpoch: number | undefined;
     const stream = this.connection!.receiver.subscribe(userId, {
       end: {
         behavior: EndBehaviorType.AfterSilence,
-        duration: this.options.silenceMs,
+        duration: endpoint ? this.options.endpointFallbackMs : this.options.silenceMs,
       },
     });
+
+    const scheduleHardFallback = (): void => {
+      if (!endpoint || endpointFallbackTimer) return;
+      endpointFallbackTimer = setTimeout(() => {
+        endpointFallbackTimer = undefined;
+        if (finalized) return;
+        endpointReason = "semantic_fallback";
+        stream.destroy();
+      }, Math.max(0, this.options.endpointFallbackMs - endpoint.vadSilenceMs));
+    };
+
+    const evaluateEndpoint = (): void => {
+      if (!endpoint || !endpointAudio || finalized) return;
+      while (vad && !vad.isEmpty()) vad.pop();
+      scheduleHardFallback();
+      if (smartTurnRunning) {
+        smartTurnQueued = true;
+        return;
+      }
+      smartTurnRunning = true;
+      const generation = speechGeneration;
+      const audio = endpointAudio.snapshot();
+      void endpoint.smartTurn
+        .predict(audio)
+        .then((result) => {
+          const stale = generation !== speechGeneration;
+          this.options.logger.info("endpoint.smart_turn.result", {
+            complete: result.complete,
+            probability: Number(result.probability.toFixed(4)),
+            durationMs: Math.round(result.durationMs),
+            audioMs: Math.round((audio.length / 16_000) * 1_000),
+            stale,
+          });
+          if (!finalized && !stale && result.complete) {
+            endpointReason = "smart_turn";
+            stream.destroy();
+          }
+        })
+        .catch((error) => this.options.logger.error("endpoint.smart_turn.failed", error))
+        .finally(() => {
+          smartTurnRunning = false;
+          if (smartTurnQueued && !finalized) {
+            smartTurnQueued = false;
+            evaluateEndpoint();
+          }
+        });
+    };
+
+    const acceptVad = (samples: Float32Array): void => {
+      if (!vad) return;
+      let offset = 0;
+      while (offset < samples.length) {
+        const count = Math.min(vadWindow.length - vadWindowOffset, samples.length - offset);
+        vadWindow.set(samples.subarray(offset, offset + count), vadWindowOffset);
+        vadWindowOffset += count;
+        offset += count;
+        if (vadWindowOffset !== vadWindow.length) continue;
+        vad.acceptWaveform(vadWindow);
+        vadWindowOffset = 0;
+        const detected = vad.isDetected();
+        if (detected && !vadSpeaking) {
+          speechGeneration += 1;
+          if (endpointFallbackTimer) clearTimeout(endpointFallbackTimer);
+          endpointFallbackTimer = undefined;
+        }
+        vadSpeaking = detected;
+        if (!vad.isEmpty()) evaluateEndpoint();
+      }
+    };
+
+    if (endpoint) {
+      vadSilenceTimer = setInterval(() => {
+        if (finalized || performance.now() - lastPacketAt < 28) return;
+        endpointAudio!.append(vadSilence);
+        acceptVad(vadSilence);
+      }, 32);
+    }
     stream.on("data", (packet: Buffer) => {
       try {
         const decoded = decoder.decode(packet);
         const samples = stereoPcm16ToMono16k(decoded);
+        lastPacketAt = performance.now();
+        endpointAudio?.append(samples);
+        acceptVad(samples);
         this.queueS2SInput(stereoPcm16ToMono24k(decoded));
         transcription.accept(samples);
         const packetPeak = peakAmplitude(samples);
@@ -319,6 +416,8 @@ export class DiscordVoiceBot {
     const finalize = (): void => {
       if (finalized) return;
       finalized = true;
+      if (endpointFallbackTimer) clearTimeout(endpointFallbackTimer);
+      if (vadSilenceTimer) clearInterval(vadSilenceTimer);
       decoder.delete();
       this.recordingUsers.delete(userId);
       let result;
@@ -333,6 +432,7 @@ export class DiscordVoiceBot {
         durationMs: Math.round(performance.now() - started),
         audioMs: result.audioMs,
         peakAmplitude: Number(result.peakAmplitude.toFixed(4)),
+        endpoint: endpointReason,
       });
       this.notifyRecordingSettled();
       this.queueRecording(result.text, result.audioMs, result.peakAmplitude, inputEpoch);
@@ -387,7 +487,7 @@ export class DiscordVoiceBot {
       this.pendingTranscript = "";
       this.pendingTranscriptAudioMs = 0;
       void this.handleUtterance(transcript, audioMs, epoch);
-    }, this.options.utteranceMergeMs);
+    }, this.options.endpoint ? 0 : this.options.utteranceMergeMs);
   }
 
   private async handleUtterance(

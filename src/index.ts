@@ -2,6 +2,7 @@ import { loadConfig } from "./config.js";
 import { CelerisConversation } from "./celeris.js";
 import { OmnigentCoordinator } from "./coordinator.js";
 import { DiscordVoiceBot } from "./discord.js";
+import { SemanticEndpointRuntime } from "./endpoint.js";
 import { Logger } from "./log.js";
 import { CoordinatorMcpClient } from "./mcp.js";
 import { OmnigentClient } from "./omnigent.js";
@@ -64,6 +65,20 @@ const s2s =
       })
     : undefined;
 if (s2s) await s2s.start();
+const endpoint = config.semanticEndpointing
+  ? new SemanticEndpointRuntime({
+      pythonExecutable: config.smartTurnPythonExecutable,
+      bridgePath: config.smartTurnBridgePath,
+      modelPath: config.smartTurnModelPath,
+      threads: config.smartTurnThreads,
+      vadModelPath: config.sileroVadModelPath,
+      vadThreshold: config.sileroVadThreshold,
+      vadSilenceMs: config.sileroVadSilenceMs,
+      vadMinSpeechMs: config.sileroVadMinSpeechMs,
+      logger,
+    })
+  : undefined;
+if (endpoint) await endpoint.start();
 const bot = new DiscordVoiceBot({
   token: config.discordBotToken,
   guildId: config.discordGuildId,
@@ -72,6 +87,8 @@ const bot = new DiscordVoiceBot({
   silenceMs: config.discordSilenceMs,
   utteranceMergeMs: config.discordUtteranceMergeMs,
   bargeInPeak: config.discordBargeInPeak,
+  endpointFallbackMs: config.endpointFallbackMs,
+  endpoint,
   logger,
   speech,
   coordinator,
@@ -84,6 +101,7 @@ await bot.start();
 const shutdown = async (signal: string): Promise<void> => {
   logger.info("shutdown.started", { signal });
   await bot.stop();
+  await endpoint?.stop();
   await s2s?.stop();
   coordinator.stop();
   await tools.close();

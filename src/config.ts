@@ -7,6 +7,16 @@ export interface Config {
   discordSilenceMs: number;
   discordUtteranceMergeMs: number;
   discordBargeInPeak: number;
+  semanticEndpointing: boolean;
+  endpointFallbackMs: number;
+  sileroVadModelPath: string;
+  sileroVadThreshold: number;
+  sileroVadSilenceMs: number;
+  sileroVadMinSpeechMs: number;
+  smartTurnPythonExecutable: string;
+  smartTurnBridgePath: string;
+  smartTurnModelPath: string;
+  smartTurnThreads: number;
   omnigentBaseUrl: string;
   omnigentRefreshToken: string;
   omnigentAgentName: string;
@@ -73,6 +83,14 @@ const positiveNumber = (
 const optional = (env: NodeJS.ProcessEnv, name: string): string | undefined => {
   const value = env[name]?.trim();
   return value || undefined;
+};
+
+const boolean = (env: NodeJS.ProcessEnv, name: string, fallback: boolean): boolean => {
+  const raw = optional(env, name)?.toLowerCase();
+  if (!raw) return fallback;
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  throw new Error(`${name} must be a boolean`);
 };
 
 const positiveInteger = (
@@ -146,6 +164,22 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
       350,
     ),
     discordBargeInPeak: positiveNumber(env, "DISCORD_BARGE_IN_PEAK", 0.08),
+    semanticEndpointing: boolean(env, "SEMANTIC_ENDPOINTING", true),
+    endpointFallbackMs: positiveInteger(env, "ENDPOINT_FALLBACK_MS", 700),
+    sileroVadModelPath:
+      optional(env, "SILERO_VAD_MODEL_PATH") ?? "/opt/models/endpoint/silero_vad.onnx",
+    sileroVadThreshold: positiveNumber(env, "SILERO_VAD_THRESHOLD", 0.5),
+    sileroVadSilenceMs: positiveInteger(env, "SILERO_VAD_SILENCE_MS", 180),
+    sileroVadMinSpeechMs: positiveInteger(env, "SILERO_VAD_MIN_SPEECH_MS", 100),
+    smartTurnPythonExecutable:
+      optional(env, "SMART_TURN_PYTHON") ?? "/usr/bin/python3",
+    smartTurnBridgePath:
+      optional(env, "SMART_TURN_BRIDGE_PATH") ??
+      "/opt/omnigent-voice/smart-turn/bridge.py",
+    smartTurnModelPath:
+      optional(env, "SMART_TURN_MODEL_PATH") ??
+      "/opt/models/endpoint/smart-turn-v3.2-cpu.onnx",
+    smartTurnThreads: positiveInteger(env, "SMART_TURN_THREADS", 1),
     omnigentBaseUrl: required(env, "OMNIGENT_BASE_URL").replace(/\/$/, ""),
     omnigentRefreshToken: required(env, "OMNIGENT_REFRESH_TOKEN"),
     omnigentAgentName: optional(env, "OMNIGENT_AGENT_NAME") ?? "codex-native-ui",

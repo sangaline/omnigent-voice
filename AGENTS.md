@@ -346,7 +346,11 @@ the shader but did not reliably prime an immediate first dialogue turn, so
 connects. Do not shorten that startup priming or expose its output to callers.
 
 The guided native experiment is implemented behind `VOICE_RUNTIME=kame`; the
-default remains `staged`. `native/moshi-kame.patch` adds KAME's oracle embedding
+default remains `staged`. Select the runtime once at process startup; never
+switch between KAME and staged voices inside a live conversation. In KAME mode,
+all Discord output is KAME audio. Piper may generate a hidden input stimulus
+for a proactive KAME turn, but that stimulus is never played to the caller and
+Piper is not an audible fallback. `native/moshi-kame.patch` adds KAME's oracle embedding
 and one-token-per-frame queue to pinned `Codes4Fun/moshi.cpp`, while
 `native/kame_bridge.cpp` exposes raw 24 kHz float32 audio over stdin/stdout and
 guidance/events on descriptors 3/4. `src/s2s.ts` owns the subprocess and

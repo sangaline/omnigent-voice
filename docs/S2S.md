@@ -1,9 +1,10 @@
 # Guided speech-to-speech runtime
 
 The optional `kame` voice runtime is a native Q4/Vulkan full-duplex path. It is
-kept alongside the original staged ASR/Celeris/TTS runtime, selected with
-`VOICE_RUNTIME=staged|kame`; `staged` remains the default and rollback requires
-only that environment change.
+kept alongside the original staged ASR/Celeris/TTS runtime, selected once at
+process startup with `VOICE_RUNTIME=staged|kame`; `staged` remains the default
+and rollback requires that environment change plus a restart. It is never a
+per-turn choice: a live KAME conversation has one consistent audible voice.
 
 KAME uses the Moshi/Mimi audio architecture plus one oracle text embedding. A
 small patch against `Codes4Fun/moshi.cpp` loads and quantizes that embedding and
@@ -26,6 +27,7 @@ speech and barge-in behavior.
 Proactive coordinator updates use the same audible KAME voice. After the
 channel has been idle, the local TTS engine synthesizes a short input-side
 question and feeds it only to KAME; that trigger is never played to Discord.
+Piper is therefore a hidden stimulus, not an audible fallback in KAME mode.
 Once the hidden input drains, the coordinator's verified update becomes the
 oracle guidance. Output energy must show real speech followed by eight silent
 frames before the coordinator event cursor advances. This avoids both an
