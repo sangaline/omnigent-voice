@@ -33,6 +33,7 @@ import { isCancelCommand } from "./control.js";
 import { SemanticEndpointRuntime, TailAudioBuffer } from "./endpoint.js";
 import { Logger } from "./log.js";
 import { shouldScheduleCoordinatorNotification } from "./notification.js";
+import { ConfirmedRecordingTracker, MIN_RECORDING_PEAK } from "./recording.js";
 import { LocalSpeech } from "./speech.js";
 import {
   KameS2SRuntime,
@@ -73,7 +74,8 @@ export class DiscordVoiceBot {
   private readonly player = createAudioPlayer({
     behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
   });
-  private readonly recordingUsers = new Set<string>();
+  private readonly receivingUsers = new Set<string>();
+  private readonly activeRecordings = new ConfirmedRecordingTracker();
   private readonly recordingSettledWaiters = new Set<() => void>();
   private readonly pendingCoordinatorUpdates: CoordinatorUpdate[] = [];
   private connection?: VoiceConnection;
@@ -280,17 +282,14 @@ export class DiscordVoiceBot {
   }
 
   private onSpeakingStart(userId: string): void {
-    if (this.shuttingDown || this.recordingUsers.size > 0) return;
+    if (this.shuttingDown || this.receivingUsers.size > 0) return;
     if (userId === this.client.user?.id) return;
     if (this.options.allowedUserId && userId !== this.options.allowedUserId) return;
 
-    if (this.transcriptTimer) {
-      clearTimeout(this.transcriptTimer);
-      this.transcriptTimer = undefined;
-    }
-    this.recordingUsers.add(userId);
+    this.receivingUsers.add(userId);
+    const recording = this.activeRecordings.createLease();
     const started = performance.now();
-    this.options.logger.info("speech.started");
+    let speechStarted = false;
     const decoder = new OpusScript(48_000, 2, OpusScript.Application.AUDIO);
     const transcription = this.options.speech.createTranscription();
     const endpoint = this.options.endpoint;
@@ -401,6 +400,15 @@ export class DiscordVoiceBot {
         this.queueS2SInput(stereoPcm16ToMono24k(decoded));
         transcription.accept(samples);
         const packetPeak = peakAmplitude(samples);
+        if (!speechStarted && packetPeak >= MIN_RECORDING_PEAK) {
+          speechStarted = true;
+          recording.confirm();
+          if (this.transcriptTimer) {
+            clearTimeout(this.transcriptTimer);
+            this.transcriptTimer = undefined;
+          }
+          this.options.logger.info("speech.started");
+        }
         if (inputEpoch === undefined && packetPeak >= this.options.bargeInPeak) {
           const interruptedPlayback = this.options.s2s
             ? this.s2sOutputGate.isOpen
@@ -432,7 +440,8 @@ export class DiscordVoiceBot {
       if (endpointFallbackTimer) clearTimeout(endpointFallbackTimer);
       if (vadSilenceTimer) clearInterval(vadSilenceTimer);
       decoder.delete();
-      this.recordingUsers.delete(userId);
+      this.receivingUsers.delete(userId);
+      const wasConfirmed = recording.close();
       let result;
       try {
         result = transcription.finish();
@@ -441,12 +450,19 @@ export class DiscordVoiceBot {
         this.notifyRecordingSettled();
         return;
       }
-      this.options.logger.info("speech.ended", {
-        durationMs: Math.round(performance.now() - started),
-        audioMs: result.audioMs,
-        peakAmplitude: Number(result.peakAmplitude.toFixed(4)),
-        endpoint: endpointReason,
-      });
+      if (wasConfirmed) {
+        this.options.logger.info("speech.ended", {
+          durationMs: Math.round(performance.now() - started),
+          audioMs: result.audioMs,
+          peakAmplitude: Number(result.peakAmplitude.toFixed(4)),
+          endpoint: endpointReason,
+        });
+      } else {
+        this.options.logger.debug("speech.receive.ignored", {
+          durationMs: Math.round(performance.now() - started),
+          audioMs: result.audioMs,
+        });
+      }
       this.notifyRecordingSettled();
       this.queueRecording(result.text, result.audioMs, result.peakAmplitude, inputEpoch);
     };
@@ -460,7 +476,7 @@ export class DiscordVoiceBot {
     peak: number,
     inputEpoch?: number,
   ): void {
-    if (audioMs < 250 || peak < 0.002) {
+    if (audioMs < 250 || peak < MIN_RECORDING_PEAK) {
       this.options.logger.debug("speech.ignored", { audioMs });
       this.scheduleTranscriptFlush();
       return;
@@ -489,11 +505,11 @@ export class DiscordVoiceBot {
   }
 
   private scheduleTranscriptFlush(): void {
-    if (!this.pendingTranscript || this.recordingUsers.size > 0 || this.shuttingDown) return;
+    if (!this.pendingTranscript || this.activeRecordings.size > 0 || this.shuttingDown) return;
     if (this.transcriptTimer) clearTimeout(this.transcriptTimer);
     this.transcriptTimer = setTimeout(() => {
       this.transcriptTimer = undefined;
-      if (this.recordingUsers.size > 0 || this.shuttingDown) return;
+      if (this.activeRecordings.size > 0 || this.shuttingDown) return;
       const transcript = this.pendingTranscript;
       const audioMs = this.pendingTranscriptAudioMs;
       const epoch = this.pendingTranscriptEpoch;
@@ -890,7 +906,7 @@ export class DiscordVoiceBot {
   }
 
   private queueCoordinatorUpdate(update: CoordinatorUpdate): void {
-    if (this.shuttingDown || this.recordingUsers.size > 0 || this.activeUserTurns > 0) return;
+    if (this.shuttingDown || this.activeRecordings.size > 0 || this.activeUserTurns > 0) return;
     this.pendingCoordinatorUpdates.push(update);
     this.scheduleCoordinatorNotification();
   }
@@ -914,7 +930,7 @@ export class DiscordVoiceBot {
     if (this.notificationInFlight) return;
     if (
       this.shuttingDown ||
-      this.recordingUsers.size > 0 ||
+      this.activeRecordings.size > 0 ||
       this.activeUserTurns > 0 ||
       this.s2sResponseActive ||
       (!this.options.s2s && this.player.state.status !== AudioPlayerStatus.Idle)
@@ -968,7 +984,7 @@ export class DiscordVoiceBot {
     while (
       !this.shuttingDown &&
       epoch === this.responseEpoch &&
-      this.recordingUsers.size > 0
+      this.activeRecordings.size > 0
     ) {
       await new Promise<void>((resolve) => {
         const waiter = (): void => {
@@ -982,7 +998,7 @@ export class DiscordVoiceBot {
   }
 
   private notifyRecordingSettled(): void {
-    if (this.recordingUsers.size > 0 && !this.shuttingDown) return;
+    if (this.activeRecordings.size > 0 && !this.shuttingDown) return;
     for (const waiter of [...this.recordingSettledWaiters]) waiter();
   }
 }
