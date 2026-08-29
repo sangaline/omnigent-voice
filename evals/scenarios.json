@@ -2051,5 +2051,201 @@
         }
       }
     ]
+  },
+  {
+    "id": "queued_background_delivery_lifecycle",
+    "description": "Queue work for a running background session, announce its later dispatch with the prior-turn outcome, verify delivery and sticky focus from the ledger, then inspect the resumed work.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-side", "name": "Side Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "when side worker finishes this turn queue it a message to rerun the reconnect test with packet logs and don't switch me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side", "name": "Side Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "queued",
+            "target_session": { "id": "session-side", "name": "Side Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+              { "id": "session-side", "name": "Side Worker", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              {
+                "action_id": 401,
+                "type": "message_queued",
+                "session_id": "session-side",
+                "name": "Side Worker",
+                "delivery": "queued",
+                "message": "Rerun the reconnect test with packet logs.",
+                "summary": "Queued for Side Worker after its current turn: rerun the reconnect test with packet logs."
+              }
+            ],
+            "updates": [],
+            "update_cursor": 0
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-side",
+          "messageTerms": ["rerun", "reconnect", "packet logs"],
+          "delivery": "queued",
+          "speechTerms": ["queued", "side worker"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 402,
+            "type": "session_completed",
+            "session_id": "session-side",
+            "name": "Side Worker",
+            "summary": "Side Worker finished its prior turn. The reconnect checks passed."
+          },
+          {
+            "event_id": 403,
+            "type": "message_delivered",
+            "session_id": "session-side",
+            "name": "Side Worker",
+            "delivery": "queued_after_turn",
+            "summary": "The queued message was sent to Side Worker after its prior turn."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side worker", "reconnect", "passed", "queued", "sent"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait did that queued message actually get sent and am i still in primary",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side", "name": "Side Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 401,
+              "type": "message_queued",
+              "session_id": "session-side",
+              "name": "Side Worker",
+              "delivery": "queued",
+              "message": "Rerun the reconnect test with packet logs.",
+              "summary": "Queued for Side Worker after its current turn: rerun the reconnect test with packet logs."
+            },
+            {
+              "action_id": 404,
+              "type": "message_sent",
+              "session_id": "session-side",
+              "name": "Side Worker",
+              "delivery": "queued_after_turn",
+              "message": "Rerun the reconnect test with packet logs.",
+              "summary": "Sent queued message to Side Worker: rerun the reconnect test with packet logs."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 403
+        },
+        "checkUpdatesAfter": 403,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["send_message", "focus_session", "get_output"],
+          "speechTerms": ["sent", "side worker", "primary work"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay what's side worker doing with that now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side", "name": "Side Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 404,
+              "type": "message_sent",
+              "session_id": "session-side",
+              "name": "Side Worker",
+              "delivery": "queued_after_turn",
+              "message": "Rerun the reconnect test with packet logs.",
+              "summary": "Sent queued message to Side Worker: rerun the reconnect test with packet logs."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 403
+        },
+        "toolResults": {
+          "get_output": {
+            "session_id": "session-side",
+            "target_session": { "id": "session-side", "name": "Side Worker", "status": "running" },
+            "focus_changed": false,
+            "page": 1,
+            "order": "oldest_to_newest",
+            "latest_message": {
+              "position": 2,
+              "kind": "message",
+              "role": "assistant",
+              "text": "The reconnect rerun is collecting packet logs now."
+            },
+            "items": [
+              { "position": 1, "kind": "message", "role": "user", "text": "Rerun the reconnect test with packet logs." },
+              { "position": 2, "kind": "message", "role": "assistant", "text": "The reconnect rerun is collecting packet logs now." }
+            ],
+            "has_more": false,
+            "recent_delivery_visibility": {
+              "action_id": 404,
+              "delivery": "queued_after_turn",
+              "status": "visible_on_page",
+              "matching_position": 1,
+              "page": 1
+            }
+          }
+        },
+        "expected": {
+          "toolSequence": ["get_output"],
+          "forbiddenTools": ["focus_session", "send_message"],
+          "sessionId": "session-side",
+          "speechTerms": ["reconnect", "packet logs"],
+          "maxRounds": 2
+        }
+      }
+    ]
   }
 ]

@@ -18,8 +18,10 @@ import {
   targetsFocusedSession,
   verifiedActionFollowupSpeech,
   verifiedDeliveryVisibilitySpeech,
+  verifiedQueuedDeliverySpeech,
   voiceFocusRouting,
   voiceMessageRouting,
+  voiceReadRouting,
   voiceStartInstruction,
 } from "./celeris.js";
 import { Logger } from "./log.js";
@@ -52,6 +54,17 @@ const toolClient = (): CoordinatorToolClient => ({
         type: "object",
         properties: { session_id: { type: "string" } },
         required: ["session_id"],
+      },
+    },
+    {
+      name: "get_output",
+      description: "Read session output.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_id: { type: "string" },
+          page: { type: "number" },
+        },
       },
     },
     {
@@ -260,6 +273,19 @@ describe("Celeris coordinator conversation", () => {
         updates: [],
       }),
     ).toBe("It was sent, but the message isn't visible on the returned output page yet.");
+    expect(
+      verifiedQueuedDeliverySpeech(
+        "wait did that queued message actually get sent and am i still in primary",
+        [
+          {
+            type: "message_sent",
+            delivery: "queued_after_turn",
+            name: "Side Worker",
+          },
+        ],
+        { id: "session-primary", name: "Primary Work" },
+      ),
+    ).toBe("The queued message was sent to Side Worker. You're in Primary Work.");
   });
 
   it("only allows focus mutation for an explicit session switch", () => {
@@ -429,6 +455,34 @@ describe("Celeris coordinator conversation", () => {
       ]),
     ).toEqual({ mode: "model" });
     expect(
+      voiceReadRouting("okay what's side beta doing with that now", [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-beta", name: "Side Beta" },
+      ]),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-beta", name: "Side Beta" },
+    });
+    expect(
+      voiceReadRouting("compare primary work and side beta", [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-beta", name: "Side Beta" },
+      ]),
+    ).toEqual({ mode: "model" });
+    expect(
+      voiceReadRouting(
+        "tell primary work what side beta found",
+        [
+          { id: "session-primary", name: "Primary Work" },
+          { id: "session-beta", name: "Side Beta" },
+        ],
+        { id: "session-primary", name: "Primary Work" },
+      ),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-beta", name: "Side Beta" },
+    });
+    expect(
       voiceStartInstruction("make a temporary session to test that receipt wording"),
     ).toBe("test that receipt wording");
     expect(voiceStartInstruction("what is this session doing")).toBeUndefined();
@@ -534,7 +588,7 @@ describe("Celeris coordinator conversation", () => {
         function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
       }>;
     };
-    expect(request.tools).toHaveLength(2);
+    expect(request.tools).toHaveLength(3);
     expect(request.tools?.map((tool) => tool.function?.name)).not.toContain("focus_session");
     expect(request.tools?.map((tool) => tool.function?.name)).toContain("answer_prompt");
     const send = request.tools?.find((tool) => tool.function?.name === "send_message");
@@ -721,6 +775,68 @@ describe("Celeris coordinator conversation", () => {
     expect(send?.function?.description).toContain("Side Beta");
     expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("injects the authoritative ID for an explicitly named output read", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-read",
+              type: "function",
+              function: {
+                name: "get_output",
+                arguments: JSON.stringify({ session_id: "session-side}" }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({ content: "Side Worker is collecting packet logs now." }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) =>
+      Promise.resolve(
+        name === "check_updates"
+          ? {
+              focused_session: { id: "session-primary", name: "Primary Work" },
+              known_sessions: [
+                { id: "session-primary", name: "Primary Work" },
+                { id: "session-side", name: "Side Worker" },
+              ],
+              updates: [],
+            }
+          : {
+              target_session: { id: "session-side", name: "Side Worker" },
+              latest_message: { role: "assistant", text: "Collecting packet logs now." },
+              updates: [],
+            },
+      ),
+    );
+
+    await expect(
+      conversation("test-key", tools).respond("okay what's side worker doing now"),
+    ).resolves.toBe("Side Worker is collecting packet logs now.");
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "get_output", {
+      session_id: "session-side",
+    });
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tools?: Array<{
+        function?: {
+          name?: string;
+          description?: string;
+          parameters?: { properties?: Record<string, unknown> };
+        };
+      }>;
+    };
+    const read = request.tools?.find((tool) => tool.function?.name === "get_output");
+    expect(read?.function?.description).toContain("Side Worker");
+    expect(read?.function?.parameters?.properties).not.toHaveProperty("session_id");
   });
 
   it("speaks a deterministic failure and skips another model call after a tool error", async () => {
@@ -1258,6 +1374,36 @@ describe("Celeris coordinator conversation", () => {
     const expected =
       "Cache Worker needs your approval: Restart the local test process? " +
       "Release Deploy needs your approval: Deploy the candidate to production?";
+
+    expect(directCoordinatorUpdateSpeech(updates)).toBe(expected);
+    await expect(
+      conversation("test-key").announceUpdate(updates, new AbortController().signal),
+    ).resolves.toBe(expected);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("voices a queued dispatch together with the prior-turn outcome", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const updates = [
+      {
+        event_id: 6,
+        type: "message_delivered" as const,
+        session_id: "session-side",
+        name: "Side Worker",
+        delivery: "queued_after_turn",
+      },
+      {
+        event_id: 7,
+        type: "session_completed" as const,
+        session_id: "session-side",
+        name: "Side Worker",
+        summary: "Side Worker finished its prior turn. The reconnect checks passed.",
+      },
+    ];
+    const expected =
+      "Side Worker finished its prior turn. The reconnect checks passed. " +
+      "I sent the queued message to Side Worker.";
 
     expect(directCoordinatorUpdateSpeech(updates)).toBe(expected);
     await expect(

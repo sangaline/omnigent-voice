@@ -117,6 +117,13 @@ of up to three structured `decision_needed` events are also rendered directly
 from their prompt messages: confirmation mode says “needs your approval,” while
 other modes say “needs your input.” URLs, code fences, longer output, and other
 multi-event batches still use Celeris adaptation.
+When a coordinator-managed queued message leaves the queue, the coordinator
+emits `message_delivered` only after the backend accepts the send. A lone event,
+or a bounded pair with the same session's prior-turn completion, is rendered
+directly in zero model rounds so speech preserves both the prior outcome and the
+fact that the queued message was actually sent. The action ledger records the
+same dispatch as `message_sent` with `delivery: queued_after_turn`; an immediate
+delivery audit and current-focus question is answered from that typed evidence.
 `waiting_for_input` is a
 voice-facing filter for a nonzero pending-elicitation count, not an Omnigent
 status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
@@ -176,7 +183,11 @@ explicitly named, deterministic grammar resolves its server-owned ID and the
 harness injects that target without changing focus. Multiple direct
 destinations fail closed. When a message depends on another session's output,
 Celeris must read that source before sending unless the human already supplied
-the finding in the current request. The harness also withholds and rejects
+the finding in the current request. A read-only question that names exactly one
+known session receives the same protection: the model-visible `get_output` or
+`poll_output` schema omits `session_id`, and the harness injects the authoritative
+ID while focus remains sticky. This prevents malformed or invented read IDs.
+The harness also withholds and rejects
 `focus_session` unless the current transcript explicitly requests a
 switch/select/open/focus action or an ordinal selection. This is a runtime
 safety guard in addition to the prompt; ordinary latest/current-output language
@@ -218,7 +229,9 @@ window. `send_message` defaults to
 `delivery: immediate`, the Omnigent create-or-steer path; the backend's HTTP
 `queued: true` response means asynchronous acceptance, not deferred delivery,
 and is exposed as such. `delivery: queued` is an explicit coordinator-managed
-wait until the current session turn becomes idle.
+wait until the current session turn becomes idle. Successful deferred dispatch
+records a `queued_after_turn` action and emits `message_delivered`; a failed
+dispatch is put back into the in-process queue and emits no false success.
 For clear “start/make/create/open a session to/for …” language, the harness
 copies the user's exact task clause into `start_session.instruction`; Celeris
 still selects the tool and may choose the title, agent, and workspace.

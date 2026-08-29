@@ -701,3 +701,39 @@ round, measured at 152-247 ms in the final targeted runs. The promotion gate is
 turns across 15 linked scenarios with no invalid trials. In the final linked
 sweep, safe latest-output and already-focused turns also completed in zero
 model rounds.
+
+### 2026-08-29 — Deferred delivery as a typed lifecycle
+
+Hypothesis H26: acknowledging `delivery: queued` was sufficient because the
+later dispatch would be obvious from ordinary session events and the action
+ledger. Code inspection disproved the event half: the coordinator sent a
+deferred message when the session became idle and recorded `message_sent`, but
+never pushed an update. A new four-turn background-session scenario then queued
+a reconnect rerun, delivered the prior-turn result plus a synthetic dispatch,
+audited delivery and sticky focus, and read the resumed work. The baseline was
+zero of five complete runs. Every notification paraphrase omitted both “queued”
+and “sent,” so the user heard only the old turn's completion. One of five named
+reads also emitted the malformed opaque ID `session-side}`.
+
+The coordinator now emits `message_delivered` only after the deferred backend
+send succeeds. Its summary excludes message contents while the private action
+ledger retains the exact text. A common one-event dispatch or same-session
+completion-plus-dispatch batch renders directly from typed data; it preserves a
+short prior result and explicitly says the queued message was sent. The audit
+path uses the newest `message_sent` action with `delivery: queued_after_turn`
+and current focus, without a model call. Failures reinsert the queue item and do
+not emit success.
+
+The voice harness also gained deterministic named-read routing. When a
+read-shaped utterance contains exactly one known session name, `get_output` and
+`poll_output` hide `session_id` from Celeris and receive the server-owned target
+at execution. This mirrors named send/focus safety without changing sticky
+focus; multi-session comparisons remain model-directed rather than being
+collapsed onto one target.
+
+Result: accepted for deployment. The new lifecycle moved from zero of five to
+five of five targeted runs across 20 turns. The dispatch announcement and audit
+are now zero-round, while the named read remained two rounds at 220-419 ms and
+was correctly targeted in every run. The promotion gate is 63 conventional
+tests with clean typecheck, 27 of 27 isolated cases, and all 65 turns across 16
+linked scenarios with no invalid trials.

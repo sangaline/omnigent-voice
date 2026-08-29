@@ -11,13 +11,23 @@ export type SessionFilter =
 
 export interface CoordinatorUpdate extends JsonObject {
   event_id: number;
-  type: "session_completed" | "session_output" | "decision_needed" | "session_failed";
+  type:
+    | "session_completed"
+    | "session_output"
+    | "decision_needed"
+    | "session_failed"
+    | "message_delivered";
   session_id: string;
   name: string;
 }
 
 interface CoordinatorUpdateInput extends JsonObject {
-  type: "session_completed" | "session_output" | "decision_needed" | "session_failed";
+  type:
+    | "session_completed"
+    | "session_output"
+    | "decision_needed"
+    | "session_failed"
+    | "message_delivered";
   session_id: string;
   name: string;
 }
@@ -1071,6 +1081,13 @@ export class OmnigentCoordinator {
           delivery: "queued_after_turn",
           message: pending.message.slice(0, 500),
           summary: `Sent queued message to ${pending.sessionName}: ${pending.message.slice(0, 300)}`,
+        });
+        this.pushUpdate({
+          type: "message_delivered",
+          session_id: id,
+          name: pending.sessionName,
+          delivery: "queued_after_turn",
+          summary: `The queued message was sent to ${pending.sessionName} after its prior turn.`,
         });
       } catch (error) {
         this.deferredMessages.splice(index, 0, pending);

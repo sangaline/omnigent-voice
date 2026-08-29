@@ -203,8 +203,9 @@ describe("Omnigent coordinator", () => {
         hasMore: false,
       });
     const sendMessage = vi.fn().mockResolvedValue({ queued: true });
+    const listSessions = vi.fn().mockResolvedValue([session]);
     const omnigent = {
-      listSessions: vi.fn().mockResolvedValue([session]),
+      listSessions,
       getSession: vi.fn().mockResolvedValue(session),
       listItems,
       sendMessage,
@@ -283,6 +284,29 @@ describe("Omnigent coordinator", () => {
         queued_messages: 1,
       });
       expect(sendMessage).toHaveBeenCalledTimes(1);
+      listSessions.mockResolvedValue([{ ...session, status: "idle" }]);
+      await expect(
+        client.callTool("check_updates", { after_event_id: 0 }),
+      ).resolves.toMatchObject({
+        recent_actions: expect.arrayContaining([
+          expect.objectContaining({
+            type: "message_sent",
+            name: "Voice MVP",
+            delivery: "queued_after_turn",
+            message: "Do this later.",
+          }),
+        ]),
+        updates: expect.arrayContaining([
+          expect.objectContaining({
+            type: "message_delivered",
+            session_id: "session-1",
+            name: "Voice MVP",
+            delivery: "queued_after_turn",
+          }),
+        ]),
+      });
+      expect(sendMessage).toHaveBeenCalledTimes(2);
+      expect(sendMessage).toHaveBeenLastCalledWith("session-1", "Do this later.");
     } finally {
       coordinator.stop();
       await client.close();
