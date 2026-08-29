@@ -512,3 +512,23 @@ middle scored 0.490. Silero detected and closed the same fixture correctly.
 The packaged image is about 185 MB larger uncompressed than the prior image;
 using isolated Python wheels avoided the roughly 517 MB Debian numerical stack
 that an initial build pulled in. Live phone audio remains the promotion gate.
+
+### 2026-08-29 — KAME notification retry and Pocket TTS gate
+
+The first semantic-endpoint rollout exposed another useful negative result. A
+proactive KAME update accepted 48 oracle tokens but generated no speech for 20
+seconds. The event was correctly left unacknowledged, but the local queue had
+already removed it. Proactive turns now use a five-second speech-start timeout
+and a separate 30-second completion timeout, retry once with a fresh hidden
+input, and requeue the event after two unconfirmed attempts. Only confirmed
+KAME speech advances the cursor. This preserves one audible voice and prevents
+silent event loss; another naturally occurring notification is still needed to
+exercise the retry path live.
+
+Pocket TTS 3.0.2 was benchmarked separately as a possible staged-runtime Piper
+replacement using PyTorch 2.13 CPU and dynamic int8 quantization. Model load was
+11.48 seconds and cached voice-state load was 657 ms. After warmup, first audio
+arrived in 33-53 ms. A 0.88-0.96 second acknowledgement generated in 184-212 ms,
+a 2.08-2.24 second receipt in 352-438 ms, and a 4.40-4.56 second update in
+750-761 ms. This is fast enough to pursue for staged voice quality, but it is
+not wired into KAME mode and must never become an audible per-turn fallback.

@@ -34,6 +34,12 @@ frames before the coordinator event cursor advances. This avoids both an
 audible voice swap and the earlier false success condition where accepting
 oracle tokens was mistaken for speaking them.
 
+KAME occasionally accepts guidance without choosing to speak. A proactive turn
+therefore gets five seconds to begin and 30 seconds to finish after speech
+starts. The runtime tries one fresh hidden-input turn after a start failure. If
+that also produces no speech, it retains and requeues the coordinator event;
+the caller never hears Piper and the event cursor does not advance.
+
 ## Runtime files
 
 No speech-to-speech weights or deployment-specific values belong in the image.

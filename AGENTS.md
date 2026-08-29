@@ -380,6 +380,11 @@ input drains. KAME output must cross the speech-energy threshold and then
 produce eight silent frames before the event cursor advances. Normal guided
 replies are tracked with the same detector for durable playback logs. Merely
 accepting oracle tokens is not evidence that Discord received speech.
+Proactive KAME output has a five-second speech-start deadline and a separate
+30-second completion deadline once speech begins. If the first hidden-input
+turn produces no speech, retry it once with a fresh hidden input. If both
+attempts fail, retain and requeue the coordinator event; never advance its
+cursor or silently discard it. A human turn may preempt this retry normally.
 
 The first live Discord deployment verified two proactive turns end to end.
 Hidden-trigger synthesis took 90-97 ms, KAME speech began 1.17-1.82 seconds
