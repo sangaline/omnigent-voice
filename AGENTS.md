@@ -149,6 +149,11 @@ Notification history records are authoritative for resolving “that one,” “
 first one,” and “the other one”; a read copies the referenced notification's
 session ID rather than substituting sticky focus. A changed `output_delta`
 directly answers “what's new” and “since then” without an older-output read.
+An imperative pronoun follow-up immediately after one session's spoken
+notification is also resolved by the harness: `send_message` receives that
+notification's still-known server-owned session ID, while sticky focus remains
+unchanged. If one notification batch names multiple sessions, the voice route
+fails closed instead of guessing.
 ASR discourse repairs such as “no wait” do not select queued delivery; only an
 explicit request to queue or wait for the current turn does. For a true output
 visibility check, the response combines the action ledger's delivery evidence

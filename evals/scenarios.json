@@ -1626,5 +1626,106 @@
         }
       }
     ]
+  },
+  {
+    "id": "notification_pronoun_send_keeps_focus",
+    "description": "Route an imperative pronoun follow-up to the just-announced background session without silently sending it to sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 101,
+            "type": "session_completed",
+            "session_id": "session-beta",
+            "name": "Side Beta",
+            "summary": "Side Beta finished the voice worker check. It found one flaky reconnect test."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side beta", "flaky", "reconnect"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay tell that one rerun the flaky reconnect test with debug logs",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 101
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-beta", "name": "Side Beta", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+              { "id": "session-beta", "name": "Side Beta", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 102, "type": "message_sent", "summary": "Sent immediately to Side Beta: Rerun the flaky reconnect test with debug logs." }
+            ]
+          }
+        },
+        "checkUpdatesAfter": 101,
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-beta",
+          "messageTerms": ["rerun", "flaky reconnect", "debug logs"],
+          "delivery": "not_queued",
+          "speechTerms": ["side beta"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "and where am i still",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-beta", "name": "Side Beta", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 102, "type": "message_sent", "summary": "Sent immediately to Side Beta: Rerun the flaky reconnect test with debug logs." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 101
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session", "send_message"],
+          "speechTerms": ["primary work"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

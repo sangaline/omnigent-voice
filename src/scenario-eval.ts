@@ -229,6 +229,7 @@ for (const scenario of scenarios) {
           );
           for (const failure of score.failures) console.log(`  ${failure}`);
         }
+        if (invalid) break;
       }
     } finally {
       await tools.close();

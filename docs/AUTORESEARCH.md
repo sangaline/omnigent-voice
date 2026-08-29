@@ -532,3 +532,32 @@ arrived in 33-53 ms. A 0.88-0.96 second acknowledgement generated in 184-212 ms,
 a 2.08-2.24 second receipt in 352-438 ms, and a 4.40-4.56 second update in
 750-761 ms. This is fast enough to pursue for staged voice quality, but it is
 not wired into KAME mode and must never become an audible per-turn fallback.
+
+### 2026-08-29 — Notification-pronoun send routing
+
+Hypothesis H19: the prompt's notification-reference rule was enough to route
+“tell that one …” back to a just-announced background session. A held-out
+three-turn scenario disproved it. Celeris correctly selected `send_message` and
+preserved the dictated work, but the voice-safe schema deliberately omits
+`session_id`; the production harness therefore would have defaulted the call to
+sticky focus. The frozen result exposed the mismatch because the observed call
+had no target ID. This is the same high-cost failure class as sending work into
+an unrelated live coding session.
+
+The harness now parses only the immediately preceding authoritative background
+notification record, intersects its session IDs with the fresh `known_sessions`
+snapshot, and deterministically injects the one unambiguous target for an
+imperative pronoun follow-up. Focus does not change. A multi-session notification
+batch fails closed instead of guessing. Notification records with an intervening
+human turn are not used by this narrow guard; longer references remain the
+model's responsibility and explicit session names still use the existing grammar.
+
+Result: accepted. The new scenario passed all three turns in one model round per
+spoken turn, routed the send to the background session, and retained primary
+focus. The full stateful sweep passed every trial not rejected by the model
+service: 11 of 11 valid scenario runs, with four HTTP 429 turns excluding their
+two scenarios. Targeted reruns then passed the rate-limited two-turn named-send
+scenario and all thirteen turns of the compound workday, and the one isolated
+rate-limited case also passed. Conventional tests remain 54 with a clean
+typecheck. The scenario runner now stops a scenario after an invalid transport
+trial, avoiding meaningless downstream failures and unnecessary model calls.

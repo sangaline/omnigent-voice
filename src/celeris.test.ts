@@ -8,6 +8,7 @@ import {
   CelerisMemoryPolicy,
   CoordinatorToolClient,
   directSessionOutputSpeech,
+  immediateNotificationTargets,
   isDeclarativeMissedSend,
   serializeToolResult,
   successfulActionSpeech,
@@ -218,6 +219,51 @@ describe("Celeris coordinator conversation", () => {
       mode: "named",
       target: { id: "session-beta", name: "Side Beta" },
     });
+    const notificationTargets = immediateNotificationTargets(
+      [
+        {
+          role: "system",
+          content:
+            'Omnigent background update: [{"event_id":4,"session_id":"session-beta","name":"Old Side Beta"}]',
+        },
+        { role: "assistant", content: "Side Beta finished the reconnect check." },
+      ],
+      [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-beta", name: "Side Beta" },
+      ],
+    );
+    expect(notificationTargets).toEqual([
+      { id: "session-beta", name: "Side Beta" },
+    ]);
+    expect(
+      voiceMessageRouting(
+        "okay tell that one rerun the flaky reconnect test",
+        [
+          { id: "session-primary", name: "Primary Work" },
+          { id: "session-beta", name: "Side Beta" },
+        ],
+        notificationTargets,
+      ),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-beta", name: "Side Beta" },
+    });
+    expect(
+      immediateNotificationTargets(
+        [
+          {
+            role: "system",
+            content:
+              'Omnigent background update: [{"session_id":"session-beta","name":"Side Beta"}]',
+          },
+          { role: "assistant", content: "Side Beta finished." },
+          { role: "user", content: "what is primary doing" },
+          { role: "assistant", content: "Primary is still running." },
+        ],
+        [{ id: "session-beta", name: "Side Beta" }],
+      ),
+    ).toEqual([]);
     expect(
       voiceMessageRouting("tell primary work what side beta found", [
         { id: "session-primary", name: "Primary Work" },

@@ -294,6 +294,67 @@ interface VoiceFocusRouting {
   candidates?: string[] | undefined;
 }
 
+interface VoiceSessionTarget {
+  id: string;
+  name: string;
+}
+
+const backgroundUpdatePrefix = "Omnigent background update: ";
+
+export const immediateNotificationTargets = (
+  history: readonly { role: string; content: unknown }[],
+  knownSessions: unknown,
+): VoiceSessionTarget[] => {
+  const notificationIndex = history.findLastIndex(
+    (message) =>
+      message.role === "system" &&
+      typeof message.content === "string" &&
+      message.content.startsWith(backgroundUpdatePrefix),
+  );
+  if (notificationIndex < 0) return [];
+  if (history.slice(notificationIndex + 1).some((message) => message.role === "user")) {
+    return [];
+  }
+
+  const notification = history[notificationIndex]?.content;
+  if (typeof notification !== "string") return [];
+  let updates: unknown;
+  try {
+    updates = JSON.parse(notification.slice(backgroundUpdatePrefix.length));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(updates)) return [];
+
+  const knownById = new Map<string, VoiceSessionTarget>();
+  for (const candidate of Array.isArray(knownSessions) ? knownSessions : []) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const id = (candidate as JsonObject).id;
+    const name = (candidate as JsonObject).name;
+    if (typeof id === "string" && id && typeof name === "string" && name) {
+      knownById.set(id, { id, name });
+    }
+  }
+
+  const targets = new Map<string, VoiceSessionTarget>();
+  for (const update of updates) {
+    if (!update || typeof update !== "object" || Array.isArray(update)) continue;
+    const id = (update as JsonObject).session_id;
+    if (typeof id !== "string") continue;
+    const known = knownById.get(id);
+    if (known) targets.set(id, known);
+  }
+  return [...targets.values()];
+};
+
+const hasDeicticMessageTarget = (input: string): boolean =>
+  /\b(?:tell|ask|message|steer|have)\s+(?:that|the)\s+(?:one|session|agent)\b/i.test(
+    input,
+  ) ||
+  /\b(?:tell|ask|message|steer|have)\s+it\b/i.test(input) ||
+  /\bsend\b.+\bto\s+(?:it|that|that\s+one|the\s+one)\b/i.test(input) ||
+  /\blet\s+(?:it|that\s+one|the\s+one)\s+know\b/i.test(input);
+
 export const isDeclarativeMissedSend = (
   input: string,
   recentActions: unknown,
@@ -333,6 +394,7 @@ export const isDeclarativeMissedSend = (
 export const voiceMessageRouting = (
   input: string,
   knownSessions: unknown,
+  notificationTargets: readonly VoiceSessionTarget[] = [],
 ): VoiceMessageRouting => {
   if (
     !/\b(?:tell|message|send|ask|steer|have)\b/i.test(input) &&
@@ -352,7 +414,18 @@ export const voiceMessageRouting = (
       matches.set(id, { id, name });
     }
   }
-  if (matches.size === 0) return { mode: "focused" };
+  if (matches.size === 0) {
+    if (hasDeicticMessageTarget(input) && notificationTargets.length === 1) {
+      return { mode: "named", target: notificationTargets[0] };
+    }
+    if (hasDeicticMessageTarget(input) && notificationTargets.length > 1) {
+      return {
+        mode: "ambiguous",
+        candidates: notificationTargets.map(({ name }) => name),
+      };
+    }
+    return { mode: "focused" };
+  }
   const normalized = words(input).join(" ");
   const directlyAddressed = [...matches.values()].filter(({ name }) => {
     const phrase = words(name).join(" ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -729,7 +802,15 @@ export class CelerisConversation {
       this.remember(input, speech);
       return speech;
     }
-    const messageRouting = voiceMessageRouting(input, updates.known_sessions);
+    const notificationTargets = immediateNotificationTargets(
+      this.history,
+      updates.known_sessions,
+    );
+    const messageRouting = voiceMessageRouting(
+      input,
+      updates.known_sessions,
+      notificationTargets,
+    );
     const focusRouting = voiceFocusRouting(input, updates.known_sessions);
     const startInstruction = voiceStartInstruction(input);
     const previousAssistantSpeech = [...this.history]
