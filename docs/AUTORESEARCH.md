@@ -658,3 +658,46 @@ only after the second finished. No `delivery_started` interval overlapped a
 prior interval, every transaction reached audible KAME playback, and all probe
 sessions were archived afterward. This closes the live queue-contention rollout
 gate without touching existing user work.
+
+### 2026-08-29 — Typed multi-decision transactions
+
+Hypothesis H25: the existing decision prompt plus `answer_prompt` schema was
+enough for two simultaneous background prompts with opposite outcomes. A new
+three-turn ASR-style scenario announced a cache restart and production deploy,
+then asked to approve the first and decline the second in one utterance before
+auditing whether both really happened. The baseline passed only one of five
+complete runs. Celeris generally selected both correct opaque prompt/session
+IDs, but its second synthesis round inconsistently omitted a target or outcome;
+one trace later tried both already-resolved prompt IDs again. A completion also
+returned the stray word “thought” after executing the correct tools. Correct
+actions were therefore not enough to provide a trustworthy voice transaction.
+
+The coordinator now returns a typed `target_session` after a successful prompt
+resolution. The harness renders accept, decline, and cancel receipts directly,
+including multiple calls in one model response, and stores that exact receipt
+as the last verified action outcome. Immediate outcome audits repeat that
+receipt and state that its outcomes are recorded, without offering stale prompt
+tools to the model. Bounded structured decision notifications also bypass
+paraphrasing: up to three plain events speak their exact prompt messages and
+distinguish confirmation approval from form input. Concurrent updates still
+disable every deterministic action receipt.
+
+The first full sweep exposed an eval-fidelity bug: the frozen coordinator kept
+putting events already consumed by `check_updates` into later tool results. It
+now filters the authoritative envelope using the same per-MCP-connection cursor
+as production. This reduced a normal prompt approval from two model rounds to
+one. Two stochastic held-out misses then motivated narrow typed fast paths for
+a safe short `output_delta` status question and a switch request targeting the
+already-focused session. Both refuse concurrent events; the output path also
+refuses pending decisions and action language. They reduced those turns from
+one or two model rounds to zero without adding a model-side rule.
+
+Result: accepted for deployment. The opposite-decision scenario moved from one
+of five complete baseline passes to five of five targeted passes, followed by
+three of three after the cursor and audit refinements. Its announcement and
+verification are now zero-round; its two opposite actions require one Celeris
+round, measured at 152-247 ms in the final targeted runs. The promotion gate is
+61 conventional tests with clean typecheck, 27 of 27 isolated cases, and all 61
+turns across 15 linked scenarios with no invalid trials. In the final linked
+sweep, safe latest-output and already-focused turns also completed in zero
+model rounds.

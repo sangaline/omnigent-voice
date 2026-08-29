@@ -641,6 +641,7 @@
             "session_id": "session-beta",
             "prompt_id": "prompt-restart",
             "action": "accept",
+            "target_session": { "id": "session-beta", "name": "Side Beta", "status": "waiting" },
             "pending_decisions": [],
             "recent_actions": [
               { "action_id": 50, "type": "prompt_answered", "summary": "Accepted a pending prompt in Side Beta." }
@@ -1165,6 +1166,7 @@
             "session_id": "session-primary",
             "prompt_id": "prompt-worker-restart",
             "action": "accept",
+            "target_session": { "id": "session-primary", "name": "Primary Work", "status": "waiting" },
             "focused_session": { "id": "session-lab", "name": "Receipt Wording", "status": "running" },
             "pending_decisions": [],
             "recent_actions": [
@@ -1845,6 +1847,206 @@
           "toolSequence": [],
           "forbiddenTools": ["focus_session", "send_message"],
           "speechTerms": ["primary work"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "opposite_background_decisions_one_turn",
+    "description": "Announce two simultaneous background decisions, resolve both with opposite actions in one ASR-style utterance, keep sticky focus, and verify both outcomes from the authoritative ledger.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-cache", "name": "Cache Worker", "status": "waiting", "focused": false },
+        { "id": "session-release", "name": "Release Deploy", "status": "waiting", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 301,
+            "type": "decision_needed",
+            "session_id": "session-cache",
+            "name": "Cache Worker",
+            "summary": "Cache Worker needs approval to restart its local test process.",
+            "prompts": [
+              {
+                "prompt_id": "prompt-cache-restart",
+                "message": "Restart the local test process?",
+                "mode": "confirmation",
+                "schema": null
+              }
+            ]
+          },
+          {
+            "event_id": 302,
+            "type": "decision_needed",
+            "session_id": "session-release",
+            "name": "Release Deploy",
+            "summary": "Release Deploy needs approval to deploy the candidate to production.",
+            "prompts": [
+              {
+                "prompt_id": "prompt-production-deploy",
+                "message": "Deploy the candidate to production?",
+                "mode": "confirmation",
+                "schema": null
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["cache worker", "restart", "release deploy", "production"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "yeah okay let the cache restart one go ahead but uh no decline the production deploy",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-cache", "name": "Cache Worker", "status": "waiting", "focused": false },
+            { "id": "session-release", "name": "Release Deploy", "status": "waiting", "focused": false }
+          ],
+          "pending_decisions": [
+            {
+              "session_id": "session-cache",
+              "name": "Cache Worker",
+              "prompts": [
+                {
+                  "prompt_id": "prompt-cache-restart",
+                  "message": "Restart the local test process?",
+                  "mode": "confirmation",
+                  "schema": null
+                }
+              ]
+            },
+            {
+              "session_id": "session-release",
+              "name": "Release Deploy",
+              "prompts": [
+                {
+                  "prompt_id": "prompt-production-deploy",
+                  "message": "Deploy the candidate to production?",
+                  "mode": "confirmation",
+                  "schema": null
+                }
+              ]
+            }
+          ],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 302
+        },
+        "toolResults": {
+          "answer_prompt": [
+            {
+              "resolved": true,
+              "session_id": "session-cache",
+              "prompt_id": "prompt-cache-restart",
+              "action": "accept",
+              "target_session": { "id": "session-cache", "name": "Cache Worker", "status": "waiting" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "pending_decisions": [
+                {
+                  "session_id": "session-release",
+                  "name": "Release Deploy",
+                  "prompts": [
+                    {
+                      "prompt_id": "prompt-production-deploy",
+                      "message": "Deploy the candidate to production?",
+                      "mode": "confirmation",
+                      "schema": null
+                    }
+                  ]
+                }
+              ],
+              "recent_actions": [
+                { "action_id": 303, "type": "prompt_answered", "summary": "Accepted the restart prompt in Cache Worker." }
+              ]
+            },
+            {
+              "resolved": true,
+              "session_id": "session-release",
+              "prompt_id": "prompt-production-deploy",
+              "action": "decline",
+              "target_session": { "id": "session-release", "name": "Release Deploy", "status": "waiting" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "pending_decisions": [],
+              "recent_actions": [
+                { "action_id": 303, "type": "prompt_answered", "summary": "Accepted the restart prompt in Cache Worker." },
+                { "action_id": 304, "type": "prompt_answered", "summary": "Declined the production deploy prompt in Release Deploy." }
+              ]
+            }
+          ]
+        },
+        "checkUpdatesAfter": 302,
+        "expected": {
+          "toolSequence": ["answer_prompt", "answer_prompt"],
+          "forbiddenTools": ["focus_session", "send_message"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "answer_prompt",
+              "sessionId": "session-cache",
+              "argumentEquals": { "prompt_id": "prompt-cache-restart", "action": "accept" }
+            },
+            {
+              "index": 1,
+              "name": "answer_prompt",
+              "sessionId": "session-release",
+              "argumentEquals": { "prompt_id": "prompt-production-deploy", "action": "decline" }
+            }
+          ],
+          "speechTerms": ["cache worker", "release deploy"],
+          "speechAnyTerms": [
+            ["approved", "accepted"],
+            ["declined", "rejected", "denied"]
+          ],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait did both of those actually happen or are you just saying that",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-cache", "name": "Cache Worker", "status": "running", "focused": false },
+            { "id": "session-release", "name": "Release Deploy", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 303, "type": "prompt_answered", "summary": "Accepted the restart prompt in Cache Worker." },
+            { "action_id": 304, "type": "prompt_answered", "summary": "Declined the production deploy prompt in Release Deploy." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 302
+        },
+        "checkUpdatesAfter": 302,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["answer_prompt", "focus_session", "send_message"],
+          "speechTerms": ["cache worker", "release deploy"],
+          "speechAnyTerms": [
+            ["accepted", "approved"],
+            ["declined", "rejected", "denied"]
+          ],
           "maxRounds": 1
         }
       }

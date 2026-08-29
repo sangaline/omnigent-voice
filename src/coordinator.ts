@@ -691,6 +691,15 @@ export class OmnigentCoordinator {
     const answers = isObject(args.answers) ? args.answers : undefined;
     await this.options.omnigent.resolveElicitation(targetId, promptId, action, answers);
     const pending = this.pendingDecisions.get(focusedId);
+    const targetName =
+      stringValue(this.sessionSummaries.get(targetId)?.name) ??
+      stringValue(pending?.name) ??
+      stringValue(this.sessionSummaries.get(focusedId)?.name) ??
+      sessionName(snapshot);
+    const targetSession = this.sessionSummaries.get(targetId) ?? {
+      id: targetId,
+      name: targetName,
+    };
     if (pending && Array.isArray(pending.prompts)) {
       const prompts = pending.prompts.filter(
         (entry) => !isObject(entry) || entry.prompt_id !== promptId,
@@ -701,12 +710,18 @@ export class OmnigentCoordinator {
     this.recordAction({
       type: "prompt_answered",
       session_id: targetId,
-      name: stringValue(this.sessionSummaries.get(targetId)?.name) ?? "focused session",
+      name: targetName,
       prompt_id: promptId,
       action,
-      summary: `${action === "accept" ? "Accepted" : action === "decline" ? "Declined" : "Cancelled"} a pending prompt in ${stringValue(this.sessionSummaries.get(targetId)?.name) ?? "the focused session"}.`,
+      summary: `${action === "accept" ? "Accepted" : action === "decline" ? "Declined" : "Cancelled"} a pending prompt in ${targetName}.`,
     });
-    return { resolved: true, session_id: targetId, prompt_id: promptId, action };
+    return {
+      resolved: true,
+      session_id: targetId,
+      prompt_id: promptId,
+      action,
+      target_session: targetSession,
+    };
   }
 
   private async startSession(args: Record<string, unknown>): Promise<JsonObject> {

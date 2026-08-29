@@ -116,6 +116,29 @@ describe("voice harness evaluation", () => {
     });
   });
 
+  it("replays only coordinator updates newer than the MCP consumer cursor", async () => {
+    const executor = new FrozenCoordinatorExecutor({
+      focused_session: { id: "session-primary", name: "Primary Work" },
+      updates: [
+        { event_id: 4, type: "session_completed", session_id: "session-old" },
+        { event_id: 7, type: "decision_needed", session_id: "session-new" },
+      ],
+      update_cursor: 7,
+    }, {
+      answer_prompt: { resolved: true },
+    });
+
+    await expect(executor.execute("check_updates", {}, 4)).resolves.toMatchObject({
+      updates: [{ event_id: 7 }],
+      update_cursor: 7,
+    });
+    await expect(executor.execute("answer_prompt", {}, 7)).resolves.toMatchObject({
+      resolved: true,
+      updates: [],
+      update_cursor: 7,
+    });
+  });
+
   it("marks model-service errors separately from scored harness behavior", () => {
     expect(
       observationFromTrace(

@@ -112,9 +112,11 @@ event in its frozen context. The voice consumer advances its event cursor only
 after proactive playback completes.
 One plain `session_output` message or `session_completed` summary up to 240
 characters and three lines is spoken directly in zero model rounds. This keeps
-short proactive facts exact instead of risking lossy paraphrase. URLs, code
-fences, longer output, decisions, and multi-event batches still use Celeris
-adaptation.
+short proactive facts exact instead of risking lossy paraphrase. Bounded batches
+of up to three structured `decision_needed` events are also rendered directly
+from their prompt messages: confirmation mode says “needs your approval,” while
+other modes say “needs your input.” URLs, code fences, longer output, and other
+multi-event batches still use Celeris adaptation.
 `waiting_for_input` is a
 voice-facing filter for a nonzero pending-elicitation count, not an Omnigent
 status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
@@ -122,7 +124,8 @@ status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
 Celeris owns the low-latency conversation and uses its OpenAI-compatible native
 tool-call shape to invoke a real MCP client/server pair connected in memory.
 For successful `send_message`, `focus_session`, `start_session`,
-`rename_session`, and `archive_session` results with no concurrent updates, the
+`rename_session`, `archive_session`, and `answer_prompt` results with no
+concurrent updates, the
 harness renders deterministic natural receipts from typed fields and skips the
 second Celeris request. This includes a compound model response when every tool
 call has a verified renderable action result. If one call fails, verified
@@ -151,6 +154,11 @@ Notification history records are authoritative for resolving “that one,” “
 first one,” and “the other one”; a read copies the referenced notification's
 session ID rather than substituting sticky focus. A changed `output_delta`
 directly answers “what's new” and “since then” without an older-output read.
+For a plain current/latest/progress question with no concurrent update, pending
+decision, or action language, the harness voices a short safe focused-session
+`output_delta` directly in zero model rounds. An explicit switch to the session
+that is already focused is likewise a typed zero-round receipt. These paths must
+remain narrow: compound or ambiguous turns still go to Celeris.
 Imperative pronoun follow-ups after a spoken notification burst are also
 resolved by the harness. It preserves notification order since the last human
 turn, maps “first,” “second,” “third,” and “last” to the corresponding
@@ -242,6 +250,11 @@ and schemas until successful resolution; the decision event carries the same
 prompt data. Celeris must copy these opaque IDs, never recreate them from a
 spoken name. Successful resolution removes the prompt before the result is
 returned and the action ledger becomes authoritative for later verification.
+The result includes a typed `target_session`, allowing one or several
+successful prompt resolutions to be acknowledged without another model round.
+An immediate outcome audit such as “did both actually happen?” repeats only the
+last typed receipt and says that the outcomes are recorded; it never calls stale
+prompt IDs again.
 A stdio MCP entry point is
 available with `npm run mcp`; authenticated remote HTTP transport is deliberately
 deferred.
@@ -327,6 +340,9 @@ archive restoration. A scenario passes only if every valid turn passes; never
 replace it with isolated case invocations when evaluating stateful behavior.
 Use `--json --include-trace` only with sanitized or otherwise private scenario
 data when raw completion shapes are needed to diagnose an empty model turn.
+The frozen coordinator filters `updates` against the MCP consumer cursor on
+every call, matching the production server's per-connection replay semantics;
+do not reintroduce already-consumed events into later tool fixtures.
 
 The Discord voice channel is currently part of the MVP trust boundary. Before
 using a channel with more than one trusted human, configure

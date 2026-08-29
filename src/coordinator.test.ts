@@ -663,6 +663,7 @@ describe("Omnigent coordinator", () => {
         session_id: "session-beta",
         prompt_id: "prompt-restart",
         action: "accept",
+        target_session: { id: "session-beta", name: "Side Beta" },
         pending_decisions: [],
         recent_actions: [
           { type: "prompt_answered", name: "Side Beta", action: "accept" },

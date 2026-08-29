@@ -74,12 +74,20 @@ const isJsonObject = (value: unknown): value is JsonObject =>
 const lowerIncludes = (value: string, term: string): boolean =>
   value.toLocaleLowerCase().includes(term.toLocaleLowerCase());
 
-const authoritativeEnvelope = (state: JsonObject): JsonObject => ({
+const updatesAfter = (state: JsonObject, afterEventId = 0): unknown[] =>
+  Array.isArray(state.updates)
+    ? state.updates.filter((value) => {
+        const update = isJsonObject(value) ? value : undefined;
+        return typeof update?.event_id === "number" && update.event_id > afterEventId;
+      })
+    : [];
+
+const authoritativeEnvelope = (state: JsonObject, afterEventId = 0): JsonObject => ({
   focused_session: state.focused_session ?? null,
   known_sessions: state.known_sessions ?? [],
   pending_decisions: state.pending_decisions ?? [],
   recent_actions: state.recent_actions ?? [],
-  updates: state.updates ?? [],
+  updates: updatesAfter(state, afterEventId),
   update_cursor: state.update_cursor ?? 0,
   update_cursor_expired: state.update_cursor_expired ?? false,
 });
@@ -119,8 +127,10 @@ export class FrozenCoordinatorExecutor implements CoordinatorExecutor {
     afterEventId?: number,
   ): Promise<JsonObject> {
     this.calls.push({ name, arguments: args, afterEventId });
-    if (name === "check_updates") return { ...this.state };
-    const envelope = authoritativeEnvelope(this.state);
+    if (name === "check_updates") {
+      return { ...this.state, updates: updatesAfter(this.state, afterEventId) };
+    }
+    const envelope = authoritativeEnvelope(this.state, afterEventId);
     const supplied = this.resultQueues.get(name)?.shift();
     if (isJsonObject(supplied)) {
       const result = { ...envelope, ...supplied };

@@ -696,6 +696,15 @@ export const successfulActionSpeech = (
           ? `I switched to ${focused}.`
           : undefined;
     }
+    case "answer_prompt": {
+      if (result.resolved !== true) return undefined;
+      const target = resultSessionName(result.target_session);
+      if (!target) return undefined;
+      if (result.action === "accept") return `I approved the prompt for ${target}.`;
+      if (result.action === "decline") return `I declined the prompt for ${target}.`;
+      if (result.action === "cancel") return `I cancelled the prompt for ${target}.`;
+      return undefined;
+    }
     default:
       return undefined;
   }
@@ -707,9 +716,17 @@ export const verifiedActionFollowupSpeech = (
   focusedSession: unknown,
 ): string | undefined => {
   if (!lastVerifiedActionOutcome) return undefined;
+  const asksDidOutcome =
+    /\bdid\s+(?:(?:both|all)\s+(?:of\s+)?)?(?:that|those|them|it|they)?\s*(?:actually\s+)?(?:happen|work|go\s+through|succeed)\b/i.test(
+      input,
+    ) ||
+    /\bdid\s+(?:that|those|the)\s+(?:approval|decline|cancellation|action|change|send|message)\s+(?:actually\s+)?(?:happen|work|go\s+through|succeed)\b/i.test(
+      input,
+    );
   const asksOutcome =
     /\b(?:what|which)\s+part\b.{0,50}\b(?:happen|work|succeed|fail)/i.test(input) ||
-    /\bwhat\s+(?:actually\s+)?happened\b/i.test(input);
+    /\bwhat\s+(?:actually\s+)?happened\b/i.test(input) ||
+    asksDidOutcome;
   if (!asksOutcome) return undefined;
   if (
     /\b(?:visible|visibility|output|showing|see|check|verify|read)\b/i.test(input) ||
@@ -722,11 +739,14 @@ export const verifiedActionFollowupSpeech = (
   const asksFocus =
     /\bwhere\s+(?:am\s+i|are\s+we)\b/i.test(input) ||
     /\bwhat\s+session\s+(?:am\s+i|are\s+we)\b/i.test(input);
-  if (!asksFocus) return lastVerifiedActionOutcome;
+  const verifiedOutcome = asksDidOutcome
+    ? `${lastVerifiedActionOutcome} ${/\b(?:both|all|those)\b/i.test(input) ? "Those outcomes are recorded." : "That outcome is recorded."}`
+    : lastVerifiedActionOutcome;
+  if (!asksFocus) return verifiedOutcome;
   const focused = resultSessionName(focusedSession);
   return focused
-    ? `${lastVerifiedActionOutcome} You're in ${focused}.`
-      : `${lastVerifiedActionOutcome} No session is currently focused.`;
+    ? `${verifiedOutcome} You're in ${focused}.`
+      : `${verifiedOutcome} No session is currently focused.`;
 };
 
 export const verifiedDeliveryVisibilitySpeech = (
@@ -775,11 +795,78 @@ export const directSessionOutputSpeech = (
   return `${update.name} update: ${output.replace(/^assistant:\s*/i, "")}`;
 };
 
+export const directFocusedOutputSpeech = (
+  input: string,
+  state: JsonObject,
+): string | undefined => {
+  if (
+    (Array.isArray(state.updates) && state.updates.length > 0) ||
+    (Array.isArray(state.pending_decisions) && state.pending_decisions.length > 0) ||
+    /\b(?:tell|send|message|ask|switch|focus|open|archive|rename|start|make|create|approve|accept|decline|deny|reject|cancel|interrupt|stop|queue|rerun|retry)\b/i.test(
+      input,
+    )
+  ) {
+    return undefined;
+  }
+  const asksForCurrentOutput =
+    /\b(?:latest|status|progress)\b/i.test(input) ||
+    /\bwhat(?:'s|\s+is)\s+(?:new\b|(?:it|this|that)\s+(?:doing|working\s+on|up\s+to)\b)/i.test(
+      input,
+    ) ||
+    /\b(?:found|done)\s+so\s+far\b/i.test(input) ||
+    /\bwhat\s+finished\b/i.test(input);
+  if (!asksForCurrentOutput) return undefined;
+  const delta = objectValue(state.output_delta);
+  const output = delta?.changed === true && typeof delta.output === "string"
+    ? delta.output.trim().replace(/^assistant:\s*/i, "")
+    : "";
+  const focused = resultSessionName(state.focused_session);
+  if (
+    !focused ||
+    !output ||
+    output.length > 300 ||
+    output.includes("```") ||
+    /https?:\/\//i.test(output) ||
+    output.split("\n").length > 3
+  ) {
+    return undefined;
+  }
+  return `${focused} update: ${output}`;
+};
+
 export const directCoordinatorUpdateSpeech = (
   updates: readonly CoordinatorUpdate[],
 ): string | undefined => {
   const outputSpeech = directSessionOutputSpeech(updates);
   if (outputSpeech) return outputSpeech;
+  if (
+    updates.length > 0 &&
+    updates.length <= 3 &&
+    updates.every((update) => update.type === "decision_needed")
+  ) {
+    const decisions: string[] = [];
+    for (const update of updates) {
+      const prompts = Array.isArray(update.prompts) ? update.prompts : [];
+      if (prompts.length === 0 || prompts.length > 2) return undefined;
+      for (const value of prompts) {
+        const prompt = objectValue(value);
+        const message = typeof prompt?.message === "string" ? prompt.message.trim() : "";
+        if (
+          !message ||
+          message.length > 180 ||
+          message.includes("```") ||
+          /https?:\/\//i.test(message) ||
+          message.includes("\n")
+        ) {
+          return undefined;
+        }
+        const need = prompt?.mode === "confirmation" ? "approval" : "input";
+        decisions.push(`${update.name} needs your ${need}: ${message}`);
+      }
+    }
+    const speech = decisions.join(" ");
+    return speech.length <= 480 ? speech : undefined;
+  }
   if (updates.length !== 1 || updates[0]?.type !== "session_completed") {
     return undefined;
   }
@@ -857,6 +944,28 @@ export class CelerisConversation {
       this.remember(input, speech);
       return speech;
     }
+    const focusedAtTurn = objectValue(updates.focused_session);
+    const focusedName = typeof focusedAtTurn?.name === "string"
+      ? focusedAtTurn.name.trim()
+      : "";
+    if (
+      focusedName &&
+      (!Array.isArray(updates.updates) || updates.updates.length === 0) &&
+      allowsFocusChange(input) &&
+      targetsFocusedSession(input, focusedName)
+    ) {
+      const speech = sanitizeForSpeech(`You're already in ${focusedName}.`, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech);
+      return speech;
+    }
+    const directOutput = directFocusedOutputSpeech(input, updates);
+    if (directOutput) {
+      const speech = sanitizeForSpeech(directOutput, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech);
+      return speech;
+    }
     const notificationTargets = immediateNotificationTargets(
       this.history,
       updates.known_sessions,
@@ -900,13 +1009,6 @@ export class CelerisConversation {
       .filter(
         (tool) => {
           const name = tool.function.name;
-          const focusedSession = updates.focused_session;
-          const focusedName =
-            focusedSession &&
-            typeof focusedSession === "object" &&
-            !Array.isArray(focusedSession)
-              ? (focusedSession as JsonObject).name
-              : undefined;
           return (
             name !== "check_updates" &&
             (name !== "focus_session" ||

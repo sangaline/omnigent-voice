@@ -8,6 +8,7 @@ import {
   CelerisMemoryPolicy,
   CoordinatorToolClient,
   directCoordinatorUpdateSpeech,
+  directFocusedOutputSpeech,
   directSessionOutputSpeech,
   immediateNotificationTargets,
   isDeclarativeMissedSend,
@@ -74,6 +75,19 @@ const toolClient = (): CoordinatorToolClient => ({
       },
     },
     {
+      name: "answer_prompt",
+      description: "Resolve a pending prompt.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          prompt_id: { type: "string" },
+          action: { type: "string", enum: ["accept", "decline", "cancel"] },
+          session_id: { type: "string" },
+        },
+        required: ["prompt_id", "action"],
+      },
+    },
+    {
       name: "check_updates",
       description: "Check updates.",
       inputSchema: { type: "object", properties: {} },
@@ -123,6 +137,30 @@ describe("Celeris coordinator conversation", () => {
     expect(parsed.items?.at(-1)).toHaveProperty("omitted_items");
   });
 
+  it("answers a plain latest-output question only from a safe fresh delta", () => {
+    const state = {
+      focused_session: { id: "session-primary", name: "Primary Work" },
+      pending_decisions: [],
+      updates: [],
+      output_delta: {
+        changed: true,
+        output: "assistant: The shared harness passed the held out checks.",
+      },
+    };
+    expect(directFocusedOutputSpeech("okay what's the latest on it right now", state)).toBe(
+      "Primary Work update: The shared harness passed the held out checks.",
+    );
+    expect(
+      directFocusedOutputSpeech("tell it to rerun the latest check", state),
+    ).toBeUndefined();
+    expect(
+      directFocusedOutputSpeech("what's the latest", {
+        ...state,
+        updates: [{ event_id: 9, type: "decision_needed" }],
+      }),
+    ).toBeUndefined();
+  });
+
   it("renders verified action receipts directly unless an update also needs speech", () => {
     expect(
       successfulActionSpeech("send_message", {
@@ -149,6 +187,22 @@ describe("Celeris coordinator conversation", () => {
       }),
     ).toBe("I archived Receipt Lab; you're back in Primary Work.");
     expect(
+      successfulActionSpeech("answer_prompt", {
+        resolved: true,
+        action: "accept",
+        target_session: { id: "session-cache", name: "Cache Worker" },
+        updates: [],
+      }),
+    ).toBe("I approved the prompt for Cache Worker.");
+    expect(
+      successfulActionSpeech("answer_prompt", {
+        resolved: true,
+        action: "decline",
+        target_session: { id: "session-release", name: "Release Deploy" },
+        updates: [],
+      }),
+    ).toBe("I declined the prompt for Release Deploy.");
+    expect(
       successfulActionSpeech("send_message", {
         accepted: true,
         target_session: { id: "session-1", name: "Primary Work" },
@@ -171,6 +225,22 @@ describe("Celeris coordinator conversation", () => {
         { id: "session-primary", name: "Primary Work" },
       ),
     ).toBeUndefined();
+    expect(
+      verifiedActionFollowupSpeech(
+        "wait did both of those actually happen or are you just saying that",
+        "I approved the prompt for Cache Worker. I declined the prompt for Release Deploy.",
+        { id: "session-primary", name: "Primary Work" },
+      ),
+    ).toBe(
+      "I approved the prompt for Cache Worker. I declined the prompt for Release Deploy. Those outcomes are recorded.",
+    );
+    expect(
+      verifiedActionFollowupSpeech(
+        "and did that approval actually go through",
+        "I approved the prompt for Side Beta.",
+        { id: "session-primary", name: "Primary Work" },
+      ),
+    ).toBe("I approved the prompt for Side Beta. That outcome is recorded.");
     expect(
       verifiedDeliveryVisibilitySpeech("is that message showing now", {
         target_session: { id: "session-primary", name: "Primary Work" },
@@ -464,8 +534,9 @@ describe("Celeris coordinator conversation", () => {
         function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
       }>;
     };
-    expect(request.tools).toHaveLength(1);
+    expect(request.tools).toHaveLength(2);
     expect(request.tools?.map((tool) => tool.function?.name)).not.toContain("focus_session");
+    expect(request.tools?.map((tool) => tool.function?.name)).toContain("answer_prompt");
     const send = request.tools?.find((tool) => tool.function?.name === "send_message");
     expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");
     expect(
@@ -807,6 +878,88 @@ describe("Celeris coordinator conversation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("renders multiple verified prompt resolutions and answers the immediate audit without retrying", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-accept",
+            type: "function",
+            function: {
+              name: "answer_prompt",
+              arguments: JSON.stringify({
+                session_id: "session-cache",
+                prompt_id: "prompt-cache-restart",
+                action: "accept",
+              }),
+            },
+          },
+          {
+            id: "call-decline",
+            type: "function",
+            function: {
+              name: "answer_prompt",
+              arguments: JSON.stringify({
+                session_id: "session-release",
+                prompt_id: "prompt-production-deploy",
+                action: "decline",
+              }),
+            },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    let resolved = false;
+    vi.mocked(tools.callTool).mockImplementation(
+      (name: string, args: Record<string, unknown>) => {
+        if (name === "check_updates") {
+          return Promise.resolve({
+            focused_session: { id: "session-primary", name: "Primary Work" },
+            pending_decisions: resolved
+              ? []
+              : [
+                  { session_id: "session-cache", name: "Cache Worker" },
+                  { session_id: "session-release", name: "Release Deploy" },
+                ],
+            updates: [],
+          });
+        }
+        if (args.prompt_id === "prompt-cache-restart") {
+          return Promise.resolve({
+            resolved: true,
+            action: "accept",
+            target_session: { id: "session-cache", name: "Cache Worker" },
+            updates: [],
+          });
+        }
+        resolved = true;
+        return Promise.resolve({
+          resolved: true,
+          action: "decline",
+          target_session: { id: "session-release", name: "Release Deploy" },
+          updates: [],
+        });
+      },
+    );
+    const subject = conversation("test-key", tools);
+    const receipt =
+      "I approved the prompt for Cache Worker. I declined the prompt for Release Deploy.";
+
+    await expect(
+      subject.respond(
+        "yeah okay let the cache restart one go ahead but uh no decline the production deploy",
+      ),
+    ).resolves.toBe(receipt);
+    await expect(
+      subject.respond("wait did both of those actually happen or are you just saying that"),
+    ).resolves.toBe(`${receipt} Those outcomes are recorded.`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(tools.callTool).toHaveBeenCalledTimes(4);
+  });
+
   it("forces the missing half of an explicit compound action before speaking", async () => {
     const fetchMock = vi
       .fn()
@@ -1080,6 +1233,36 @@ describe("Celeris coordinator conversation", () => {
     ).resolves.toBe(
       "Side Beta finished the check. It found one flaky reconnect test.",
     );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("voices a bounded batch of structured decisions without model paraphrasing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const updates = [
+      {
+        event_id: 4,
+        type: "decision_needed" as const,
+        session_id: "session-cache",
+        name: "Cache Worker",
+        prompts: [{ message: "Restart the local test process?", mode: "confirmation" }],
+      },
+      {
+        event_id: 5,
+        type: "decision_needed" as const,
+        session_id: "session-release",
+        name: "Release Deploy",
+        prompts: [{ message: "Deploy the candidate to production?", mode: "confirmation" }],
+      },
+    ];
+    const expected =
+      "Cache Worker needs your approval: Restart the local test process? " +
+      "Release Deploy needs your approval: Deploy the candidate to production?";
+
+    expect(directCoordinatorUpdateSpeech(updates)).toBe(expected);
+    await expect(
+      conversation("test-key").announceUpdate(updates, new AbortController().signal),
+    ).resolves.toBe(expected);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

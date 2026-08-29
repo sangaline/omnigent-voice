@@ -440,7 +440,8 @@
         "resolved": true,
         "session_id": "session-primary",
         "prompt_id": "prompt-deploy",
-        "action": "accept"
+        "action": "accept",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "waiting" }
       }
     },
     "expected": {
