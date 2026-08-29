@@ -28,7 +28,9 @@ export class OmnigentGrantClient {
   }
 
   public async startCliLogin(): Promise<CliLoginStart> {
-    const response = await this.fetcher(new URL("/auth/cli-login", this.options.baseUrl), {
+    const url = new URL("/auth/cli-login", this.options.baseUrl);
+    url.searchParams.set("grant_client_id", "omnigent-mcp");
+    const response = await this.fetcher(url, {
       method: "POST",
       headers: { accept: "application/json" },
     });
