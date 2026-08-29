@@ -28,6 +28,10 @@ queued message, archive the focused session, answer a structured prompt, start
 a session, and drain background updates. Focus is server-owned state included
 in every tool result. Archiving a temporary focused session restores the prior
 valid focus and reports both sides of the transition for the spoken response.
+Background events are retained in a bounded log and every result carries an
+event cursor. Clients without server notifications can safely poll
+`check_updates` with their last cursor; one client reading events does not drain
+them for other clients.
 The same server can run over stdio with `npm run mcp`; the voice process uses an
 in-memory MCP transport to avoid network latency.
 

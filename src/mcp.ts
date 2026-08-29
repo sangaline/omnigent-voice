@@ -6,13 +6,29 @@ import * as z from "zod/v4";
 import { OmnigentCoordinator } from "./coordinator.js";
 import { JsonObject } from "./omnigent.js";
 
+interface ToolConsumerState {
+  updateCursor: number;
+}
+
 const toolResult = async (
   coordinator: OmnigentCoordinator,
   name: string,
   args: Record<string, unknown>,
+  state: ToolConsumerState,
 ) => {
   try {
-    const result = await coordinator.execute(name, args);
+    const explicitCursor =
+      name === "check_updates" && typeof args.after_event_id === "number"
+        ? args.after_event_id
+        : undefined;
+    const result = await coordinator.execute(
+      name,
+      args,
+      explicitCursor ?? state.updateCursor,
+    );
+    if (typeof result.update_cursor === "number") {
+      state.updateCursor = Math.max(state.updateCursor, result.update_cursor);
+    }
     return {
       content: [{ type: "text" as const, text: JSON.stringify(result) }],
       structuredContent: result,
@@ -30,6 +46,7 @@ export const createCoordinatorMcpServer = (
   coordinator: OmnigentCoordinator,
 ): McpServer => {
   const server = new McpServer({ name: "omnigent-coordinator", version: "0.1.0" });
+  const state: ToolConsumerState = { updateCursor: 0 };
 
   server.registerTool(
     "list_sessions",
@@ -44,7 +61,7 @@ export const createCoordinatorMcpServer = (
         limit: z.number().int().min(1).max(20).optional().describe("Maximum sessions, default 8."),
       },
     },
-    (args) => toolResult(coordinator, "list_sessions", args),
+    (args) => toolResult(coordinator, "list_sessions", args, state),
   );
 
   server.registerTool(
@@ -56,7 +73,7 @@ export const createCoordinatorMcpServer = (
         session_id: z.string().min(1).describe("Session id returned by list_sessions."),
       },
     },
-    (args) => toolResult(coordinator, "focus_session", args),
+    (args) => toolResult(coordinator, "focus_session", args, state),
   );
 
   server.registerTool(
@@ -70,7 +87,7 @@ export const createCoordinatorMcpServer = (
         page_size: z.number().int().min(1).max(30).optional().describe("Items per page, default 12."),
       },
     },
-    (args) => toolResult(coordinator, "get_output", args),
+    (args) => toolResult(coordinator, "get_output", args, state),
   );
 
   server.registerTool(
@@ -87,7 +104,7 @@ export const createCoordinatorMcpServer = (
           .describe("Opaque cursor returned by the prior poll; omit for buffered output."),
       },
     },
-    (args) => toolResult(coordinator, "poll_output", args),
+    (args) => toolResult(coordinator, "poll_output", args, state),
   );
 
   server.registerTool(
@@ -104,7 +121,7 @@ export const createCoordinatorMcpServer = (
           .describe("Defaults to immediate. Use queued only when the user explicitly asks."),
       },
     },
-    (args) => toolResult(coordinator, "send_message", args),
+    (args) => toolResult(coordinator, "send_message", args, state),
   );
 
   server.registerTool(
@@ -116,7 +133,7 @@ export const createCoordinatorMcpServer = (
         session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
       },
     },
-    (args) => toolResult(coordinator, "archive_session", args),
+    (args) => toolResult(coordinator, "archive_session", args, state),
   );
 
   server.registerTool(
@@ -131,7 +148,7 @@ export const createCoordinatorMcpServer = (
         session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
       },
     },
-    (args) => toolResult(coordinator, "answer_prompt", args),
+    (args) => toolResult(coordinator, "answer_prompt", args, state),
   );
 
   server.registerTool(
@@ -145,16 +162,24 @@ export const createCoordinatorMcpServer = (
         title: z.string().min(1).optional().describe("Short session title."),
       },
     },
-    (args) => toolResult(coordinator, "start_session", args),
+    (args) => toolResult(coordinator, "start_session", args, state),
   );
 
   server.registerTool(
     "check_updates",
     {
       description:
-        "Drain background session completion, failure, and decision-needed updates since the last tool call.",
+        "Return background completion, failure, and decision-needed updates after an explicit event cursor. Omit the cursor for this connection's unread updates.",
+      inputSchema: {
+        after_event_id: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Last update_cursor seen by the caller; use 0 on first poll."),
+      },
     },
-    () => toolResult(coordinator, "check_updates", {}),
+    (args) => toolResult(coordinator, "check_updates", args, state),
   );
 
   return server;

@@ -216,11 +216,6 @@ export class OmnigentCoordinator {
     return () => this.updateListeners.delete(listener);
   }
 
-  public acknowledgeUpdate(eventId: number): void {
-    const index = this.updates.findIndex((update) => update.event_id === eventId);
-    if (index >= 0) this.updates.splice(index, 1);
-  }
-
   public async interruptFocused(): Promise<boolean> {
     if (!this.focusedSessionId) return false;
     const snapshot = await this.options.omnigent.getSession(this.focusedSessionId);
@@ -229,7 +224,11 @@ export class OmnigentCoordinator {
     return true;
   }
 
-  public async execute(name: string, args: Record<string, unknown>): Promise<JsonObject> {
+  public async execute(
+    name: string,
+    args: Record<string, unknown>,
+    afterEventId = 0,
+  ): Promise<JsonObject> {
     await this.refreshUpdates();
     let result: JsonObject;
     switch (name) {
@@ -271,7 +270,7 @@ export class OmnigentCoordinator {
     return {
       ...result,
       focused_session: this.focusedSession ?? null,
-      updates: this.drainUpdates(),
+      ...this.updatesAfter(afterEventId),
     };
   }
 
@@ -499,8 +498,18 @@ export class OmnigentCoordinator {
     return id;
   }
 
-  private drainUpdates(): CoordinatorUpdate[] {
-    return this.updates.splice(0, this.updates.length);
+  private updatesAfter(afterEventId: number): JsonObject {
+    const requested = Math.max(0, Math.floor(afterEventId));
+    const earliest = this.updates[0]?.event_id;
+    const cursorAhead = requested > this.updateSequence;
+    const cursorExpired =
+      cursorAhead || (earliest !== undefined && requested < earliest - 1);
+    const effective = cursorAhead ? 0 : requested;
+    return {
+      updates: this.updates.filter((update) => update.event_id > effective),
+      update_cursor: this.updateSequence,
+      update_cursor_expired: cursorExpired,
+    };
   }
 
   private seed(sessions: JsonObject[]): void {

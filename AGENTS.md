@@ -66,11 +66,16 @@ every two seconds, including while the human is speaking. At ASR finalization,
 `check_updates` atomically drains the focused session's cursor-backed output
 delta into the model context. Output arriving later remains buffered for the
 next turn. Persisted conversation items exclude transient terminal animations.
-Completion, failure, and new-decision events remain buffered in `updates`.
+Completion, failure, and new-decision events remain in a bounded replay log.
+Every tool result includes only this MCP connection's unread `updates` plus an
+`update_cursor`; `check_updates(after_event_id)` can replay from an explicit
+cursor for clients without notifications. A cursor beyond the current process
+or older than the retained window sets `update_cursor_expired` and returns the
+available window. Events are never globally drained by one caller.
 When the channel is idle, those real events are sent to Celeris without tools
 and spoken proactively; a human turn takes priority and receives any unspoken
-event in its frozen context. Proactive delivery acknowledgement removes the
-event only after playback completes.
+event in its frozen context. The voice consumer advances its event cursor only
+after proactive playback completes.
 `waiting_for_input` is a
 voice-facing filter for a nonzero pending-elicitation count, not an Omnigent
 status (the native statuses are `idle`, `running`, `waiting`, and `failed`).

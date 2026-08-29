@@ -415,9 +415,7 @@ export class DiscordVoiceBot {
         source: "background_update",
       });
       if (await this.speak(spoken, epoch)) {
-        for (const update of updates) {
-          this.options.coordinator.acknowledgeUpdate(update.event_id);
-        }
+        this.options.celeris.acknowledgeSpokenUpdates(updates, spoken);
       }
     } finally {
       if (this.notificationAbort === controller) this.notificationAbort = undefined;

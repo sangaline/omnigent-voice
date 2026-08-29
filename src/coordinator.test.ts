@@ -220,4 +220,59 @@ describe("Omnigent coordinator", () => {
       await client.close();
     }
   });
+
+  it("supports replayable event cursors without globally draining updates", async () => {
+    const now = new Date().toISOString();
+    const running = {
+      id: "session-1",
+      title: "Voice MVP",
+      status: "running",
+      updated_at: now,
+    };
+    const idle = { ...running, status: "idle" };
+    const omnigent = {
+      listSessions: vi
+        .fn()
+        .mockResolvedValueOnce([running])
+        .mockResolvedValue([idle]),
+      getSession: vi.fn().mockResolvedValue(idle),
+      listItems: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
+      sendMessage: vi.fn(),
+      resolveElicitation: vi.fn(),
+      createSession: vi.fn(),
+      archiveSession: vi.fn(),
+      interruptSession: vi.fn(),
+    } as unknown as OmnigentClient;
+    const coordinator = new OmnigentCoordinator({
+      omnigent,
+      logger: new Logger("error"),
+      pollIntervalMs: 60_000,
+    });
+    await coordinator.start();
+    const client = await CoordinatorMcpClient.create(coordinator);
+    try {
+      const first = await client.callTool("check_updates", { after_event_id: 0 });
+      expect(first).toMatchObject({
+        update_cursor: 1,
+        update_cursor_expired: false,
+        updates: [{ event_id: 1, type: "session_completed", session_id: "session-1" }],
+      });
+      await expect(client.callTool("list_sessions", {})).resolves.toMatchObject({
+        update_cursor: 1,
+        updates: [],
+      });
+      await expect(
+        client.callTool("check_updates", { after_event_id: 0 }),
+      ).resolves.toMatchObject({
+        update_cursor: 1,
+        updates: [{ event_id: 1, type: "session_completed" }],
+      });
+      await expect(
+        client.callTool("check_updates", { after_event_id: 1 }),
+      ).resolves.toMatchObject({ update_cursor: 1, updates: [] });
+    } finally {
+      coordinator.stop();
+      await client.close();
+    }
+  });
 });

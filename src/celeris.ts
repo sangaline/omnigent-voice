@@ -137,16 +137,23 @@ const voiceSafeTool = (tool: OpenAiTool): OpenAiTool => {
 export class CelerisConversation {
   private readonly history: ChatMessage[] = [];
   private toolDefinitions?: OpenAiTool[];
+  private updateCursor = 0;
 
   public constructor(private readonly options: CelerisOptions) {}
 
   public async respond(input: string): Promise<string> {
     if (!this.options.apiKey) return "Celeris isn't configured right now.";
 
-    const updates = await this.options.tools.callTool("check_updates", {}).catch((error) => {
+    let turnUpdateCursor = this.updateCursor;
+    const updates = await this.options.tools.callTool("check_updates", {
+      after_event_id: this.updateCursor,
+    }).catch((error) => {
       this.options.logger.error("coordinator.updates.failed", error);
-      return { updates: [] };
+      return { updates: [] } as JsonObject;
     });
+    if (typeof updates.update_cursor === "number") {
+      turnUpdateCursor = Math.max(turnUpdateCursor, updates.update_cursor);
+    }
     const messages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
       ...this.history,
@@ -172,6 +179,7 @@ export class CelerisConversation {
           const content = typeof message.content === "string" ? message.content.trim() : "";
           if (!content) throw new Error("Celeris returned neither speech nor a tool call");
           const speech = sanitizeForSpeech(content, 300);
+          this.updateCursor = turnUpdateCursor;
           this.remember(input, speech);
           return speech;
         }
@@ -197,6 +205,9 @@ export class CelerisConversation {
             result = await this.options.tools.callTool(call.function.name, args);
           } catch (error) {
             result = { error: error instanceof Error ? error.message : String(error) };
+          }
+          if (typeof result.update_cursor === "number") {
+            turnUpdateCursor = Math.max(turnUpdateCursor, result.update_cursor);
           }
           messages.push({
             role: "tool",
@@ -229,18 +240,25 @@ export class CelerisConversation {
       const message = await this.complete(messages, "background_update", [], signal);
       const content = typeof message.content === "string" ? message.content.trim() : "";
       if (!content) return undefined;
-      const speech = sanitizeForSpeech(content, 300);
-      this.history.push(
-        { role: "system", content: `Omnigent background update: ${JSON.stringify(updates)}` },
-        { role: "assistant", content: speech },
-      );
-      this.trimHistory();
-      return speech;
+      return sanitizeForSpeech(content, 300);
     } catch (error) {
       if (signal.aborted) return undefined;
       this.options.logger.error("celeris.notification.failed", error);
       return undefined;
     }
+  }
+
+  public acknowledgeSpokenUpdates(updates: CoordinatorUpdate[], speech: string): void {
+    const lastEventId = updates.reduce(
+      (maximum, update) => Math.max(maximum, update.event_id),
+      this.updateCursor,
+    );
+    this.updateCursor = lastEventId;
+    this.history.push(
+      { role: "system", content: `Omnigent background update: ${JSON.stringify(updates)}` },
+      { role: "assistant", content: speech },
+    );
+    this.trimHistory();
   }
 
   private async tools(): Promise<OpenAiTool[]> {

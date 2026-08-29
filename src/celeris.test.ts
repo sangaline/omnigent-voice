@@ -148,7 +148,9 @@ describe("Celeris coordinator conversation", () => {
     await expect(conversation("test-key", tools).respond("Check the deployment")).resolves.toBe(
       "I sent that to the active session.",
     );
-    expect(tools.callTool).toHaveBeenNthCalledWith(1, "check_updates", {});
+    expect(tools.callTool).toHaveBeenNthCalledWith(1, "check_updates", {
+      after_event_id: 0,
+    });
     expect(tools.callTool).toHaveBeenNthCalledWith(2, "send_message", {
       message: "Inspect the deployment",
     });
@@ -194,5 +196,28 @@ describe("Celeris coordinator conversation", () => {
     };
     expect(request.tools).toBeUndefined();
     expect(request.tool_choice).toBeUndefined();
+  });
+
+  it("advances its update cursor only after a proactive update is spoken", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response({ content: "The Voice MVP session is ready." }))
+      .mockResolvedValueOnce(response({ content: "Hello again." }));
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    const subject = conversation("test-key", tools);
+    const updates = [
+      {
+        event_id: 7,
+        type: "session_completed" as const,
+        session_id: "session-1",
+        name: "Voice MVP",
+      },
+    ];
+    const speech = await subject.announceUpdate(updates, new AbortController().signal);
+    subject.acknowledgeSpokenUpdates(updates, speech ?? "");
+
+    await subject.respond("Hello");
+    expect(tools.callTool).toHaveBeenCalledWith("check_updates", { after_event_id: 7 });
   });
 });
