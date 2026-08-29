@@ -139,6 +139,9 @@ ENV HF_HOME=/opt/pocket-cache \
 RUN /opt/pocket-tts/bin/python -c \
       'from pocket_tts import TTSModel; model = TTSModel.load_model(quantize=True); model.get_state_for_audio_prompt("alba")' \
     && rm -rf \
+      /opt/pocket-cache/.agent_harnesses.json \
+      /opt/pocket-cache/hub/.locks \
+      /opt/pocket-cache/xet \
       /opt/pocket-tts/lib/python*/site-packages/torch/include \
       /opt/pocket-tts/lib/python*/site-packages/torch/test \
       /opt/pocket-tts/lib/python*/site-packages/pip \
@@ -165,6 +168,7 @@ ENV NODE_ENV=production \
     POCKET_TTS_BRIDGE_PATH=/opt/omnigent-voice/pocket-tts/bridge.py \
     HF_HOME=/opt/pocket-cache \
     HF_HUB_OFFLINE=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
     POCKET_TTS_NO_BEARTYPE=1 \
     SMART_TURN_BRIDGE_PATH=/opt/omnigent-voice/smart-turn/bridge.py \
     PYTHONPATH=/opt/smart-turn-python \

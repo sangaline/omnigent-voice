@@ -51,7 +51,9 @@ probes generated in 0.51-0.68 seconds and were independently recognized by the
 bundled Nemotron model with only two minor word omissions. Returning `false`
 from the Discord chunk callback sends a real cancellation to the warm bridge;
 do not regress to rendering an unheard long reply before accepting the next TTS
-request. Piper remains selectable with `TTS_RUNTIME=piper`.
+request. The public image removes Hugging Face download locks, Xet logs, and
+generic agent-client metadata after caching the public checkpoint, and runtime
+telemetry is disabled. Piper remains selectable with `TTS_RUNTIME=piper`.
 
 Production Celeris requests use OpenAI-compatible SSE whenever the round is not
 forcing a named tool. Complete natural speech segments are queued into one
