@@ -90,6 +90,9 @@ const stringValue = (value: unknown): string | undefined =>
 const numberValue = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
+const objectArray = (value: unknown): JsonObject[] =>
+  Array.isArray(value) ? value.filter(isObject) : [];
+
 const sessionId = (session: JsonObject): string | undefined => stringValue(session.id);
 
 const sessionName = (session: JsonObject): string =>
@@ -339,6 +342,7 @@ export class OmnigentCoordinator {
     const sessions = await this.options.omnigent.listSessions(30);
     this.seed(sessions);
     await this.refreshPendingDecisions(sessions);
+    this.seed(sessions);
     this.focusedSessionId = sessionId(sessions[0] ?? {});
     this.focusedSession = this.focusedSessionId
       ? this.sessionSummaries.get(this.focusedSessionId)
@@ -842,7 +846,19 @@ export class OmnigentCoordinator {
   }
 
   private fingerprint(session: JsonObject): string {
-    return JSON.stringify({ status: session.status, pending: pendingCount(session) });
+    const id = sessionId(session);
+    const prompts = id
+      ? objectArray(this.pendingDecisions.get(id)?.prompts)
+      : [];
+    const promptIds = prompts
+      .map((prompt) => stringValue(prompt.prompt_id))
+      .filter((promptId): promptId is string => Boolean(promptId))
+      .sort();
+    return JSON.stringify({
+      status: session.status,
+      pending: pendingCount(session),
+      prompt_ids: promptIds,
+    });
   }
 
   private async refreshUpdates(): Promise<void> {
@@ -874,7 +890,7 @@ export class OmnigentCoordinator {
       const before = this.fingerprints.get(id);
       const after = this.fingerprint(session);
       this.fingerprints.set(id, after);
-      let previous: { status?: unknown; pending?: unknown } = {};
+      let previous: { status?: unknown; pending?: unknown; prompt_ids?: unknown } = {};
       const lifecycleChanged = Boolean(before && before !== after);
       if (lifecycleChanged && before) {
         try {
@@ -885,6 +901,17 @@ export class OmnigentCoordinator {
       }
       const status = stringValue(session.status) ?? "unknown";
       const name = sessionName(session);
+      const currentPromptIds = objectArray(this.pendingDecisions.get(id)?.prompts)
+        .map((prompt) => stringValue(prompt.prompt_id))
+        .filter((promptId): promptId is string => Boolean(promptId));
+      const previousPromptIds = new Set(
+        Array.isArray(previous.prompt_ids)
+          ? previous.prompt_ids.filter((value): value is string => typeof value === "string")
+          : [],
+      );
+      const hasNewPrompt = currentPromptIds.some(
+        (promptId) => !previousPromptIds.has(promptId),
+      );
       let lifecycleUpdate = false;
       if (lifecycleChanged && status === "failed" && previous.status !== "failed") {
         lifecycleUpdate = true;
@@ -910,7 +937,7 @@ export class OmnigentCoordinator {
       }
       if (
         lifecycleChanged &&
-        pendingCount(session) > Number(previous.pending ?? 0)
+        (pendingCount(session) > Number(previous.pending ?? 0) || hasNewPrompt)
       ) {
         lifecycleUpdate = true;
         this.pushUpdate({

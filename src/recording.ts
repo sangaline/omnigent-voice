@@ -1,5 +1,15 @@
 export const MIN_RECORDING_PEAK = 0.002;
 
+/**
+ * Smart Turn's positive result is the only endpoint that establishes a
+ * complete semantic turn. A fallback can land just before Discord opens the
+ * continuation receive stream, so retain the ordinary merge grace for it.
+ */
+export const transcriptMergeDelay = (
+  endpointReason: string,
+  utteranceMergeMs: number,
+): number => endpointReason === "smart_turn" ? 0 : utteranceMergeMs;
+
 export interface RecordingLease {
   confirm(): boolean;
   close(): boolean;

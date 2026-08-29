@@ -1488,3 +1488,45 @@ does not hide fresh state.
 The sanitized regression passed ten of ten trials at zero model rounds and
 0–4 ms. Focus remains unchanged and no live coordinator session was read or
 mutated.
+
+### 2026-08-29 — Superseded partial-turn action safety
+
+Hypothesis H52: immediate Smart Turn delivery was safe even when endpointing
+fell through to the semantic timeout. The live trace disproved it. One
+incomplete transcript was finalized by `semantic_fallback`; Discord opened the
+continuation receive stream about 8 ms later, but the first fragment had already
+started a Celeris request. Its `send_message` mutation completed before the
+second fragment was recognized. The later response then falsely described both
+fragments as delivered even though the action ledger contained only the first.
+
+Only a positive Smart Turn classification now commits with zero merge delay.
+Fallback endpoints retain the configured 350 ms continuation grace, and the
+next confirmed stream cancels that timer before the transcript is delivered.
+Confirmed new speech also aborts the active Celeris turn. The same abort signal
+cancels the provider request and is checked after completion plus immediately
+before every MCP tool invocation. A production-path regression aborts the turn
+after Celeris selects `send_message` and proves that only the initial read-only
+`check_updates` call ran.
+
+### 2026-08-29 — Real proactive runtime and replacement decisions
+
+Hypothesis H53: the prompt cleanly distinguished a model-owned polling loop from
+the voice runtime's existing proactive coordinator monitor. The live agent said
+the human would need to ask again, and the sanitized replay failed all five
+trials with “can't monitor.” An explicit capability contract now says the model
+cannot invent a sleep/poll loop while the runtime does watch sessions and will
+announce real events. The repaired case passed ten of ten in 162–340 ms, while
+the adversarial fake-loop case also remained ten of ten.
+
+A second live failure said “nothing new” while a structured command approval
+was present. Its unchanged replay failed all five trials. One safe pending
+decision is now rendered directly from typed coordinator state instead of being
+hidden by an empty event delta; that case passed ten of ten at zero model rounds
+and 0–3 ms. Coordinator lifecycle fingerprints now include exact prompt IDs, so
+a new prompt replacing an approved one emits `decision_needed` even when the
+pending count remains one.
+
+Promotion evidence is 110 passing unit tests, clean typecheck and build, 38 of
+38 isolated trials, and all 32 stateful scenarios across 106 linked turns. No
+live Omnigent session was read or mutated by these tests, and the excluded ESPN
+session remained untouched.

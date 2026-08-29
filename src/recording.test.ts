@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ConfirmedRecordingTracker } from "./recording.js";
+import {
+  ConfirmedRecordingTracker,
+  transcriptMergeDelay,
+} from "./recording.js";
 
 describe("confirmed Discord recording tracking", () => {
   it("does not let an empty provisional stream block transcript delivery", () => {
@@ -35,5 +38,12 @@ describe("confirmed Discord recording tracking", () => {
     expect(tracker.size).toBe(1);
     second.close();
     expect(tracker.size).toBe(0);
+  });
+
+  it("keeps merge grace only when semantic completion is unproven", () => {
+    expect(transcriptMergeDelay("smart_turn", 350)).toBe(0);
+    expect(transcriptMergeDelay("semantic_fallback", 350)).toBe(350);
+    expect(transcriptMergeDelay("hard_fallback", 350)).toBe(350);
+    expect(transcriptMergeDelay("discord_silence", 350)).toBe(350);
   });
 });

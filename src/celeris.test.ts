@@ -11,6 +11,7 @@ import {
   directFocusedOutputSpeech,
   directGetOutputResultSpeech,
   directNoIncomingUpdateSpeech,
+  directPendingDecisionSpeech,
   directPollOutputResultSpeech,
   directSessionOutputSpeech,
   immediateNotificationTargets,
@@ -1293,6 +1294,40 @@ describe("Celeris coordinator conversation", () => {
       message: "Inspect the deployment",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not execute a tool chosen by a superseded model turn", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      return response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-stale",
+            type: "function",
+            function: {
+              name: "send_message",
+              arguments: JSON.stringify({ message: "Only the first fragment" }),
+            },
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "Tell it only the first fragment",
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(tools.callTool).toHaveBeenCalledTimes(1);
+    expect(tools.callTool).toHaveBeenCalledWith("check_updates", {
+      after_event_id: 0,
+    });
   });
 
   it("routes an explicitly named send without exposing its session id to the model", async () => {
@@ -3093,6 +3128,35 @@ describe("Celeris coordinator conversation", () => {
     expect(tools.callTool).toHaveBeenCalledTimes(1);
     expect(tools.callTool).toHaveBeenCalledWith("check_updates", { after_event_id: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not hide a pending approval behind an empty update snapshot", () => {
+    const state = {
+      pending_decisions: [
+        {
+          session_id: "session-temp",
+          name: "Temporary Session",
+          prompts: [
+            {
+              prompt_id: "prompt-top",
+              message: "Allow the command that samples the top CPU processes?",
+              mode: "confirmation",
+            },
+          ],
+        },
+      ],
+      output_delta: { changed: false, output: "" },
+      updates: [],
+    };
+    expect(directPendingDecisionSpeech("okay so nothing new", state)).toBe(
+      "Temporary Session needs your approval: Allow the command that samples the top CPU processes?",
+    );
+    expect(
+      directNoIncomingUpdateSpeech(
+        "did anything new come in while i was talking",
+        state,
+      ),
+    ).toBeUndefined();
   });
 
   it("does not report an empty incoming-update check without complete evidence", () => {

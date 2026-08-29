@@ -1361,5 +1361,85 @@
       "speechForbiddenTerms": ["renamed", "new temporary session"],
       "maxRounds": 1
     }
+  },
+  {
+    "id": "explain_runtime_proactive_updates",
+    "description": "Distinguish the runtime's real proactive event delivery from a fictitious model-owned polling loop when the human asks to be told when running work replies.",
+    "history": [
+      { "role": "assistant", "content": "I approved that for Temporary Session." }
+    ],
+    "input": "alright will you let me know when it gets back to you",
+    "coordinatorState": {
+      "focused_session": { "id": "session-temp", "name": "Temporary Session", "status": "running" },
+      "known_sessions": [
+        { "id": "session-temp", "name": "Temporary Session", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [
+        {
+          "action_id": 82,
+          "type": "prompt_answered",
+          "session_id": "session-temp",
+          "name": "Temporary Session",
+          "action": "accept",
+          "summary": "Accepted the pending prompt for Temporary Session."
+        }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 14
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+      "speechAnyTerms": [["yes", "will"], ["let you know", "tell you", "notify", "announce"]],
+      "speechForbiddenTerms": [
+        "can't monitor",
+        "cannot monitor",
+        "ask me again",
+        "you'll need to ask",
+        "you need to ask"
+      ],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "pending_approval_is_new_state",
+    "description": "Do not say that nothing is new when the current coordinator snapshot contains an unresolved structured approval.",
+    "history": [
+      { "role": "assistant", "content": "The session is collecting a fresh process snapshot." }
+    ],
+    "input": "okay so nothing new",
+    "coordinatorState": {
+      "focused_session": { "id": "session-temp", "name": "Temporary Session", "status": "waiting" },
+      "known_sessions": [
+        { "id": "session-temp", "name": "Temporary Session", "status": "waiting", "focused": true }
+      ],
+      "pending_decisions": [
+        {
+          "session_id": "session-temp",
+          "name": "Temporary Session",
+          "prompts": [
+            {
+              "prompt_id": "prompt-top",
+              "message": "Allow the command that samples the top CPU processes?",
+              "mode": "confirmation"
+            }
+          ]
+        }
+      ],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 16
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message", "answer_prompt"],
+      "speechTerms": ["temporary session"],
+      "speechAnyTerms": [["approval", "allow", "permission", "waiting"]],
+      "speechForbiddenTerms": ["nothing new", "no new", "still collecting", "still running"],
+      "maxRounds": 1
+    }
   }
 ]

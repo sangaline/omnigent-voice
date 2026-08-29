@@ -112,6 +112,14 @@ full updated turn is classified after the next pause. This replaces the staged
 450 ms capture stop plus 350 ms transcript merge; when semantic endpointing is
 disabled, those legacy settings remain available. Only explicit cancel
 language interrupts the focused running Omnigent session.
+Only a positive Smart Turn classification commits with no transcript merge
+delay. A semantic or hard fallback does not prove the thought is complete, so
+it retains the configured 350 ms continuation grace; a new Discord receive
+stream cancels that timer and joins the next transcript. Confirmed new speech
+also aborts the superseded Celeris request. The conversation checks that abort
+after model completion and again immediately before every coordinator tool
+invocation, so a stale partial transcript cannot mutate a session merely
+because Celeris already selected a tool.
 
 Smart Turn runs as a persistent local Python bridge inside the same container,
 using its 8.7 MB int8 ONNX model and Pipecat's NumPy-only Whisper feature
@@ -456,7 +464,10 @@ session. The coordinator maintains a server-owned `pending_decisions` registry
 across all watched sessions. Every snapshot and tool result repeats unresolved
 prompts with exact session IDs, prompt IDs, natural-language messages, modes,
 and schemas until successful resolution; the decision event carries the same
-prompt data. Celeris must copy these opaque IDs, never recreate them from a
+prompt data. Event fingerprints include the exact prompt IDs rather than only
+the pending count, so replacing one approval with the next at a constant count
+still emits a new `decision_needed` event. Celeris must copy these opaque IDs,
+never recreate them from a
 spoken name. Form-mode prompts pass their JSON schema to Celeris;
 `answer_prompt.answers` must preserve the caller's typed field values.
 Successful resolution removes the prompt before the result is
@@ -503,6 +514,15 @@ The context contract also says that
 output is absent until a tool returns it. Celeris has no page/token introspection
 and must never estimate how much context it has or invent an explanation for a
 dropped utterance or delay.
+
+The model cannot create its own sleep/poll loop, but it must not deny the
+runtime's real background behavior: the coordinator already watches sessions
+and the voice loop proactively announces real output, completion, failure, and
+decision events. A question about whether the user will be told when work gets
+back is answered yes in terms of that runtime capability, without promising a
+model-owned future action. A short “nothing new” check cannot hide an unresolved
+typed prompt; one safe pending decision is rendered directly without a model
+round.
 
 Logs are newline-delimited JSON on stdout and, when `LOG_FILE` is configured,
 appended to that runtime file. `conversation.user.recognized` contains each ASR

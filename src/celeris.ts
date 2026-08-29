@@ -319,7 +319,7 @@ send_message defaults to immediate delivery into the focused session. Use queued
 Every send_message becomes a user-role item in the destination session. Normally relay the human's intent directly. If the message instead reports something you, the voice interface, did, said, or misunderstood, name yourself explicitly as “the voice coordinator” and distinguish the human explicitly; never use an unqualified “I” for a voice-coordinator self-report because the destination will interpret “I” as the human.
 Use archive_session only when the user explicitly asks to archive the focused session. Its result deterministically restores the previous focus; tell the user both what was archived and which session is active now.
 Use rename_session only when the user explicitly asks to rename the focused session. Renaming never changes focus. After a successful rename, tell the user the previous and new names returned by the tool rather than relying on conversational memory.
-You cannot sleep, wait, poll periodically, monitor logs autonomously, or promise a future action. The runtime may deliver real background updates to you; describe only updates actually present in coordinator state or tool results. Never invent an explanation for a delay, silence, dropped utterance, or recognition error.
+You cannot personally sleep, wait, poll periodically, or monitor logs autonomously. The voice runtime itself already watches coordinator events and proactively speaks real output, completion, failure, and decision updates when they arrive. When the human asks whether they will be told when running work gets back, say yes: the runtime will announce the real update when it receives one. Do not tell them to ask again, and do not misdescribe this runtime capability as your own model-controlled polling loop. Describe only updates actually present in coordinator state or tool results, and never promise any other future action. Never invent an explanation for a delay, silence, dropped utterance, or recognition error.
 Never invent why one of your prior answers was wrong. If the available evidence only establishes that you answered incorrectly, say you misread or misinterpreted the available data without claiming that context, output, or access was missing.
 You cannot inspect or measure your own context window. If asked what context you can see, describe only the context contract supplied in coordinator state. Never estimate pages or tokens. If you mention a configured retention threshold, copy its number exactly from context_contract or omit the number; never approximate or alter it. Do not claim to see older or live agent output unless output_delta or a tool result in this turn contains it.
 If a session needs input, explain the prompt naturally. Only call answer_prompt with accept after the user clearly approves; preserve their actual form answer.
@@ -1209,6 +1209,9 @@ const hasEmptyIncomingUpdateSnapshot = (
 ): boolean => {
   if (!asksForIncomingUpdate(input)) return false;
   if (!Array.isArray(state.updates) || state.updates.length > 0) return false;
+  if (Array.isArray(state.pending_decisions) && state.pending_decisions.length > 0) {
+    return false;
+  }
   const delta = objectValue(state.output_delta);
   return delta?.changed === false && state.update_cursor_expired !== true;
 };
@@ -1956,6 +1959,38 @@ const directDecisionUpdatesSpeech = (
   return speech.length <= 300 ? speech : undefined;
 };
 
+export const directPendingDecisionSpeech = (
+  input: string,
+  state: JsonObject,
+): string | undefined => {
+  if (
+    !/\b(?:(?:nothing|anything|something)\s+new|(?:any|no)\s+(?:command\s+)?approval)\b/i.test(
+      input,
+    ) ||
+    (Array.isArray(state.updates) && state.updates.length > 0) ||
+    objectValue(state.output_delta)?.changed === true ||
+    !Array.isArray(state.pending_decisions)
+  ) {
+    return undefined;
+  }
+  const decisions = state.pending_decisions.flatMap((value, index) => {
+    const decision = objectValue(value);
+    const name = typeof decision?.name === "string" ? decision.name.trim() : "";
+    const sessionId = typeof decision?.session_id === "string"
+      ? decision.session_id.trim()
+      : "";
+    if (!name || !sessionId || !Array.isArray(decision?.prompts)) return [];
+    return [{
+      event_id: -(index + 1),
+      type: "decision_needed" as const,
+      session_id: sessionId,
+      name,
+      prompts: decision.prompts,
+    }];
+  });
+  return directDecisionUpdatesSpeech(decisions);
+};
+
 export const directCoordinatorUpdateSpeech = (
   updates: readonly CoordinatorUpdate[],
 ): string | undefined => {
@@ -2105,8 +2140,10 @@ export class CelerisConversation {
   public async respond(
     input: string,
     onSpeechSegment?: ((segment: string) => void) | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<string> {
     if (!this.options.apiKey) return "Celeris isn't configured right now.";
+    signal?.throwIfAborted();
     this.preemptCompaction();
 
     let turnUpdateCursor = this.updateCursor;
@@ -2116,6 +2153,7 @@ export class CelerisConversation {
       this.options.logger.error("coordinator.updates.failed", error);
       return { updates: [] } as JsonObject;
     });
+    signal?.throwIfAborted();
     const consumedTurnUpdates = new Map<number, CoordinatorUpdate>();
     const retainTurnUpdates = (value: unknown): void => {
       for (const update of coordinatorUpdates(value)) {
@@ -2146,6 +2184,13 @@ export class CelerisConversation {
       : undefined;
     if (directIncomingUpdate) {
       const speech = sanitizeForSpeech(directIncomingUpdate, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
+    const pendingDecisionSpeech = directPendingDecisionSpeech(input, updates);
+    if (pendingDecisionSpeech) {
+      const speech = sanitizeForSpeech(pendingDecisionSpeech, 300);
       this.updateCursor = turnUpdateCursor;
       this.remember(input, speech, retainedTurnUpdates());
       return speech;
@@ -2425,13 +2470,14 @@ export class CelerisConversation {
           messages,
           `round_${round + 1}`,
           tools,
-          undefined,
+          signal,
           256,
           forcedThisRound,
           speechSegmenter
             ? (fragment) => emitSegments(speechSegmenter.push(fragment))
             : undefined,
         );
+        signal?.throwIfAborted();
         const calls = Array.isArray(message.tool_calls)
           ? message.tool_calls.map(extractToolCall).filter((call): call is ToolCall => Boolean(call))
           : [];
@@ -2675,6 +2721,7 @@ export class CelerisConversation {
             attemptedMessageTargetIds.add(resolvedMultipleMessageTarget.id);
           }
           this.options.logger.info("celeris.tool.called", { name: call.function.name });
+          signal?.throwIfAborted();
           let result: JsonObject;
           if (call.function.name === "send_message" && messageRouting.mode === "ambiguous") {
             result = {
@@ -2696,6 +2743,7 @@ export class CelerisConversation {
           } catch (error) {
             result = { error: error instanceof Error ? error.message : String(error) };
           }
+          signal?.throwIfAborted();
           if (typeof result.update_cursor === "number") {
             turnUpdateCursor = Math.max(turnUpdateCursor, result.update_cursor);
           }
@@ -2961,6 +3009,7 @@ export class CelerisConversation {
       }
       throw new Error("Celeris exceeded the coordinator tool-call limit");
     } catch (error) {
+      if (signal?.aborted) throw error;
       this.options.trace?.({
         type: "error",
         phase: "turn",

@@ -704,4 +704,72 @@ describe("Omnigent coordinator", () => {
       await client.close();
     }
   });
+
+  it("publishes a replacement prompt even when the pending count stays constant", async () => {
+    const now = new Date().toISOString();
+    const prompt = (id: string, message: string) => ({
+      id: "session-live",
+      title: "Live Work",
+      status: "waiting",
+      updated_at: now,
+      pending_elicitations_count: 1,
+      pending_elicitations: [
+        {
+          elicitation_id: id,
+          params: { message, mode: "confirmation" },
+        },
+      ],
+    });
+    const first = prompt("prompt-first", "Allow the first command?");
+    const replacement = prompt("prompt-replacement", "Allow the next command?");
+    const omnigent = {
+      listSessions: vi
+        .fn()
+        .mockResolvedValueOnce([first])
+        .mockResolvedValueOnce([first])
+        .mockResolvedValue([replacement]),
+      getSession: vi.fn(),
+      listItems: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
+      sendMessage: vi.fn(),
+      resolveElicitation: vi.fn(),
+      createSession: vi.fn(),
+      archiveSession: vi.fn(),
+      renameSession: vi.fn(),
+      interruptSession: vi.fn(),
+    } as unknown as OmnigentClient;
+    const coordinator = new OmnigentCoordinator({
+      omnigent,
+      logger: new Logger("error"),
+      pollIntervalMs: 60_000,
+    });
+    await coordinator.start();
+    const client = await CoordinatorMcpClient.create(coordinator);
+    try {
+      await expect(
+        client.callTool("check_updates", { after_event_id: 0 }),
+      ).resolves.toMatchObject({ updates: [], update_cursor: 0 });
+      await expect(
+        client.callTool("check_updates", { after_event_id: 0 }),
+      ).resolves.toMatchObject({
+        update_cursor: 1,
+        updates: [
+          {
+            event_id: 1,
+            type: "decision_needed",
+            session_id: "session-live",
+            pending_prompts: 1,
+            prompts: [
+              {
+                prompt_id: "prompt-replacement",
+                message: "Allow the next command?",
+              },
+            ],
+          },
+        ],
+      });
+    } finally {
+      coordinator.stop();
+      await client.close();
+    }
+  });
 });
