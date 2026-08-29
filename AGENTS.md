@@ -216,6 +216,15 @@ rate limits and transport failures are invalid trials excluded from the quality
 rate; empty model turns remain real failures. Add sanitized held-out paraphrases
 before promoting a targeted change.
 
+Use `npm run eval:scenarios -- --api-key-file <private-key-file>` for linked
+multi-session flows in `evals/scenarios.json`. One scenario preserves the real
+`CelerisConversation`, spoken history, proactive-notification history, and MCP
+event cursor across every turn while only swapping deterministic coordinator
+snapshots and tool results. This is the regression gate for notification
+references, sticky focus, incremental output, explicit focus changes, and
+archive restoration. A scenario passes only if every valid turn passes; never
+replace it with isolated case invocations when evaluating stateful behavior.
+
 The Discord voice channel is currently part of the MVP trust boundary. Before
 using a channel with more than one trusted human, configure
 `ALLOWED_DISCORD_USER_ID`; do not rely on Celeris to authenticate callers.
@@ -228,6 +237,7 @@ npm run check
 npm test
 npm run build
 npm run eval -- --api-key-file /private/path/celeris-key
+npm run eval:scenarios -- --api-key-file /private/path/celeris-key
 npm run dev
 npm run mcp
 podman build -t omnigent-voice:dev .

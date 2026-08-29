@@ -97,6 +97,23 @@ describe("voice harness evaluation", () => {
       recent_actions: [{ type: "message_sent" }],
       update_cursor: 9,
     });
+    executor.replaceState({
+      focused_session: { id: "session-side", name: "Side Work" },
+      recent_actions: [],
+      updates: [],
+      update_cursor: 10,
+    });
+    executor.replaceToolResults({
+      get_output: { items: [{ text: "New output" }] },
+    });
+    await expect(executor.execute("check_updates", {}, 9)).resolves.toMatchObject({
+      focused_session: { id: "session-side" },
+      update_cursor: 10,
+    });
+    await expect(executor.execute("get_output", {}, 10)).resolves.toMatchObject({
+      items: [{ text: "New output" }],
+      focused_session: { id: "session-side" },
+    });
   });
 
   it("marks model-service errors separately from scored harness behavior", () => {

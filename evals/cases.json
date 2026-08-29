@@ -640,7 +640,7 @@
     "expected": {
       "toolSequence": ["get_output"],
       "forbiddenTools": ["send_message", "focus_session"],
-      "speechTerms": ["show", "primary work"],
+      "speechAnyTerms": [["show", "visible", "appears"]],
       "maxRounds": 2
     }
   },
@@ -672,6 +672,156 @@
       "messageTerms": ["rerun", "checks"],
       "delivery": "not_queued",
       "speechTerms": ["primary work"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "accepted_send_not_yet_visible",
+    "description": "Distinguish coordinator acceptance from absence in current session output.",
+    "history": [
+      { "role": "user", "content": "send another message saying reply with delivery confirmed" },
+      { "role": "assistant", "content": "I've sent that message to Primary Work." }
+    ],
+    "input": "can you check whether that message showed up in the output",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [
+        { "action_id": 18, "type": "message_sent", "summary": "Sent immediately to Primary Work: reply with delivery confirmed" }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-primary",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": { "position": 1, "kind": "message", "role": "assistant", "text": "Still finishing the previous operation." },
+        "items": [
+          { "position": 1, "kind": "message", "role": "assistant", "text": "Still finishing the previous operation." }
+        ],
+        "items_omitted": 0,
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "forbiddenTools": ["send_message", "focus_session"],
+      "speechAnyTerms": [
+        ["sent", "accepted"],
+        [
+          "hasn't appeared",
+          "not visible",
+          "isn't visible",
+          "not showing",
+          "isn't appearing",
+          "not there yet",
+          "hasn't shown"
+        ]
+      ],
+      "speechForbiddenTerms": ["failed to send", "didn't send"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "heldout_sent_or_not_but_invisible",
+    "description": "Answer a combined sent-or-visible question with both pieces of evidence.",
+    "history": [
+      { "role": "user", "content": "send it a note to rerun the timing check" },
+      { "role": "assistant", "content": "I sent the timing note to Primary Work." }
+    ],
+    "input": "so did it send or not because i can't see it in there",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [
+        { "action_id": 19, "type": "message_sent", "summary": "Sent immediately to Primary Work: rerun the timing check" }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-primary",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": { "position": 1, "kind": "message", "role": "assistant", "text": "The earlier operation is still active." },
+        "items": [
+          { "position": 1, "kind": "message", "role": "assistant", "text": "The earlier operation is still active." }
+        ],
+        "items_omitted": 0,
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "forbiddenTools": ["send_message", "focus_session"],
+      "speechAnyTerms": [
+        ["sent", "accepted"],
+        [
+          "hasn't appeared",
+          "not visible",
+          "isn't visible",
+          "not showing",
+          "isn't appearing",
+          "not there yet",
+          "hasn't shown"
+        ]
+      ],
+      "speechForbiddenTerms": ["failed to send", "didn't send"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "heldout_accepted_send_is_visible",
+    "description": "Confirm both acceptance and visibility when the sent message is present.",
+    "history": [
+      { "role": "user", "content": "send it a note to rerun the timing check" },
+      { "role": "assistant", "content": "I sent the timing note to Primary Work." }
+    ],
+    "input": "okay can you verify if that one is actually showing now",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [
+        { "action_id": 20, "type": "message_sent", "summary": "Sent immediately to Primary Work: rerun the timing check" }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-primary",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": { "position": 2, "kind": "message", "role": "user", "text": "Rerun the timing check." },
+        "items": [
+          { "position": 1, "kind": "message", "role": "assistant", "text": "The earlier operation finished." },
+          { "position": 2, "kind": "message", "role": "user", "text": "Rerun the timing check." }
+        ],
+        "items_omitted": 0,
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "forbiddenTools": ["send_message", "focus_session"],
+      "speechAnyTerms": [["visible", "showing", "showed up", "appears", "see your message"]],
+      "speechForbiddenTerms": [
+        "not visible",
+        "hasn't appeared",
+        "not showing",
+        "haven't seen a response",
+        "don't see a response",
+        "keep an eye"
+      ],
       "maxRounds": 2
     }
   }

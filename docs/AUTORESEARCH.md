@@ -159,3 +159,44 @@ visibility without unnecessarily repeating the message body. The expanded full
 run passed all 22 valid trials; the two late trials invalidated by HTTP 429 were
 rerun individually and both passed, completing a 24-of-24 candidate result with
 no untested cases. Conventional tests are now 29.
+
+### 2026-08-28 — Delivery evidence and stateful multi-session flows
+
+A disposable two-session live experiment confirmed immediate coordinator
+acceptance in roughly 0.3 seconds, while a subsequent output read could still
+show no corresponding user item. This exposed an evidence boundary: accepted
+delivery and visible conversation output are different facts.
+
+Hypothesis H5: a visibility answer should combine the authoritative action
+ledger with the read result instead of treating absent output as failed
+delivery or as the absence of an agent response.
+
+The baseline passed zero of five accepted-but-not-yet-visible trials. A scoped
+late invariant passed the original visibility and resend boundaries plus three
+new held-out cases in all 25 targeted trials. The public isolated corpus now has
+27 cases. This candidate was held rather than deployed because isolated turns
+did not exercise working memory across concurrent sessions.
+
+Hypothesis H6: one persistent production conversation and MCP connection will
+expose reference, cursor, and action-selection failures hidden by isolated
+cases. Four sanitized scenarios now cover 23 linked turns: an unrelated
+completion while focus remains sticky; chronological output chunks arriving
+between human utterances; an action request competing with fresh output;
+back-to-back notifications from two sessions; explicit switching; temporary
+side work; and deterministic focus restoration after archive.
+
+Result so far: supported. The production invariant passed 21 of 23 turns and
+only two of four complete scenarios on its first clean run. A notification
+follow-up used the focused ID instead of the notified ID, and “what's new since
+then” redundantly read older output instead of using the fresh delta. Repeated
+baseline trials reproduced those two target-selection failures three of three
+times; a separate run also interpreted the ASR repair “no wait” as queued
+delivery. Thirteen of 69 repeated turns hit HTTP 429 and were treated as invalid,
+not quality failures.
+
+Candidate H6 makes notification records authoritative for reference resolution,
+defines changed output as the chronological delta for “what's new” questions,
+and limits queued delivery to explicit timing language. It also includes H5's
+delivery-versus-visibility rule. The first clean candidate run passed all 23
+stateful turns, and the unchanged isolated corpus passed 27 of 27. Repeated
+stateful stability trials remain the promotion gate.

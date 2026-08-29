@@ -71,13 +71,22 @@ export class FrozenCoordinatorExecutor implements CoordinatorExecutor {
   }> = [];
 
   private readonly resultQueues = new Map<string, unknown[]>();
-  private readonly state: JsonObject;
+  private state: JsonObject;
 
   public constructor(
     state: JsonObject,
     toolResults: Record<string, unknown> = {},
   ) {
     this.state = { ...state };
+    this.replaceToolResults(toolResults);
+  }
+
+  public replaceState(state: JsonObject): void {
+    this.state = { ...state };
+  }
+
+  public replaceToolResults(toolResults: Record<string, unknown> = {}): void {
+    this.resultQueues.clear();
     for (const [name, value] of Object.entries(toolResults)) {
       this.resultQueues.set(name, Array.isArray(value) ? [...value] : [value]);
     }

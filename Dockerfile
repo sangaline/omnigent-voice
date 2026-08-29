@@ -37,7 +37,7 @@ RUN npm ci
 COPY src ./src
 RUN npm run build \
     && find dist -type f -name '*.test.js' -delete \
-    && rm dist/eval.js dist/evaluation.js dist/replay.js
+    && rm dist/eval.js dist/evaluation.js dist/replay.js dist/scenario-eval.js
 
 FROM node:24-bookworm-slim AS dependencies
 

@@ -131,9 +131,15 @@ loop; only Omnigent is replaced by deterministic frozen state and results.
 npm run eval -- --api-key-file /private/path/celeris-key
 npm run eval -- --api-key-file /private/path/celeris-key \
   --case retry_missing_send --runs 5
+npm run eval:scenarios -- --api-key-file /private/path/celeris-key
 ```
 
 Prompt override flags match replay. HTTP rate limits and transport failures are
 reported as invalid rather than quality failures, while empty model turns and
-wrong tool behavior still fail. Keys, reports, and cases copied from private
-transcripts must remain outside the repository.
+wrong tool behavior still fail. `evals/scenarios.json` keeps one production
+conversation and MCP connection alive across linked human turns and proactive
+notifications. It exercises sticky focus, notification references, event
+cursors, chronological output chunks, actions during fresh output, and
+archive-to-previous-focus behavior. A scenario passes only when every turn
+passes. Keys, reports, and cases copied from private transcripts must remain
+outside the repository.

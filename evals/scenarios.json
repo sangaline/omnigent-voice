@@ -1,0 +1,564 @@
+[
+  {
+    "id": "concurrent_focus_notification_followup",
+    "description": "Keep sticky focus while an unrelated session completes, follow up on that notification, switch explicitly, then archive and restore focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-voice", "name": "Voice Build", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "hey which thing am i in right now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Build", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["voice build"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 7,
+            "type": "session_completed",
+            "session_id": "session-side",
+            "name": "Side Audit",
+            "summary": "Side Audit completed. The route audit passed all checks."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side audit", "passed"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "yeah okay what's the last thing that one actually said",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Build", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 7
+        },
+        "toolResults": {
+          "get_output": {
+            "session_id": "session-side",
+            "target_session": { "id": "session-side", "name": "Side Audit", "status": "idle" },
+            "focus_changed": false,
+            "page": 1,
+            "order": "oldest_to_newest",
+            "latest_message": { "position": 2, "kind": "message", "role": "assistant", "text": "The route audit passed all checks." },
+            "items": [
+              { "position": 1, "kind": "message", "role": "user", "text": "Audit the route behavior." },
+              { "position": 2, "kind": "message", "role": "assistant", "text": "The route audit passed all checks." }
+            ],
+            "has_more": false
+          }
+        },
+        "checkUpdatesAfter": 7,
+        "expected": {
+          "toolSequence": ["get_output"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-side",
+          "speechTerms": ["route audit", "passed"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "all right and what's latest on this session now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Build", "status": "running" },
+          "recent_actions": [],
+          "output_delta": {
+            "changed": true,
+            "output": "Voice Build completed the decoder cutoff checks successfully.",
+            "cursor": "voice-4"
+          },
+          "updates": [],
+          "update_cursor": 7
+        },
+        "checkUpdatesAfter": 7,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session", "get_output"],
+          "speechTerms": ["decoder", "cutoff"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "switch me over to the side audit one",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Build", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 7
+        },
+        "toolResults": {
+          "focus_session": {
+            "focus_changed": true,
+            "focused_session": { "id": "session-side", "name": "Side Audit", "status": "idle" },
+            "previous_focused_session": { "id": "session-voice", "name": "Voice Build", "status": "running" },
+            "summary": "Focused Side Audit."
+          }
+        },
+        "expected": {
+          "toolSequence": ["focus_session"],
+          "sessionId": "session-side",
+          "speechTerms": ["side audit"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "cool archive this temporary chat i'm done with it",
+        "coordinatorState": {
+          "focused_session": { "id": "session-side", "name": "Side Audit", "status": "idle" },
+          "recent_actions": [
+            { "action_id": 21, "type": "focus_changed", "summary": "Focused Side Audit from Voice Build." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 7
+        },
+        "toolResults": {
+          "archive_session": {
+            "archived": true,
+            "archived_session": { "id": "session-side", "name": "Side Audit" },
+            "focused_session": { "id": "session-voice", "name": "Voice Build", "status": "running" },
+            "focus_changed": true,
+            "summary": "Archived Side Audit and restored Voice Build."
+          }
+        },
+        "expected": {
+          "toolSequence": ["archive_session"],
+          "forbiddenTools": ["focus_session"],
+          "speechTerms": ["side audit", "voice build"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "so where am i now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Build", "status": "running" },
+          "recent_actions": [
+            { "action_id": 22, "type": "session_archived", "summary": "Archived Side Audit and restored Voice Build." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 7
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["voice build"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "incremental_chunks_and_action_priority",
+    "description": "Consume chronological output chunks across turns, prioritize a user action over fresh output, prove it from the ledger, and retain the notification cursor.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-long", "name": "Long Build", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "what's it doing right now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-long", "name": "Long Build", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": true, "output": "Started the Discord decoder timing tests.", "cursor": "long-1" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["decoder", "timing"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay an now like what's new since then",
+        "coordinatorState": {
+          "focused_session": { "id": "session-long", "name": "Long Build", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": true, "output": "Three decoder tests failed at the speech cutoff boundary.", "cursor": "long-2" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["three", "failed", "cutoff"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "tell it no wait focus on the discord cut off first don't do the other cleanup",
+        "coordinatorState": {
+          "focused_session": { "id": "session-long", "name": "Long Build", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": true, "output": "Collected another failure trace from the cleanup phase.", "cursor": "long-3" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-long", "name": "Long Build", "status": "running" },
+            "focused_session": { "id": "session-long", "name": "Long Build", "status": "running" },
+            "recent_actions": [
+              { "action_id": 30, "type": "message_sent", "summary": "Sent immediately to Long Build: focus on the Discord cutoff first and skip the other cleanup." }
+            ],
+            "summary": "Sent immediately to Long Build."
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["get_output", "focus_session"],
+          "messageTerms": ["discord", "cutoff", "cleanup"],
+          "delivery": "not_queued",
+          "speechTerms": ["long build"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "did you actually send my correction",
+        "coordinatorState": {
+          "focused_session": { "id": "session-long", "name": "Long Build", "status": "running" },
+          "recent_actions": [
+            { "action_id": 30, "type": "message_sent", "summary": "Sent immediately to Long Build: focus on the Discord cutoff first and skip the other cleanup." }
+          ],
+          "output_delta": { "changed": true, "output": "The worker narrowed the decoder failure to barge-in timing.", "cursor": "long-4" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["send_message", "get_output"],
+          "speechTerms": ["sent", "long build"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 15,
+            "type": "session_completed",
+            "session_id": "session-long",
+            "name": "Long Build",
+            "summary": "Long Build completed. The Discord cutoff bug is fixed and all decoder tests pass."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["long build", "fixed", "pass"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait can you repeat that last bit",
+        "coordinatorState": {
+          "focused_session": { "id": "session-long", "name": "Long Build", "status": "idle" },
+          "recent_actions": [
+            { "action_id": 30, "type": "message_sent", "summary": "Sent immediately to Long Build: focus on the Discord cutoff first and skip the other cleanup." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 15
+        },
+        "checkUpdatesAfter": 15,
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["cutoff", "fixed", "pass"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "back_to_back_notification_references",
+    "description": "Resolve first, other, and primary references after two background sessions notify in succession without mutating sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 20,
+            "type": "session_completed",
+            "session_id": "session-alpha",
+            "name": "Side Alpha",
+            "summary": "Side Alpha completed. It found a stale cache in the build step."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side alpha", "stale cache"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 22,
+            "type": "decision_needed",
+            "session_id": "session-beta",
+            "name": "Side Beta",
+            "summary": "Side Beta needs approval before restarting the test worker."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side beta", "approval", "restart"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "what did the first one say again like the result",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 22
+        },
+        "toolResults": {
+          "get_output": {
+            "session_id": "session-alpha",
+            "target_session": { "id": "session-alpha", "name": "Side Alpha", "status": "idle" },
+            "focus_changed": false,
+            "page": 1,
+            "order": "oldest_to_newest",
+            "latest_message": { "position": 2, "kind": "message", "role": "assistant", "text": "The build step was reusing a stale cache key." },
+            "items": [
+              { "position": 1, "kind": "message", "role": "user", "text": "Find the build inconsistency." },
+              { "position": 2, "kind": "message", "role": "assistant", "text": "The build step was reusing a stale cache key." }
+            ],
+            "has_more": false
+          }
+        },
+        "checkUpdatesAfter": 22,
+        "expected": {
+          "toolSequence": ["get_output"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-alpha",
+          "speechTerms": ["stale cache"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "and the other one what was it waiting on",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 22
+        },
+        "toolResults": {
+          "get_output": {
+            "session_id": "session-beta",
+            "target_session": { "id": "session-beta", "name": "Side Beta", "status": "waiting" },
+            "focus_changed": false,
+            "page": 1,
+            "order": "oldest_to_newest",
+            "latest_message": { "position": 2, "kind": "message", "role": "assistant", "text": "Approve restarting the test worker to continue." },
+            "items": [
+              { "position": 1, "kind": "message", "role": "assistant", "text": "The test worker stopped responding." },
+              { "position": 2, "kind": "message", "role": "assistant", "text": "Approve restarting the test worker to continue." }
+            ],
+            "has_more": false
+          }
+        },
+        "expected": {
+          "toolSequence": ["get_output"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-beta",
+          "speechTerms": ["restart", "test worker"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "stay on primary though what's new there",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": true, "output": "Primary Work finished synchronizing the deployment manifests.", "cursor": "primary-8" },
+          "updates": [],
+          "update_cursor": 22
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session", "get_output"],
+          "speechTerms": ["primary work", "deployment", "manifests"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "temporary_side_work_and_restore",
+    "description": "Start focused side work, retain a primary-session notification, inspect the side snapshot, archive it, and continue from restored primary focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "make a quick temporary side session and check the audio packet ordering",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "start_session": {
+            "started": true,
+            "session": { "id": "session-side", "name": "Audio Ordering", "status": "running" },
+            "focused_session": { "id": "session-side", "name": "Audio Ordering", "status": "running" },
+            "previous_focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "summary": "Started and focused Audio Ordering."
+          }
+        },
+        "expected": {
+          "toolSequence": ["start_session"],
+          "argumentTerms": { "instruction": ["audio", "packet", "ordering"] },
+          "speechTerms": ["audio ordering"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 31,
+            "type": "session_completed",
+            "session_id": "session-primary",
+            "name": "Primary Work",
+            "summary": "Primary Work completed. The release tests all passed."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["primary work", "release tests", "passed"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay what's the little side one done so far",
+        "coordinatorState": {
+          "focused_session": { "id": "session-side", "name": "Audio Ordering", "status": "running" },
+          "recent_actions": [
+            { "action_id": 40, "type": "session_started", "summary": "Started and focused Audio Ordering from Primary Work." }
+          ],
+          "output_delta": { "changed": true, "output": "Audio Ordering reproduced one out-of-order packet after reconnect.", "cursor": "side-1" },
+          "updates": [],
+          "update_cursor": 31
+        },
+        "checkUpdatesAfter": 31,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session", "get_output"],
+          "speechTerms": ["out-of-order", "reconnect"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "yeah that's enough archive this temporary thing",
+        "coordinatorState": {
+          "focused_session": { "id": "session-side", "name": "Audio Ordering", "status": "running" },
+          "recent_actions": [
+            { "action_id": 40, "type": "session_started", "summary": "Started and focused Audio Ordering from Primary Work." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 31
+        },
+        "toolResults": {
+          "archive_session": {
+            "archived": true,
+            "archived_session": { "id": "session-side", "name": "Audio Ordering" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+            "focus_changed": true,
+            "summary": "Archived Audio Ordering and restored Primary Work."
+          }
+        },
+        "expected": {
+          "toolSequence": ["archive_session"],
+          "forbiddenTools": ["focus_session"],
+          "speechTerms": ["audio ordering", "primary work"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "where'd that put me and what finished while i was in there",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+          "recent_actions": [
+            { "action_id": 41, "type": "session_archived", "summary": "Archived Audio Ordering and restored Primary Work." }
+          ],
+          "output_delta": { "changed": true, "output": "Primary Work completed. The release tests all passed.", "cursor": "primary-9" },
+          "updates": [],
+          "update_cursor": 31
+        },
+        "checkUpdatesAfter": 31,
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["primary work", "release tests", "passed"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  }
+]
