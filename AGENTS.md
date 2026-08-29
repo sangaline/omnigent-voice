@@ -300,6 +300,23 @@ The Discord voice channel is currently part of the MVP trust boundary. Before
 using a channel with more than one trusted human, configure
 `ALLOWED_DISCORD_USER_ID`; do not rely on Celeris to authenticate callers.
 
+## PersonaPlex feasibility experiment
+
+`experiments/personaplex/benchmark_moshi.py` is an isolated measurement harness
+for evaluating whether the shared Moshi/PersonaPlex streaming architecture can
+meet its 80 ms frame deadline on the Strix Halo `gfx1151` GPU. It is not part of
+the production image or Node dependency graph. The benchmark runs current
+upstream Moshi in an existing ROCm container, uses real speech, times eager and
+HIP-graph modes, and emits sanitized JSON only. Host paths, Hugging Face cache,
+and gated model authentication enter through shell variables consumed by
+`run-benchmark.sh`; never add them to the repository.
+
+Use public `kyutai/moshiko-pytorch-bf16` as the architecture-equivalent runtime
+control before gated PersonaPlex weights. PersonaPlex requires the human to
+accept the model terms and authenticate the local Hugging Face cache. Do not
+request or print their token. See `docs/PERSONAPLEX-EXPERIMENT.md` for the
+decision thresholds and current measurements.
+
 ## Commands
 
 ```bash
@@ -312,6 +329,7 @@ npm run eval:scenarios -- --api-key-file /private/path/celeris-key
 npm run dev
 npm run mcp
 podman build -t omnigent-voice:dev .
+experiments/personaplex/run-benchmark.sh --mode both
 ```
 
 The final image runs as the unprivileged `node` user. A smoke test should reach
