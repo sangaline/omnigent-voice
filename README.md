@@ -13,7 +13,7 @@ use its SSE interface and complete natural speech segments feed one continuous
 TTS queue. Celeris-1 currently generates a complete diffusion-model response in
 one burst rather than token by token, so there is normally no model-generation
 window to overlap; Pocket starts on the first segment as soon as that burst
-arrives. The persistent int8 Pocket runtime begins natural 24 kHz speech in
+arrives. The persistent dynamically quantized Pocket runtime begins natural 24 kHz speech in
 roughly 34-39 ms. Every generated 80 ms audio chunk is sent to Discord
 immediately; the complete audio reply is never buffered before playback.
 If the caller barges in, Discord playback and the in-progress Pocket generation
@@ -103,6 +103,8 @@ longer, multi-event, code-heavy, or URL-bearing updates use Celeris adaptation.
 
 Discord speaking events alone do not stop playback: decoded audio must cross a
 configurable energy threshold, preventing phone echo from truncating speech.
+Receive streams also remain provisional until they carry meaningful decoded
+audio, so Discord's zero-energy tail streams cannot delay a completed transcript.
 Adjacent ASR segments are merged briefly before the coordinator snapshot so a
 natural pause does not become two conflicting model turns.
 
@@ -141,7 +143,11 @@ The image has no embedded deployment configuration or credentials. See
 `.env.example` for the runtime interface. Set `LOG_FILE` to a writable runtime
 path to retain the JSONL event log across process restarts. The Pocket model and
 public `alba` voice state are downloaded without authentication during the
-image build and run with Hugging Face offline mode at runtime.
+image build and run with Hugging Face offline mode at runtime. This public
+`pocket-tts-without-voice-cloning` checkpoint cannot clone a new voice. The full
+gated Pocket checkpoint supports audio-prompt conditioning, but gated weights
+and private voice samples or embeddings must be mounted at runtime and must not
+be included in the public image.
 
 ## Prompt replay
 

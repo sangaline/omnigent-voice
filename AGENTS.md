@@ -28,8 +28,12 @@ Pocket TTS -> Discord voice. Coordinator actions return immediately;
 Celeris never waits for a coding agent to complete work before acknowledging it.
 
 The bundled runtime models are the int8 0.6B Nemotron English streaming
-transducer with 560 ms chunks, int8 Pocket TTS 3.0.2 with the public `alba`
-voice, and Piper US English Lessac medium as a fallback. Speech models run on
+transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the
+public `alba` voice, and Piper US English Lessac medium as a fallback. The public
+image deliberately uses `kyutai/pocket-tts-without-voice-cloning`; it cannot
+clone a new voice. The full gated Pocket checkpoint can condition on a private
+audio prompt, but those weights and any derived voice state must enter through
+private runtime storage rather than the public image. Speech models run on
 CPU; ASR and Piper use `sherpa-onnx-node`, while Pocket stays warm behind a
 private stdio Python bridge. Model
 archives and checksums belong in the container build, never in git. TTS progress
@@ -77,7 +81,13 @@ speaking event does not stop playback; decoded audio must cross
 `DISCORD_BARGE_IN_PEAK` (default `0.08`). This rejects the short low-energy
 phone echo bursts that previously cut speech off mid-word. Confirmed human
 speech stops playback and cancels further TTS generation, but backend output
-polling continues. Semantic endpointing is enabled by default. Silero VAD
+polling continues. A Discord receive stream remains provisional until decoded
+audio crosses `0.002` peak amplitude. Zero-energy tail streams therefore never
+clear a ready transcript timer or count as active recordings; live logs showed
+that the old behavior added 710-770 ms after otherwise completed turns. Keep
+the provisional receive subscription alive for its normal silence lifetime so
+real speech arriving on it can still activate the existing ASR and barge-in
+path. Semantic endpointing is enabled by default. Silero VAD
 observes the live 16 kHz stream and proposes an endpoint after 180 ms of
 silence; Smart Turn v3.2 classifies up to the latest eight seconds of the raw
 current-turn waveform. A complete decision closes the live ASR stream
@@ -198,6 +208,20 @@ a correction that a requested send was missing repeats `send_message` rather
 than substituting an output read. Celeris must not invent missing context or
 access as the cause of a prior bad answer; when no exact cause is established it
 states only that it misinterpreted the available data.
+`send_message` creates a user-role item in Omnigent. For normal relays Celeris
+preserves the human's intent, but a report about the voice interface's own
+mistake must explicitly name “the voice coordinator” and distinguish the human;
+an unqualified first-person self-report is forbidden because the destination
+would attribute it to the human. An attribution correction ending in “do you
+get what I mean” is an understanding check, not permission to promise or perform
+another send. A later explicit send request still requires the real tool.
+After a generic coordinator failure, a short “try again” or unique short session
+name inherits the nearest failed read operation and target from recent raw
+dialogue. For that narrow retry turn the harness injects the server-owned read
+target and withholds `send_message`, preventing an older successful send from
+resurfacing. Failed send retries do not take this path. A successful read of a
+clarified or nonfocused session names its typed target in speech and never
+changes sticky focus.
 Notification history records are authoritative for resolving “that one,” “the
 first one,” and “the other one”; a read copies the referenced notification's
 session ID rather than substituting sticky focus. The harness enforces this

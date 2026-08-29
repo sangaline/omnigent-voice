@@ -316,6 +316,7 @@ pending_decisions is the authoritative list of unresolved structured prompts acr
 known_sessions is the bounded current name-to-ID map used by the voice harness. A message request that clearly names exactly one known session is routed to that session without changing sticky focus, even though the model-visible send_message schema has no session_id. If the human explicitly gives different instructions to multiple named sessions, call send_message once per destination using only the required target-name enum exposed for that turn. Use the actual targets returned by the tools in your acknowledgement. Never call focus_session merely to deliver a message to an explicitly named session.
 Use list_sessions only when the user asks for a list or explicitly wants a different session that has not been resolved. The coordinator state is a fresh atomic snapshot taken after the human finished speaking. Use its output_delta when it answers a latest/current-state question; call poll_output for stable output that arrived after the previous snapshot, or get_output when older context is needed. get_output page 1 is the most recent page, with typed timestamped items ordered oldest-to-newest like incremental output. Distinguish conversation messages from internal tool or terminal activity. latest_message is the generic newest message and its role says whether it came from the user or assistant. Never claim that state is fresh without coordinator data from this turn.
 send_message defaults to immediate delivery into the focused session. Use queued delivery only when the user explicitly asks to wait until the current turn finishes. After sending, acknowledge the exact target session name returned by the tool. Never claim an action happened unless its tool result says it succeeded.
+Every send_message becomes a user-role item in the destination session. Normally relay the human's intent directly. If the message instead reports something you, the voice interface, did, said, or misunderstood, name yourself explicitly as “the voice coordinator” and distinguish the human explicitly; never use an unqualified “I” for a voice-coordinator self-report because the destination will interpret “I” as the human.
 Use archive_session only when the user explicitly asks to archive the focused session. Its result deterministically restores the previous focus; tell the user both what was archived and which session is active now.
 Use rename_session only when the user explicitly asks to rename the focused session. Renaming never changes focus. After a successful rename, tell the user the previous and new names returned by the tool rather than relying on conversational memory.
 You cannot sleep, wait, poll periodically, monitor logs autonomously, or promise a future action. The runtime may deliver real background updates to you; describe only updates actually present in coordinator state or tool results. Never invent an explanation for a delay, silence, dropped utterance, or recognition error.
@@ -330,9 +331,12 @@ Recent dialogue can contain system records beginning “Omnigent background upda
 If the immediately preceding assistant speech announced a different session, answer a follow-up directly when that notification already contains the requested fact. If the human asks for exact output, the last thing it said, or detail absent from the notification, call the read tool with the notification's session_id. If the human clearly approves, declines, or cancels an announced decision, call answer_prompt with the exact prompt_id and session_id from pending_decisions instead. Never invent an identifier from the session name.
 If the human states that a requested message was missing, not sent, or not received, repeat send_message with the intended message. A declarative correction such as “I don't see the message” after you claimed to send it is a missed-action complaint and requires send_message. An actual question asking whether a message is visible or recent, or explicitly asking to inspect or verify output, is instead a read request: use get_output and never send a message for that question.
 No coordinator action has happened in this human turn yet. If the human asks for an action, or if answering requires current coordinator data, your next output must be the appropriate tool call, not prose. Only a successful tool result later in this turn proves the action happened. The recent_actions ledger describes prior turns and never satisfies a new request. “Another,” “again,” “retry,” “now,” and corrections that an action was missed require a new tool call. Execute tools before speaking. Never say that you will need to pull or check data, offer to check it, ask permission for a read-only check, or promise to perform a tool action after the response; call the tool now.
+If the human only corrects your interpretation or asks whether you understand the distinction, acknowledge and explain that distinction, then stop. Do not infer a new send request, volunteer to send a correction, or promise a tool action. A later explicit request to send, tell, ask, message, or flag it is a new action and must call the tool before speech.
+Every send_message is delivered to Omnigent as a user-role item. Preserve the human's first person only when it really refers to the human. When relaying a correction about your own voice-interface behavior, write “the voice coordinator” rather than “I” and explicitly distinguish the human so the destination cannot reverse who did what.
 An explicit request to switch, focus, or open another session requires focus_session before any speech. Never narrate a focus change from the request alone; only the tool result proves the active session changed.
 voice_message_routing is computed deterministically from this human transcript and known_sessions. When its mode is named, call send_message normally; the harness supplies that exact target without changing focus. When its mode is multiple, call send_message once for each separately addressed destination and select its exact enum name; the harness resolves every name to a server-owned ID and requires all destinations before speech. When its mode is ambiguous, do not claim to send anything and ask the human to name one target.
 voice_read_routing also resolves a deictic read against authoritative notification history. When its mode is named, call the read tool normally and the harness supplies that exact session. When its mode is ambiguous, do not read or guess; ask the human which named session they mean.
+After a successful get_output or poll_output for a nonfocused or clarified session, name target_session.name in the spoken answer before summarizing its result. The read does not change sticky focus; naming its source prevents the result from sounding as though it came from the focused session.
 When the requested message content depends on a missing fact about what a different session found, said, or is doing, first call get_output for that source session. Only after receiving the source result may you call send_message with the grounded finding; never send a placeholder telling the destination merely to inspect or review the source session. If more than one source must be compared, complete every requested read before the send, name each source in the outbound comparison, and preserve the decisive counts, outcomes, and causes. If the human already states the complete finding to relay in the current request, send that supplied content directly without rereading the source.
 The coordinator snapshot immediately above is already current data for this turn. output_delta is the chronological stable output newly available since the prior human snapshot. When output_delta.changed is true and its content answers “latest,” “current,” “what's new,” or “since then,” answer directly from it and do not call get_output. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.
 A short output_delta is already a voice-sized update. When it directly answers the human, preserve every concrete condition, count, outcome, and still-running or blocked clause instead of shortening away one of its facts.
@@ -343,7 +347,9 @@ send_message delivery is immediate unless the human clearly requests queueing un
 Only after an actual visibility question has selected get_output, answer whether the sent user message itself appears, not whether the agent has responded. If recent_actions confirms the send but get_output does not contain that user message, say it was sent or accepted but is not visible in output yet. If the user message is present, clearly confirm that it is visible. Mention a response only if the human asked about one, and never promise future monitoring.
 For a visibility question, get_output.recent_delivery_visibility is the authoritative page comparison. visible_on_page means the latest delivered user message is present on that returned page; not_visible_on_page means only that it is absent from that page. Never reverse these values or substitute whether the agent has replied.
 Answer every requested part of a compound question. When output_delta or a notification says both that work completed and what its outcome was, preserve the outcome rather than reporting only that the activity finished.
-FINAL MESSAGE EVIDENCE BOUNDARY: classify the human's intent before responding. A declarative correction of your immediately preceding send claim, such as “no,” “I don't see that message,” or “that message isn't there,” is a new retry request; call send_message again. A question only about whether you actually performed the send is answered directly from recent_actions with no tool. A question or explicit request about whether the message is visible, present, or shown in session output calls get_output and combines that visibility result with recent_actions. Never substitute one of these three operations for another.`;
+FINAL MESSAGE EVIDENCE BOUNDARY: classify the human's intent before responding. A declarative correction of your immediately preceding send claim, such as “no,” “I don't see that message,” or “that message isn't there,” is a new retry request; call send_message again. A question only about whether you actually performed the send is answered directly from recent_actions with no tool. A question or explicit request about whether the message is visible, present, or shown in session output calls get_output and combines that visibility result with recent_actions. Never substitute one of these three operations for another.
+FINAL ACTION GATE: if this turn only corrects attribution and asks whether you understand or get the distinction, explain the distinction and stop without mentioning a send. If this turn explicitly asks to send the distinction, call send_message before speech. There is no valid middle state where you say you will send later.
+FINAL RETRY GATE: “try again” or “retry” repeats the immediately preceding failed request, not an older successful action. Reconstruct that nearest failed request from recent dialogue. If it was a named-session read or status check, call the read tool for that session; never resurrect an older send merely because it appears in history or recent_actions.`;
 
 const contextContract = (
   memoryPolicy: CelerisMemoryPolicy,
@@ -815,6 +821,86 @@ export const voiceReadRouting = (
   };
 };
 
+const retryRequest = (input: string): boolean =>
+  /^(?:(?:can|could|would)\s+you\s+(?:please\s+)?try\s+again|(?:please\s+)?(?:try|retry)(?:\s+(?:that|it))?(?:\s+again)?)[.!?]*$/i.test(
+    input.trim(),
+  );
+
+const failedCoordinatorSpeech = (content: string): boolean =>
+  /\b(?:couldn't|could not|unable to|failed to|didn't work|did not work|coordination layer|error)\b/i.test(
+    content,
+  );
+
+export const voiceRetryReadRouting = (
+  input: string,
+  history: readonly Pick<ChatMessage, "role" | "content">[],
+  knownSessions: unknown,
+): VoiceReadRouting | undefined => {
+  const explicitRetry = retryRequest(input);
+  const clarificationWords = words(input);
+  const shortTargetClarification =
+    clarificationWords.length > 0 &&
+    clarificationWords.length <= 4 &&
+    !/\b(?:send|tell|ask|message|queue|switch|focus|open|archive|rename|start|create|approve|decline|cancel|interrupt|stop)\b/i.test(
+      input,
+    );
+  if (!explicitRetry && !shortTargetClarification) return undefined;
+  const latestDialogue = [...history].reverse().find(
+    (message) => message.role === "assistant" || message.role === "user",
+  );
+  if (
+    latestDialogue?.role !== "assistant" ||
+    typeof latestDialogue.content !== "string" ||
+    !failedCoordinatorSpeech(latestDialogue.content)
+  ) {
+    return undefined;
+  }
+
+  const failedRequestParts: string[] = [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (!message || message.role === "system") continue;
+    if (message.role === "assistant") {
+      if (typeof message.content === "string" && failedCoordinatorSpeech(message.content)) {
+        continue;
+      }
+      break;
+    }
+    if (message.role === "user" && typeof message.content === "string") {
+      failedRequestParts.push(message.content);
+    }
+  }
+  const failedRequest = failedRequestParts.toReversed().join(" ");
+  if (
+    !/\b(?:check|status|latest|output|said|found|doing|read|show|inspect|progress)\b/i.test(
+      failedRequest,
+    )
+  ) {
+    return undefined;
+  }
+
+  const requestWords = new Set(words(`${failedRequest} ${explicitRetry ? "" : input}`));
+  const scored: Array<VoiceSessionTarget & { score: number }> = [];
+  for (const candidate of Array.isArray(knownSessions) ? knownSessions : []) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const id = (candidate as JsonObject).id;
+    const name = (candidate as JsonObject).name;
+    if (typeof id !== "string" || !id || typeof name !== "string" || !name) continue;
+    const score = words(name).filter((word) => requestWords.has(word)).length;
+    if (score > 0) scored.push({ id, name, score });
+  }
+  const highest = Math.max(0, ...scored.map(({ score }) => score));
+  const matches = scored.filter(({ score }) => score === highest);
+  if (matches.length === 1) {
+    const { score: _score, ...target } = matches[0]!;
+    return { mode: "named", target };
+  }
+  if (matches.length > 1) {
+    return { mode: "ambiguous", candidates: matches.map(({ name }) => name) };
+  }
+  return undefined;
+};
+
 export const voiceStartInstruction = (input: string): string | undefined => {
   const match =
     /\b(?:start|make|create|open)\b.{0,50}\b(?:session|chat)\b\s+(?:to|for)\s+(.+)/i.exec(
@@ -954,7 +1040,8 @@ const voiceSafeTool = (
           message: {
             type: "string",
             minLength: 1,
-            description: "The user's complete message in their own intent.",
+            description:
+              "The complete relay, which the destination receives as a user-role item. Preserve the human's intent. For a report about the voice interface's own behavior, explicitly say 'the voice coordinator' and distinguish the human; never use ambiguous first-person I for the voice coordinator.",
           },
           delivery: {
             type: "string",
@@ -1596,7 +1683,12 @@ export class CelerisConversation {
       notificationTargets,
     );
     const focusRouting = voiceFocusRouting(input, updates.known_sessions);
-    const readRouting = voiceReadRouting(
+    const retryReadRouting = voiceRetryReadRouting(
+      input,
+      this.history,
+      updates.known_sessions,
+    );
+    const readRouting = retryReadRouting ?? voiceReadRouting(
       input,
       updates.known_sessions,
       messageRouting.target,
@@ -1662,6 +1754,7 @@ export class CelerisConversation {
               (allowsFocusChange(input) && !targetsFocusedSession(input, focusedName))) &&
             (name !== "archive_session" || allowsArchive(input)) &&
             (name !== "rename_session" || allowsRename(input)) &&
+            (!retryReadRouting || name !== "send_message") &&
             (readRouting.mode !== "ambiguous" ||
               (name !== "get_output" && name !== "poll_output"))
           );

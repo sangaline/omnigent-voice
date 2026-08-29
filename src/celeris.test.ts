@@ -27,6 +27,7 @@ import {
   voiceMessageInstruction,
   voiceMessageRouting,
   voiceReadRouting,
+  voiceRetryReadRouting,
   voiceStartInstruction,
 } from "./celeris.js";
 import { Logger } from "./log.js";
@@ -800,6 +801,68 @@ describe("Celeris coordinator conversation", () => {
         notificationTargets,
       ),
     ).toEqual({ mode: "model" });
+    expect(
+      voiceRetryReadRouting(
+        "can you try again",
+        [
+          { role: "user", content: "send primary work the audio note" },
+          { role: "assistant", content: "I sent that to Primary Work." },
+          { role: "user", content: "can we check in on the release login" },
+          { role: "assistant", content: "I couldn't reach the coordination layer." },
+          { role: "user", content: "release login" },
+          { role: "assistant", content: "I couldn't reach the coordination layer." },
+        ],
+        [
+          { id: "session-primary", name: "Primary Work" },
+          { id: "session-release", name: "Release Login Audit" },
+        ],
+      ),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-release", name: "Release Login Audit" },
+    });
+    expect(
+      voiceRetryReadRouting(
+        "release login",
+        [
+          { role: "user", content: "can we check in on the release work" },
+          { role: "assistant", content: "I couldn't read that session output." },
+        ],
+        [
+          { id: "session-primary", name: "Primary Work" },
+          { id: "session-release", name: "Release Login Audit" },
+        ],
+      ),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-release", name: "Release Login Audit" },
+    });
+    expect(
+      voiceRetryReadRouting(
+        "try again",
+        [
+          { role: "user", content: "send primary work the audio note" },
+          { role: "assistant", content: "I couldn't send that message." },
+        ],
+        [{ id: "session-primary", name: "Primary Work" }],
+      ),
+    ).toBeUndefined();
+    expect(
+      voiceRetryReadRouting(
+        "try again",
+        [
+          { role: "user", content: "check in on the login work" },
+          { role: "assistant", content: "I couldn't reach the coordination layer." },
+        ],
+        [
+          { id: "session-release", name: "Release Login" },
+          { id: "session-auth", name: "Login Authentication" },
+        ],
+      ),
+    ).toEqual({
+      mode: "ambiguous",
+      candidates: ["Release Login", "Login Authentication"],
+    });
     expect(
       voiceStartInstruction("make a temporary session to test that receipt wording"),
     ).toBe("test that receipt wording");

@@ -1056,5 +1056,173 @@
       "speechAnyTerms": [["which", "do you mean", "which one"]],
       "maxRounds": 1
     }
+  },
+  {
+    "id": "attribution_clarification_does_not_promise_send",
+    "description": "Acknowledge a correction about voice-coordinator attribution without inventing a new send action or promising one.",
+    "history": [
+      {
+        "role": "user",
+        "content": "let's flag it for the agent that you misunderstood the last request"
+      },
+      {
+        "role": "assistant",
+        "content": "I sent that note to Primary Work."
+      },
+      {
+        "role": "user",
+        "content": "wait but the note says I misunderstood and that makes it sound like I did"
+      },
+      {
+        "role": "assistant",
+        "content": "You're right, that wording was ambiguous."
+      }
+    ],
+    "input": "it'll think those words came from me and not the voice thing do you get what i mean",
+    "coordinatorState": {
+      "focused_session": {
+        "id": "session-primary",
+        "name": "Primary Work",
+        "status": "running"
+      },
+      "known_sessions": [
+        {
+          "id": "session-primary",
+          "name": "Primary Work",
+          "status": "running",
+          "focused": true
+        }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [
+        {
+          "action_id": 401,
+          "type": "message_sent",
+          "session_id": "session-primary",
+          "name": "Primary Work",
+          "delivery": "immediate",
+          "message": "I misunderstood the previous request.",
+          "summary": "Sent immediately to Primary Work: I misunderstood the previous request."
+        }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["send_message", "get_output", "focus_session"],
+      "speechAnyTerms": [["voice coordinator", "voice agent", "voice assistant", "voice interface"]],
+      "speechTerms": ["you"],
+      "speechForbiddenTerms": ["I'll send", "I will send", "I'm sending", "send a message"],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "partial_session_name_reads_unique_match",
+    "description": "Resolve a unique shortened session name for an explicit status check without switching focus.",
+    "history": [],
+    "input": "while we wait can we check in on the release login",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-release", "name": "Release Login Audit", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-release",
+        "target_session": { "id": "session-release", "name": "Release Login Audit", "status": "idle" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": {
+          "position": 2,
+          "kind": "message",
+          "role": "assistant",
+          "text": "The authentication refresh check passed all twelve repetitions."
+        },
+        "items": [
+          { "position": 1, "kind": "message", "role": "user", "text": "Run twelve authentication refresh checks." },
+          { "position": 2, "kind": "message", "role": "assistant", "text": "The authentication refresh check passed all twelve repetitions." }
+        ],
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "forbiddenTools": ["send_message", "focus_session"],
+      "sessionId": "session-release",
+      "speechTerms": ["release login", "passed", "twelve"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "retry_after_read_error_repeats_read",
+    "description": "Retry the immediately preceding failed session read instead of resurrecting an unrelated send request.",
+    "history": [
+      { "role": "user", "content": "send primary work a note to check the audio timing" },
+      { "role": "assistant", "content": "I sent that note to Primary Work." },
+      { "role": "user", "content": "while we wait can we check in on the release login" },
+      { "role": "assistant", "content": "I couldn't reach the coordination layer just now." },
+      { "role": "user", "content": "release login" },
+      { "role": "assistant", "content": "I couldn't reach the coordination layer just now." }
+    ],
+    "input": "can you try again",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-release", "name": "Release Login Audit", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [
+        {
+          "action_id": 411,
+          "type": "message_sent",
+          "session_id": "session-primary",
+          "name": "Primary Work",
+          "delivery": "immediate",
+          "message": "Check the audio timing.",
+          "summary": "Sent immediately to Primary Work: check the audio timing."
+        }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-release",
+        "target_session": { "id": "session-release", "name": "Release Login Audit", "status": "idle" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": {
+          "position": 2,
+          "kind": "message",
+          "role": "assistant",
+          "text": "The authentication refresh check passed all twelve repetitions."
+        },
+        "items": [
+          { "position": 1, "kind": "message", "role": "user", "text": "Run twelve authentication refresh checks." },
+          { "position": 2, "kind": "message", "role": "assistant", "text": "The authentication refresh check passed all twelve repetitions." }
+        ],
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "forbiddenTools": ["send_message", "focus_session"],
+      "sessionId": "session-release",
+      "speechTerms": ["release login", "passed", "twelve"],
+      "maxRounds": 2
+    }
   }
 ]

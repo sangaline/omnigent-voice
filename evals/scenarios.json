@@ -3612,5 +3612,328 @@
         }
       }
     ]
+  },
+  {
+    "id": "voice_coordinator_relay_attribution",
+    "description": "Keep human and voice-coordinator identity distinct, avoid an unrequested promise, then relay an explicitly requested self-report with unambiguous attribution.",
+    "initialHistory": [
+      {
+        "role": "user",
+        "content": "let's flag it for the agent that you misunderstood the last request"
+      },
+      {
+        "role": "assistant",
+        "content": "I sent that note to Primary Work."
+      },
+      {
+        "role": "user",
+        "content": "wait but the note says I misunderstood and that makes it sound like I did"
+      },
+      {
+        "role": "assistant",
+        "content": "You're right, that wording was ambiguous."
+      }
+    ],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [
+        {
+          "action_id": 401,
+          "type": "message_sent",
+          "session_id": "session-primary",
+          "name": "Primary Work",
+          "delivery": "immediate",
+          "message": "I misunderstood the previous request.",
+          "summary": "Sent immediately to Primary Work: I misunderstood the previous request."
+        }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "it'll think those words came from me and not the voice thing do you get what i mean",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 401,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "I misunderstood the previous request.",
+              "summary": "Sent immediately to Primary Work: I misunderstood the previous request."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["send_message", "get_output", "focus_session"],
+          "speechAnyTerms": [["voice coordinator", "voice agent", "voice assistant", "voice interface"]],
+          "speechTerms": ["you"],
+          "speechForbiddenTerms": ["I'll send", "I will send", "I'm sending", "send a message"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "yeah okay and now send it another note making that exact distinction clear",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 401,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "I misunderstood the previous request.",
+              "summary": "Sent immediately to Primary Work: I misunderstood the previous request."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              {
+                "action_id": 402,
+                "type": "message_sent",
+                "session_id": "session-primary",
+                "name": "Primary Work",
+                "delivery": "immediate",
+                "message": "The voice coordinator misunderstood the previous request; the human did not.",
+                "summary": "Sent immediately to Primary Work: the voice coordinator misunderstood the previous request; the human did not."
+              }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session", "get_output"],
+          "messageTerms": ["voice", "coordinator", "misunderstood", "not"],
+          "delivery": "not_queued",
+          "speechTerms": ["primary work"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay what did that second note actually say",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 401,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "I misunderstood the previous request.",
+              "summary": "Sent immediately to Primary Work: I misunderstood the previous request."
+            },
+            {
+              "action_id": 402,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "The voice coordinator misunderstood the previous request; the human did not.",
+              "summary": "Sent immediately to Primary Work: the voice coordinator misunderstood the previous request; the human did not."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["send_message", "get_output", "focus_session"],
+          "speechTerms": ["voice coordinator", "misunderstood", "human"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "failed_read_target_clarification",
+    "description": "After a named-session read fails, treat a short session-name clarification as a retry of that read, never as an unrelated older send, and preserve sticky focus.",
+    "initialHistory": [
+      { "role": "user", "content": "send primary work a note to record the first audio timing" },
+      { "role": "assistant", "content": "I sent that note to Primary Work." }
+    ],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-release", "name": "Release Login Audit", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [
+        {
+          "action_id": 411,
+          "type": "message_sent",
+          "session_id": "session-primary",
+          "name": "Primary Work",
+          "delivery": "immediate",
+          "message": "Record the first-audio timing.",
+          "summary": "Sent immediately to Primary Work: record the first-audio timing."
+        }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "while while we wait can we check in on the release login",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-release", "name": "Release Login Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 411,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "Record the first-audio timing.",
+              "summary": "Sent immediately to Primary Work: record the first-audio timing."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "get_output": { "error": "Temporary coordinator read failure" }
+        },
+        "expected": {
+          "toolSequence": ["get_output"],
+          "forbiddenTools": ["send_message", "focus_session"],
+          "sessionId": "session-release",
+          "speechTerms": ["couldn't", "read"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "release login",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-release", "name": "Release Login Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 411,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "Record the first-audio timing.",
+              "summary": "Sent immediately to Primary Work: record the first-audio timing."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "get_output": {
+            "session_id": "session-release",
+            "target_session": { "id": "session-release", "name": "Release Login Audit", "status": "idle" },
+            "focus_changed": false,
+            "page": 1,
+            "order": "oldest_to_newest",
+            "latest_message": {
+              "position": 2,
+              "kind": "message",
+              "role": "assistant",
+              "text": "The authentication refresh check passed all twelve repetitions."
+            },
+            "items": [
+              { "position": 1, "kind": "message", "role": "user", "text": "Run twelve authentication refresh checks." },
+              { "position": 2, "kind": "message", "role": "assistant", "text": "The authentication refresh check passed all twelve repetitions." }
+            ],
+            "has_more": false
+          }
+        },
+        "expected": {
+          "toolSequence": ["get_output"],
+          "forbiddenTools": ["send_message", "focus_session"],
+          "sessionId": "session-release",
+          "speechTerms": ["release login", "passed", "twelve"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay and where am i still",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-release", "name": "Release Login Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 411,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "Record the first-audio timing.",
+              "summary": "Sent immediately to Primary Work: record the first-audio timing."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["send_message", "get_output", "focus_session"],
+          "speechTerms": ["primary work"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

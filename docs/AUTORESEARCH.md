@@ -1033,3 +1033,52 @@ typecheck and 85 tests. The isolated harness corpus passed all 29 cases; two HTT
 429 trials were excluded and passed on immediate individual reruns. The full
 stateful gate passed 22 of 22 scenarios and all 82 linked turns, while both new
 multi-destination scenarios also passed ten of ten stability runs separately.
+
+### 2026-08-29 — Live tail-stream latency and relay provenance
+
+Hypothesis H37: the remaining roughly one-second response floor came from
+Celeris or Pocket. Live phone evidence falsified it. Clean Celeris completions
+took 178-440 ms and Pocket produced first audio in 35-57 ms. Clean end-of-ASR to
+playback measurements were 365-590 ms. On several slower turns Discord opened a
+second receive stream containing 140-200 ms of zero-amplitude audio immediately
+after the real stream closed. Because the receive event entered the active
+recording set and cleared the transcript timer before any decoded voice existed,
+the bot waited the full hard fallback. That added 710-770 ms before the Celeris
+request even began.
+
+Receive streams are now provisional. Only a decoded packet above the existing
+minimum accepted recording peak activates the recording lease or clears a
+pending transcript timer. Independent leases also make overlapping confirmed
+streams count correctly. Three focused unit tests prove that an empty stream
+never blocks, confirmation is idempotent, and overlapping closes do not release
+one another. The next live phone turn is the required end-to-end confirmation;
+the code-level gate cannot manufacture Discord's exact duplicate event pattern.
+
+Hypothesis H38: the live attribution and retry failures were isolated wording
+mistakes. Production-harness replay disproved that. When the human explained
+that an outbound “I misunderstood” would be attributed to them rather than the
+voice layer, the unchanged prompt promised a corrective send without a tool in
+five of five isolated trials. A linked flow also wrote the next correction as
+ambiguous first person. The destination receives `send_message` as a user-role
+item, so the current-turn contract and tool schema now require explicit “voice
+coordinator” attribution for self-reports. An understanding check must explain
+the distinction without volunteering an action. This moved the isolated case
+to 15 of 15 and the three-turn attribution flow to 10 of 10 runs.
+
+The same live exchange exposed a second state error: after two failed attempts
+to read a partially named session, “try again” resurrected an older unrelated
+send. A prompt-only retry rule moved the model from the wrong send immediately
+to the correct read followed by a wrong send, passing only two of ten trials.
+The accepted harness change identifies a narrow retry after a generic
+coordinator failure, resolves a unique session name from the contiguous failed
+read dialogue, injects its server-owned ID, and withholds `send_message` for
+that turn. A short session-name clarification uses the same state. Failed send
+retries remain untouched. The generic retry then passed 10 of 10 trials, and a
+linked failed-read/clarification/focus flow passed in the full scenario gate.
+
+Result: accepted for deployment. No live Omnigent session was read or mutated
+during this research; every new coordinator interaction used the frozen
+production MCP harness. Typecheck, build, and all 88 unit tests pass. The full
+isolated sweep passed all 31 valid trials; one retry trial was invalidated only
+by HTTP 429 and has separate 10-of-10 stability evidence. The stateful sweep
+passed 24 of 24 scenarios and all 88 linked turns, including both new flows.
