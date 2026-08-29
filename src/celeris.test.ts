@@ -3,11 +3,13 @@ import {
   allowsArchive,
   allowsFocusChange,
   CelerisConversation,
+  CelerisTraceEvent,
   CelerisMemoryPolicy,
   CoordinatorToolClient,
   serializeToolResult,
 } from "./celeris.js";
 import { Logger } from "./log.js";
+import { CoordinatorExecutor, CoordinatorMcpClient } from "./mcp.js";
 
 const response = (message: object): Response =>
   new Response(JSON.stringify({ choices: [{ message }] }), {
@@ -202,6 +204,141 @@ describe("Celeris coordinator conversation", () => {
       message: "Inspect the deployment",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("speaks a deterministic failure and skips another model call after a tool error", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-1",
+            type: "function",
+            function: {
+              name: "send_message",
+              arguments: JSON.stringify({ message: "Please run the checks" }),
+            },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) =>
+      Promise.resolve(
+        name === "check_updates"
+          ? { updates: [] }
+          : { error: "backend unavailable", updates: [] },
+      ),
+    );
+
+    await expect(conversation("test-key", tools).respond("Send the checks now")).resolves.toBe(
+      "I couldn't send that message.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs restored replay history through the production conversation and MCP path", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-1",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({ message: "Try that again" }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(response({ content: "I sent it again." }));
+    vi.stubGlobal("fetch", fetchMock);
+    const calls: Array<{ name: string; afterEventId: number | undefined }> = [];
+    const executor: CoordinatorExecutor = {
+      execute: vi.fn().mockImplementation(
+        (name: string, _args: Record<string, unknown>, afterEventId?: number) => {
+          calls.push({ name, afterEventId });
+          return Promise.resolve(
+            name === "check_updates"
+              ? {
+                  focused_session: { id: "session-1", name: "Voice work" },
+                  recent_actions: [],
+                  output_delta: { changed: false, output: "" },
+                  updates: [],
+                  update_cursor: 4,
+                }
+              : {
+                  sent: true,
+                  focused_session: { id: "session-1", name: "Voice work" },
+                  updates: [],
+                  update_cursor: 5,
+                },
+          );
+        },
+      ),
+    };
+    const mcp = await CoordinatorMcpClient.create(executor);
+    const trace: CelerisTraceEvent[] = [];
+    try {
+      const subject = new CelerisConversation({
+        apiKey: "test-key",
+        baseUrl: "https://example.test/v1",
+        model: "test-model",
+        logger: new Logger("error"),
+        tools: mcp,
+        systemPromptOverride: "Candidate system prompt.",
+        actionInvariantOverride: "",
+        temperature: 0.2,
+        seed: 11,
+        trace: (event) => trace.push(event),
+      });
+      subject.restoreHistory([
+        { role: "user", content: "send it to the voice work" },
+        { role: "assistant", content: "I sent it." },
+      ]);
+
+      await expect(subject.respond("no it didn't send it again")).resolves.toBe(
+        "I sent it again.",
+      );
+      expect(calls.map(({ name }) => name)).toEqual(["check_updates", "send_message"]);
+      expect(calls[0]?.afterEventId).toBe(0);
+      const firstRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+        temperature?: number;
+        seed?: number;
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      expect(firstRequest.temperature).toBe(0.2);
+      expect(firstRequest.seed).toBe(11);
+      expect(firstRequest.messages?.[0]).toEqual({
+        role: "system",
+        content: "Candidate system prompt.",
+      });
+      expect(firstRequest.messages).toContainEqual({
+        role: "user",
+        content: "send it to the voice work",
+      });
+      expect(firstRequest.messages).not.toContainEqual({
+        role: "system",
+        content: expect.stringContaining("CURRENT TURN EXECUTION RULES"),
+      });
+      expect(trace.filter((event) => event.type === "completion")).toHaveLength(2);
+      expect(trace.find((event) => event.type === "tool")).toMatchObject({
+        type: "tool",
+        name: "send_message",
+        arguments: { message: "Try that again" },
+        result: { sent: true, update_cursor: 5 },
+      });
+      expect(() => subject.restoreHistory([])).toThrow(
+        "history has already been initialized",
+      );
+    } finally {
+      await mcp.close();
+    }
   });
 
   it("reports the missing fast model without invoking Omnigent", async () => {

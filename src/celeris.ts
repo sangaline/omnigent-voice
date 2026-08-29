@@ -9,13 +9,42 @@ export interface CoordinatorToolClient {
   callTool(name: string, args: Record<string, unknown>): Promise<JsonObject>;
 }
 
-interface CelerisOptions {
+export interface CelerisCompletionTrace {
+  type: "completion";
+  phase: string;
+  durationMs: number;
+  finishReason: string;
+  promptTokens?: number | undefined;
+  completionTokens?: number | undefined;
+  message: { content?: unknown; tool_calls?: unknown };
+}
+
+export interface CelerisToolTrace {
+  type: "tool";
+  name: string;
+  arguments: Record<string, unknown>;
+  result: JsonObject;
+}
+
+export type CelerisTraceEvent = CelerisCompletionTrace | CelerisToolTrace;
+
+export interface CelerisHistoryMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+export interface CelerisOptions {
   apiKey?: string | undefined;
   baseUrl: string;
   model: string;
   logger: Logger;
   tools: CoordinatorToolClient;
   memoryPolicy?: Partial<CelerisMemoryPolicy> | undefined;
+  systemPromptOverride?: string | undefined;
+  actionInvariantOverride?: string | undefined;
+  temperature?: number | undefined;
+  seed?: number | undefined;
+  trace?: ((event: CelerisTraceEvent) => void) | undefined;
 }
 
 export interface CelerisMemoryPolicy {
@@ -231,6 +260,29 @@ const voiceSafeTool = (tool: OpenAiTool): OpenAiTool => {
   };
 };
 
+const toolFailureSpeech = (name: string): string => {
+  switch (name) {
+    case "send_message":
+      return "I couldn't send that message.";
+    case "get_output":
+    case "poll_output":
+    case "check_updates":
+      return "I couldn't read the session output.";
+    case "list_sessions":
+      return "I couldn't retrieve the session list.";
+    case "focus_session":
+      return "I couldn't switch sessions.";
+    case "archive_session":
+      return "I couldn't archive that session.";
+    case "answer_prompt":
+      return "I couldn't submit that answer.";
+    case "start_session":
+      return "I couldn't start that session.";
+    default:
+      return "I couldn't complete that coordinator action.";
+  }
+};
+
 export class CelerisConversation {
   private readonly history: ChatMessage[] = [];
   private readonly memoryPolicy: CelerisMemoryPolicy;
@@ -257,6 +309,13 @@ export class CelerisConversation {
     }
   }
 
+  public restoreHistory(messages: readonly CelerisHistoryMessage[]): void {
+    if (this.history.length > 0 || this.memorySummary) {
+      throw new Error("Celeris conversation history has already been initialized");
+    }
+    this.history.push(...messages.map((message) => ({ ...message })));
+  }
+
   public async respond(input: string): Promise<string> {
     if (!this.options.apiKey) return "Celeris isn't configured right now.";
     this.preemptCompaction();
@@ -271,14 +330,18 @@ export class CelerisConversation {
     if (typeof updates.update_cursor === "number") {
       turnUpdateCursor = Math.max(turnUpdateCursor, updates.update_cursor);
     }
+    const actionInvariant =
+      this.options.actionInvariantOverride ?? currentTurnActionInvariant;
     const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
-      ...this.rememberedMessages(),
-      coordinatorContext(updates, this.memoryPolicy, Boolean(this.memorySummary)),
       {
         role: "system",
-        content: currentTurnActionInvariant,
+        content: this.options.systemPromptOverride ?? systemPrompt,
       },
+      ...this.rememberedMessages(),
+      coordinatorContext(updates, this.memoryPolicy, Boolean(this.memorySummary)),
+      ...(actionInvariant
+        ? [{ role: "system" as const, content: actionInvariant }]
+        : []),
       { role: "user", content: input },
     ];
     const tools = (await this.tools())
@@ -306,6 +369,7 @@ export class CelerisConversation {
         }
 
         messages.push({ role: "assistant", content: null, tool_calls: calls });
+        let failedTool: string | undefined;
         for (const call of calls) {
           let args: Record<string, unknown> = {};
           try {
@@ -330,11 +394,26 @@ export class CelerisConversation {
           if (typeof result.update_cursor === "number") {
             turnUpdateCursor = Math.max(turnUpdateCursor, result.update_cursor);
           }
+          this.options.trace?.({
+            type: "tool",
+            name: call.function.name,
+            arguments: args,
+            result,
+          });
+          if (typeof result.error === "string" && !failedTool) {
+            failedTool = call.function.name;
+          }
           messages.push({
             role: "tool",
             tool_call_id: call.id,
             content: serializeToolResult(result),
           });
+        }
+        if (failedTool) {
+          const speech = toolFailureSpeech(failedTool);
+          this.updateCursor = turnUpdateCursor;
+          this.remember(input, speech);
+          return speech;
         }
       }
       throw new Error("Celeris exceeded the coordinator tool-call limit");
@@ -351,7 +430,10 @@ export class CelerisConversation {
     if (!this.options.apiKey || updates.length === 0 || signal.aborted) return undefined;
     this.preemptCompaction();
     const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
+      {
+        role: "system",
+        content: this.options.systemPromptOverride ?? systemPrompt,
+      },
       ...this.rememberedMessages(),
       {
         role: "system",
@@ -417,8 +499,8 @@ export class CelerisConversation {
         body: JSON.stringify({
           model: this.options.model,
           max_tokens: maxTokens,
-          temperature: 0,
-          seed: 7,
+          temperature: this.options.temperature ?? 0,
+          seed: this.options.seed ?? 7,
           messages,
           ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
         }),
@@ -437,19 +519,32 @@ export class CelerisConversation {
       const choice = payload.choices?.[0];
       const message = choice?.message;
       if (!message) throw new Error("Celeris returned no message");
+      const durationMs = Math.round(performance.now() - started);
+      const finishReason =
+        typeof choice.finish_reason === "string" ? choice.finish_reason : "unknown";
+      const promptTokens =
+        typeof payload.usage?.prompt_tokens === "number"
+          ? payload.usage.prompt_tokens
+          : undefined;
+      const completionTokens =
+        typeof payload.usage?.completion_tokens === "number"
+          ? payload.usage.completion_tokens
+          : undefined;
       this.options.logger.info("celeris.response.received", {
         phase,
-        durationMs: Math.round(performance.now() - started),
-        finishReason:
-          typeof choice.finish_reason === "string" ? choice.finish_reason : "unknown",
-        promptTokens:
-          typeof payload.usage?.prompt_tokens === "number"
-            ? payload.usage.prompt_tokens
-            : undefined,
-        completionTokens:
-          typeof payload.usage?.completion_tokens === "number"
-            ? payload.usage.completion_tokens
-            : undefined,
+        durationMs,
+        finishReason,
+        promptTokens,
+        completionTokens,
+      });
+      this.options.trace?.({
+        type: "completion",
+        phase,
+        durationMs,
+        finishReason,
+        promptTokens,
+        completionTokens,
+        message,
       });
       return message;
     } finally {

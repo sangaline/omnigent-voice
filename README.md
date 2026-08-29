@@ -95,12 +95,13 @@ path to retain the JSONL event log across process restarts.
 ## Prompt replay
 
 The private audit log can replay a recognized turn against Celeris without
-calling Omnigent or mutating any session. This restores the preceding spoken
-dialogue, supplies a fake coordinator snapshot and real tool schemas, then
-reports whether the first model response chose speech or a tool. A private
-`--tool-results-file` can map tool names to synthetic or previously captured
-result objects; when supplied, replay continues through the tool loop and also
-reports the final spoken answer. Use
+calling Omnigent or mutating any session. It runs the production conversation
+class and in-process MCP client, restores the preceding spoken dialogue, and
+replaces only the Omnigent coordinator with frozen state and supplied results.
+It reports the first model decision, every coordinator call, and final speech.
+A private `--tool-results-file` can map tool names to synthetic or previously
+captured result objects; without one, an attempted tool receives a controlled
+error so the failure path can be evaluated. Use
 `--omit-action-invariant`, `--action-invariant-file`,
 `--system-prompt-file`, or `--system-prompt-suffix-file` to compare prompt
 variants. Replay defaults to the runtime's temperature 0 and seed 7;

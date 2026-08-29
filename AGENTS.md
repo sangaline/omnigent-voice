@@ -192,12 +192,15 @@ Kubernetes chart mounts a retained PVC at `/var/lib/omnigent-voice` and sets
 
 Use `npm run replay -- --log <private-jsonl> --target-time <recognized-event-time>`
 to reproduce the first Celeris decision for a late logged turn without touching
-Omnigent. The replay restores up to 80 dialogue messages since the last process
-startup and supplies fake coordinator state plus the voice-facing tool schemas.
-Pass `--tool-results-file <private-json>` to continue through as many as five
-tool rounds and inspect the final spoken response; the JSON object maps each
-tool name to one result object or an ordered array of results. Compare the old
-behavior with `--omit-action-invariant`, or replace the base prompt with
+Omnigent. Replay instantiates the production `CelerisConversation` and the same
+in-process MCP client/tool schemas as the live bot, restores up to 80 dialogue
+messages since the last process startup, and substitutes only a frozen
+coordinator executor. Pass `--tool-results-file <private-json>` to supply
+synthetic coordinator results and continue through as many as five exact
+production tool rounds; without a result, the frozen executor returns an error
+and the harness exercises its deterministic failure speech. The JSON object
+maps each tool name to one result object or an ordered array of results. Compare
+the old behavior with `--omit-action-invariant`, or replace the base prompt with
 `--system-prompt-file`. Replay output and supplied results are private because
 they can include transcripts, session output, and proposed tool arguments;
 never commit them.

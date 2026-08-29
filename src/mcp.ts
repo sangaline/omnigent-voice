@@ -3,15 +3,22 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod/v4";
-import { OmnigentCoordinator } from "./coordinator.js";
 import { JsonObject } from "./omnigent.js";
+
+export interface CoordinatorExecutor {
+  execute(
+    name: string,
+    args: Record<string, unknown>,
+    afterEventId?: number,
+  ): Promise<JsonObject>;
+}
 
 interface ToolConsumerState {
   updateCursor: number;
 }
 
 const toolResult = async (
-  coordinator: OmnigentCoordinator,
+  coordinator: CoordinatorExecutor,
   name: string,
   args: Record<string, unknown>,
   state: ToolConsumerState,
@@ -43,7 +50,7 @@ const toolResult = async (
 };
 
 export const createCoordinatorMcpServer = (
-  coordinator: OmnigentCoordinator,
+  coordinator: CoordinatorExecutor,
 ): McpServer => {
   const server = new McpServer({ name: "omnigent-coordinator", version: "0.1.0" });
   const state: ToolConsumerState = { updateCursor: 0 };
@@ -191,7 +198,7 @@ export class CoordinatorMcpClient {
     private readonly server: McpServer,
   ) {}
 
-  public static async create(coordinator: OmnigentCoordinator): Promise<CoordinatorMcpClient> {
+  public static async create(coordinator: CoordinatorExecutor): Promise<CoordinatorMcpClient> {
     const server = createCoordinatorMcpServer(coordinator);
     const client = new Client({ name: "omnigent-voice", version: "0.1.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

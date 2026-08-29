@@ -82,3 +82,38 @@ Planned test: capture requests from production-mode and replay-mode invocations
 for the same frozen state and assert byte-equivalent messages, visible tools,
 model parameters, and tool-result serialization. Then rerun the baseline corpus
 through that shared implementation before changing behavior.
+
+Result: accepted. Replay now instantiates the production conversation class and
+the production in-process MCP client. Only the coordinator executor is frozen;
+prompt assembly, context contract, dynamic tool gating, schemas, result
+serialization, model parameters, tool rounds, memory restoration, and failure
+handling are shared production code. A conventional test drives restored
+history through that complete path and captures both model rounds and the MCP
+mutation. The suite now has 25 tests at this checkpoint.
+
+The exact path revealed previously hidden drift: replay had encoded a proactive
+update as one object, while production stores an array of events. It also
+revealed that decision-only scores missed false success claims after a tool
+returned an explicit error.
+
+### 2026-08-28 — Tool-error truthfulness
+
+Hypothesis H2: a stronger global prompt sentence is sufficient to make the fast
+model distinguish current tool failure from older successful action history.
+
+Test: replay eight historical ASR-style send and read turns with no supplied
+tool result, causing a controlled coordinator error. The baseline and prompt
+suffix each produced only one strictly truthful response out of eight; typical
+failures claimed a send succeeded, treated a failed read as an empty result, or
+promised a future retry. Reject the prompt-only change.
+
+Revised hypothesis H2b: tool execution failure is a narrow runtime invariant,
+not a semantic judgment. Deterministic per-tool failure speech should eliminate
+false action claims and avoid an unnecessary second model request without
+changing successful flows.
+
+Result: accepted. All eight failure cases produced truthful, immediate failure
+speech in one model round. Eight corresponding successful send flows still
+acknowledged the confirmed target, and six supplied chronological read flows
+grounded the answer in the latest message. Conventional tests are now 26, with
+a regression asserting that the second model request is skipped on error.
