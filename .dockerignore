@@ -4,5 +4,6 @@
 !tsconfig.json
 !src/**
 !native/**
+!runtime/**
 !scripts/**
 !models/checksums.txt

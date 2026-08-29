@@ -115,12 +115,17 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev \
     && npm cache clean --force
 
+FROM python:3.13-slim-trixie AS endpoint-python
+
+RUN pip install --no-cache-dir --target /opt/smart-turn-python \
+      numpy==2.5.2 onnxruntime==1.29.0
+
 FROM node:24-trixie-slim
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       libgomp1 libsentencepiece0 libvulkan1 mesa-vulkan-drivers \
-      python3 python3-numpy python3-onnxruntime \
+      python3 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
@@ -128,10 +133,12 @@ ENV NODE_ENV=production \
     SHERPA_TTS_MODEL_DIR=/opt/models/tts \
     KAME_BRIDGE_PATH=/opt/omnigent-voice/bin/kame-bridge \
     SMART_TURN_BRIDGE_PATH=/opt/omnigent-voice/smart-turn/bridge.py \
+    PYTHONPATH=/opt/smart-turn-python \
     LD_LIBRARY_PATH=/opt/omnigent-voice/bin
 
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
+COPY --from=endpoint-python /opt/smart-turn-python /opt/smart-turn-python
 COPY --from=build /app/dist ./dist
 COPY package.json ./package.json
 COPY --from=models /models/asr /opt/models/asr

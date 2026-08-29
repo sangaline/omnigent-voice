@@ -54,10 +54,24 @@ speaking event does not stop playback; decoded audio must cross
 `DISCORD_BARGE_IN_PEAK` (default `0.08`). This rejects the short low-energy
 phone echo bursts that previously cut speech off mid-word. Confirmed human
 speech stops playback and cancels further TTS generation, but backend output
-polling continues. Adjacent recognized segments are joined for
-`DISCORD_UTTERANCE_MERGE_MS` (default 350 ms) before one model turn, preventing
-natural pauses from superseding half an utterance. Only explicit cancel
+polling continues. Semantic endpointing is enabled by default. Silero VAD
+observes the live 16 kHz stream and proposes an endpoint after 180 ms of
+silence; Smart Turn v3.2 classifies up to the latest eight seconds of the raw
+current-turn waveform. A complete decision closes the live ASR stream
+immediately, while an incomplete or failed decision keeps listening until the
+700 ms hard fallback. New speech invalidates an in-flight decision and the
+full updated turn is classified after the next pause. This replaces the staged
+450 ms capture stop plus 350 ms transcript merge; when semantic endpointing is
+disabled, those legacy settings remain available. Only explicit cancel
 language interrupts the focused running Omnigent session.
+
+Smart Turn runs as a persistent local Python bridge inside the same container,
+using its 8.7 MB int8 ONNX model and Pipecat's NumPy-only Whisper feature
+extraction. The exact container measured 37.7 ms mean, 47.1 ms p95, and 47.7 ms
+maximum across twenty complete decisions on the host. A full fixture scored
+0.957 complete while a mid-sentence cut scored 0.490. Silero and Smart Turn
+model downloads are checksum-pinned in the image build. Never log retained raw
+endpoint audio.
 
 Omnigent auth uses a runtime refresh token. At boot, the coordinator focuses the
 most recently active native session but does not create one. Focus is sticky:

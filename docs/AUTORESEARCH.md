@@ -492,3 +492,23 @@ remains external to this candidate: the existing Docker Hub credential can
 push blobs but lacks repository-creation scope, and the requested public
 repository does not yet exist. GitOps uses the exact node-local tag until that
 one account-level setup action is completed.
+
+### 2026-08-29 — Semantic endpointing runtime gate
+
+Hypothesis H18: replacing fixed Discord silence plus transcript merging with a
+short acoustic pause and raw-waveform completion classifier will remove most
+of the post-speech dead time without clipping unfinished thoughts. The default
+path now keeps one live ASR stream across pauses, uses Silero VAD at 180 ms,
+and runs Smart Turn v3.2 over the latest eight seconds. A complete decision
+commits immediately; an incomplete decision continues through a 700 ms hard
+fallback. Speech arriving during inference invalidates the stale result.
+
+The stock Transformers feature extractor measured about 90 ms mean and 116 ms
+p95 end to end. Replacing it with Pipecat's NumPy-only batched feature path
+reduced that to 36.4 ms mean and 46.1 ms p95 on the host. In the exact slim
+container, twenty decisions measured 37.7 ms mean, 47.1 ms p95, and 47.7 ms
+maximum. A complete public speech fixture scored 0.957, while a cut near the
+middle scored 0.490. Silero detected and closed the same fixture correctly.
+The packaged image is about 185 MB larger uncompressed than the prior image;
+using isolated Python wheels avoided the roughly 517 MB Debian numerical stack
+that an initial build pulled in. Live phone audio remains the promotion gate.
