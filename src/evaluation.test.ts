@@ -392,4 +392,28 @@ describe("voice harness evaluation", () => {
       }).failures,
     ).toContain("speech included unapproved number 44000");
   });
+
+  it("enforces a spoken word budget including contractions and numbers", () => {
+    const conciseCase: VoiceEvalCase = {
+      ...testCase,
+      expected: {
+        toolSequence: [],
+        maxSpeechWords: 6,
+      },
+    };
+    expect(
+      scoreVoiceEval(conciseCase, {
+        ...observation,
+        toolCalls: [],
+        speech: "It's live after all twelve checks.",
+      }).passed,
+    ).toBe(true);
+    expect(
+      scoreVoiceEval(conciseCase, {
+        ...observation,
+        toolCalls: [],
+        speech: "It's now fully live after all twelve regression checks.",
+      }).failures,
+    ).toContain("speech used 9 words, maximum 6");
+  });
 });

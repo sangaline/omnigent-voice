@@ -2337,10 +2337,26 @@ describe("Celeris coordinator conversation", () => {
     expect(tools.callTool).not.toHaveBeenCalled();
   });
 
-  it("voices a real backend update without exposing coordinator tools", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(response({ content: "The Voice MVP session is ready for you." }));
+  it("repeats the last spoken response exactly without a model round", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const subject = conversation("test-key");
+    subject.restoreHistory([
+      { role: "user", content: "what finished" },
+      {
+        role: "assistant",
+        content: "The cutoff is fixed and every decoder test passes.",
+      },
+    ]);
+
+    await expect(subject.respond("wait can you repeat that last bit")).resolves.toBe(
+      "The cutoff is fixed and every decoder test passes.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("voices the real coordinator completion shape without model paraphrasing", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
 
@@ -2357,13 +2373,8 @@ describe("Celeris coordinator conversation", () => {
         ],
         controller.signal,
       ),
-    ).resolves.toBe("The Voice MVP session is ready for you.");
-    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
-      tools?: unknown;
-      tool_choice?: unknown;
-    };
-    expect(request.tools).toBeUndefined();
-    expect(request.tool_choice).toBeUndefined();
+    ).resolves.toBe("Voice MVP finished: Ready.");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("voices one short plain progress update without a model request", async () => {
@@ -2405,6 +2416,32 @@ describe("Celeris coordinator conversation", () => {
       conversation("test-key").announceUpdate([update], new AbortController().signal),
     ).resolves.toBe(
       "Side Beta finished the check. It found one flaky reconnect test.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("extracts a bounded long completion without garbling its facts", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const update = {
+      event_id: 31,
+      type: "session_completed" as const,
+      session_id: "session-rollout",
+      name: "Rollout Check",
+      output_delta: {
+        changed: true,
+        output:
+          "The candidate image is live in the private cluster. " +
+          "Credential inspection passed, every regression test passed, and the image was imported directly without using an external registry. " +
+          "The coordinator remains focused on Primary Work.",
+      },
+    };
+
+    await expect(
+      conversation("test-key").announceUpdate([update], new AbortController().signal),
+    ).resolves.toBe(
+      "Rollout Check: The candidate image is live in the private cluster; " +
+      "Credential inspection passed; the image was imported directly without using an external registry.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

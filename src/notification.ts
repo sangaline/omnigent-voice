@@ -3,6 +3,7 @@ export interface CoordinatorNotificationScheduleState {
   pendingUpdates: number;
   timerActive: boolean;
   deliveryInFlight: boolean;
+  audiencePresent: boolean;
 }
 
 export const shouldScheduleCoordinatorNotification = (
@@ -11,4 +12,5 @@ export const shouldScheduleCoordinatorNotification = (
   !state.shuttingDown &&
   state.pendingUpdates > 0 &&
   !state.timerActive &&
-  !state.deliveryInFlight;
+  !state.deliveryInFlight &&
+  state.audiencePresent;

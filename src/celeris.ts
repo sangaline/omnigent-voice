@@ -1386,6 +1386,98 @@ export const directSessionOutputSpeech = (
   return `${update.name} update: ${output.replace(/^assistant:\s*/i, "")}`;
 };
 
+const safeCompletionSpeech = (
+  update: CoordinatorUpdate,
+): string | undefined => {
+  const suppliedSummary = typeof update.summary === "string"
+    ? update.summary.trim()
+    : "";
+  const delta = objectValue(update.output_delta);
+  const output = typeof delta?.output === "string"
+    ? delta.output.trim().replace(/^assistant:\s*/i, "")
+    : "";
+  const speech = suppliedSummary || (output ? `${update.name} finished: ${output}` : "");
+  if (
+    !speech ||
+    speech.length > 240 ||
+    speech.includes("```") ||
+    /https?:\/\//i.test(speech) ||
+    speech.split("\n").length > 3
+  ) {
+    return undefined;
+  }
+  return speech;
+};
+
+const spokenWordCount = (value: string): number =>
+  value.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
+
+const isSimpleRepeatRequest = (input: string): boolean =>
+  /^(?:(?:wait|sorry|okay|ok|uh)\s+)*(?:can\s+you\s+)?(?:say|repeat)(?:\s+(?:that(?:\s+(?:last\s+(?:bit|part|update)|update))?|it|the\s+last\s+(?:bit|part|update)))?(?:\s+again)?[?.!\s]*$/i.test(
+    input.trim(),
+  );
+
+const extractiveCompletionSpeech = (
+  update: CoordinatorUpdate,
+): string | undefined => {
+  if (typeof update.summary === "string" && update.summary.trim()) return undefined;
+  const delta = objectValue(update.output_delta);
+  const output = typeof delta?.output === "string"
+    ? delta.output.trim().replace(/^assistant:\s*/i, "")
+    : "";
+  if (
+    !output ||
+    output.length > 1_200 ||
+    output.includes("```") ||
+    /https?:\/\//i.test(output) ||
+    output.split("\n").length > 6
+  ) {
+    return undefined;
+  }
+  const clauses = output
+    .split(/(?<=[.!?])\s+|[,;]\s+/u)
+    .map((clause) => clause.trim().replace(/^(?:and|but|while)\s+/i, ""))
+    .map((clause) => clause.replace(/[.!?]+$/u, "").trim())
+    .filter(Boolean);
+  if (clauses.length < 2) return undefined;
+
+  const budget = Math.max(8, 24 - spokenWordCount(update.name));
+  const ranked = clauses.map((clause, index) => {
+    let score = index === 0 ? 100 : 0;
+    if (/\b(?:credential|auth(?:entication)?|private|external|without|secret|security|permission)\b/i.test(clause)) {
+      score += 60;
+    }
+    if (/\b(?:fail(?:ed|ure)?|error|blocked|remaining|still|need(?:s|ed)?|required?|waiting|cannot|couldn['’]?t)\b/i.test(clause)) {
+      score += 50;
+    }
+    if (/\b(?:pass(?:ed|ing)?|test(?:s|ed)?|check(?:s|ed)?|verified|healthy|ready|live|fixed|complete(?:d)?)\b/i.test(clause)) {
+      score += 30;
+    }
+    if (/\b(?:focus(?:ed)?|coordinator remains)\b/i.test(clause)) score -= 80;
+    return { clause, index, score, words: spokenWordCount(clause) };
+  });
+  const selected: typeof ranked = [];
+  let words = 0;
+  for (const candidate of ranked.toSorted((left, right) =>
+    right.score - left.score || left.index - right.index)) {
+    if (
+      candidate.score < 0 ||
+      candidate.words === 0 ||
+      words + candidate.words > budget
+    ) {
+      continue;
+    }
+    selected.push(candidate);
+    words += candidate.words;
+  }
+  if (selected.length < 2) return undefined;
+  const speech = `${update.name}: ${selected
+    .toSorted((left, right) => left.index - right.index)
+    .map(({ clause }) => clause)
+    .join("; ")}.`;
+  return speech.length <= 300 ? speech : undefined;
+};
+
 export const directFocusedOutputSpeech = (
   input: string,
   state: JsonObject,
@@ -1476,25 +1568,15 @@ export const directCoordinatorUpdateSpeech = (
     const delivery = delivered[0]!;
     const phrases: string[] = [];
     if (completed[0]) {
-      const summary = typeof completed[0].summary === "string"
-        ? completed[0].summary.trim()
-        : "";
+      const completion = safeCompletionSpeech(completed[0]);
       const delta = objectValue(completed[0].output_delta);
-      const output = typeof delta?.output === "string"
-        ? delta.output.trim().replace(/^assistant:\s*/i, "")
-        : "";
-      const completion = summary || (output
-        ? `${completed[0].name} finished its prior turn: ${output}`
-        : `${completed[0].name} finished its prior turn.`);
-      if (
-        completion.length > 200 ||
-        completion.includes("```") ||
-        /https?:\/\//i.test(completion) ||
-        completion.split("\n").length > 3
-      ) {
-        return undefined;
-      }
-      phrases.push(completion);
+      const hadContent =
+        (typeof completed[0].summary === "string" && completed[0].summary.trim().length > 0) ||
+        (typeof delta?.output === "string" && delta.output.trim().length > 0);
+      if (hadContent && !completion) return undefined;
+      const renderedCompletion = completion ?? `${completed[0].name} finished its prior turn.`;
+      if (renderedCompletion.length > 200) return undefined;
+      phrases.push(renderedCompletion);
     }
     phrases.push(`I sent the queued message to ${delivery.name}.`);
     const decisionSpeech = directDecisionUpdatesSpeech(decisions);
@@ -1509,16 +1591,11 @@ export const directCoordinatorUpdateSpeech = (
     decisions.length > 0 &&
     updates.length === completed.length + decisions.length
   ) {
-    const summary = typeof completed[0]!.summary === "string"
-      ? completed[0]!.summary.trim()
-      : "";
+    const summary = safeCompletionSpeech(completed[0]!);
     const decisionSpeech = directDecisionUpdatesSpeech(decisions);
     if (
       summary &&
       summary.length <= 200 &&
-      !summary.includes("```") &&
-      !/https?:\/\//i.test(summary) &&
-      !summary.includes("\n") &&
       decisionSpeech
     ) {
       const speech = `${summary} ${decisionSpeech}`;
@@ -1530,19 +1607,7 @@ export const directCoordinatorUpdateSpeech = (
   if (updates.length !== 1 || updates[0]?.type !== "session_completed") {
     return undefined;
   }
-  const summary = typeof updates[0].summary === "string"
-    ? updates[0].summary.trim()
-    : "";
-  if (
-    !summary ||
-    summary.length > 240 ||
-    summary.includes("```") ||
-    /https?:\/\//i.test(summary) ||
-    summary.split("\n").length > 3
-  ) {
-    return undefined;
-  }
-  return summary;
+  return safeCompletionSpeech(updates[0]) ?? extractiveCompletionSpeech(updates[0]);
 };
 
 export class CelerisConversation {
@@ -1624,6 +1689,17 @@ export class CelerisConversation {
     });
     if (typeof updates.update_cursor === "number") {
       turnUpdateCursor = Math.max(turnUpdateCursor, updates.update_cursor);
+    }
+    const previousAssistantSpeech = [...this.history]
+      .reverse()
+      .find((message) => message.role === "assistant")?.content;
+    if (previousAssistantSpeech && isSimpleRepeatRequest(input)) {
+      const speech = sanitizeForSpeech(previousAssistantSpeech, 300);
+      if (!Array.isArray(updates.updates) || updates.updates.length === 0) {
+        this.updateCursor = turnUpdateCursor;
+      }
+      this.remember(input, speech);
+      return speech;
     }
     const verifiedFollowup = verifiedActionFollowupSpeech(
       input,
@@ -1714,9 +1790,6 @@ export class CelerisConversation {
       input,
       messageRouting.target?.name,
     );
-    const previousAssistantSpeech = [...this.history]
-      .reverse()
-      .find((message) => message.role === "assistant")?.content;
     const missedSendCorrection = isDeclarativeMissedSend(
       input,
       updates.recent_actions,
@@ -2261,11 +2334,11 @@ export class CelerisConversation {
       ...this.rememberedMessages(),
       {
         role: "system",
-        content: `A real Omnigent backend notification just arrived. Briefly tell the user what changed. Preserve every concrete outcome and any remaining, blocked, or still-running work in the notification. Ask for input only when the notification contains a decision that needs it. Never offer to monitor, watch, keep an eye on, or report back later. Data: ${JSON.stringify(updates)}`,
+        content: `A real Omnigent backend notification just arrived. Speak one sentence of at most 24 words. Use session names, technical identifiers, and factual terms exactly as written; never garble or creatively rewrite them. Prioritize the changed outcome, its validation evidence, and any safety constraint, blocker, remaining work, or required decision. Preserve explicit credential, authentication, private, external, and "without" constraints before routine details. Never mention unchanged focus. Ask for input only when the notification contains a decision that needs it. Never offer to monitor, watch, keep an eye on, or report back later. Data: ${JSON.stringify(updates)}`,
       },
     ];
     try {
-      const message = await this.complete(messages, "background_update", [], signal);
+      const message = await this.complete(messages, "background_update", [], signal, 64);
       const content = typeof message.content === "string" ? message.content.trim() : "";
       if (!content) return undefined;
       return sanitizeForSpeech(content, 300);

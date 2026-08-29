@@ -17,6 +17,7 @@ import {
   Events,
   GatewayIntentBits,
   Guild,
+  VoiceState,
   VoiceChannel,
 } from "discord.js";
 import OpusScript from "opusscript";
@@ -79,6 +80,7 @@ export class DiscordVoiceBot {
   private readonly recordingSettledWaiters = new Set<() => void>();
   private readonly pendingCoordinatorUpdates: CoordinatorUpdate[] = [];
   private connection?: VoiceConnection;
+  private voiceChannel?: VoiceChannel;
   private turnTail: Promise<void> = Promise.resolve();
   private pendingTranscript = "";
   private pendingTranscriptAudioMs = 0;
@@ -102,6 +104,17 @@ export class DiscordVoiceBot {
 
   public constructor(private readonly options: DiscordVoiceOptions) {}
 
+  private readonly onVoiceStateUpdate = (
+    oldState: VoiceState,
+    newState: VoiceState,
+  ): void => {
+    const channelId = this.voiceChannel?.id;
+    if (!channelId || (oldState.channelId !== channelId && newState.channelId !== channelId)) {
+      return;
+    }
+    this.scheduleCoordinatorNotification();
+  };
+
   public async start(): Promise<void> {
     const ready = new Promise<void>((resolve, reject) => {
       const fail = (error: Error): void => reject(error);
@@ -114,6 +127,8 @@ export class DiscordVoiceBot {
     await this.client.login(this.options.token);
     await ready;
     const channel = await this.resolveVoiceChannel();
+    this.voiceChannel = channel;
+    this.client.on(Events.VoiceStateUpdate, this.onVoiceStateUpdate);
     this.connection = joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
@@ -159,6 +174,7 @@ export class DiscordVoiceBot {
     this.playbackEpoch += 1;
     this.player.stop(true);
     this.connection?.destroy();
+    this.client.off(Events.VoiceStateUpdate, this.onVoiceStateUpdate);
     this.client.destroy();
     this.notifyRecordingSettled();
     await this.turnTail.catch(() => undefined);
@@ -917,6 +933,7 @@ export class DiscordVoiceBot {
       pendingUpdates: this.pendingCoordinatorUpdates.length,
       timerActive: Boolean(this.notificationTimer),
       deliveryInFlight: this.notificationInFlight,
+      audiencePresent: this.hasListeningHuman(),
     })) {
       return;
     }
@@ -928,6 +945,7 @@ export class DiscordVoiceBot {
 
   private async processCoordinatorNotification(): Promise<void> {
     if (this.notificationInFlight) return;
+    if (!this.hasListeningHuman()) return;
     if (
       this.shuttingDown ||
       this.activeRecordings.size > 0 ||
@@ -978,6 +996,16 @@ export class DiscordVoiceBot {
       });
       this.scheduleCoordinatorNotification();
     }
+  }
+
+  private hasListeningHuman(): boolean {
+    return Boolean(
+      this.voiceChannel?.members.some(
+        (member) =>
+          !member.user.bot &&
+          (!this.options.allowedUserId || member.id === this.options.allowedUserId),
+      ),
+    );
   }
 
   private async waitForRecordingToSettle(epoch: number): Promise<boolean> {

@@ -31,6 +31,7 @@ export interface VoiceEvalExpectation {
   speechForbiddenTerms?: Array<string> | undefined;
   allowedSpeechNumbers?: Array<number> | undefined;
   speechExact?: string | undefined;
+  maxSpeechWords?: number | undefined;
   maxRounds?: number | undefined;
   callExpectations?: VoiceToolCallExpectation[] | undefined;
   unorderedCallExpectations?: VoiceUnorderedToolCallExpectation[] | undefined;
@@ -370,7 +371,14 @@ export const scoreVoiceEval = (
       `speech ${JSON.stringify(observation.speech)} != ${JSON.stringify(testCase.expected.speechExact)}`,
     );
   }
-  if (testCase.expected.maxRounds) {
+  if (testCase.expected.maxSpeechWords !== undefined) {
+    const spokenWords = observation.speech.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu) ?? [];
+    check(
+      spokenWords.length <= testCase.expected.maxSpeechWords,
+      `speech used ${spokenWords.length} words, maximum ${testCase.expected.maxSpeechWords}`,
+    );
+  }
+  if (testCase.expected.maxRounds !== undefined) {
     check(
       observation.rounds <= testCase.expected.maxRounds,
       `used ${observation.rounds} rounds, maximum ${testCase.expected.maxRounds}`,

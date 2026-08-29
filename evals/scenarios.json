@@ -304,7 +304,7 @@
         "expected": {
           "toolSequence": [],
           "speechTerms": ["cutoff", "fixed", "pass"],
-          "maxRounds": 1
+          "maxRounds": 0
         }
       }
     ]
@@ -3932,6 +3932,95 @@
           "forbiddenTools": ["send_message", "get_output", "focus_session"],
           "speechTerms": ["primary work"],
           "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "real_shape_completion_preserves_output",
+    "description": "Speak the coordinator's actual completion event shape exactly without a lossy model paraphrase.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-rollout", "name": "Rollout Check", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 501,
+            "type": "session_completed",
+            "session_id": "session-rollout",
+            "name": "Rollout Check",
+            "status": "idle",
+            "output_delta": {
+              "changed": true,
+              "output": "assistant: The local image passed credential inspection and was imported directly into the cluster.",
+              "cursor": "rollout-4"
+            }
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechExact": "Rollout Check finished: The local image passed credential inspection and was imported directly into the cluster.",
+          "maxRounds": 0
+        }
+      }
+    ]
+  },
+  {
+    "id": "long_completion_is_concise_and_grounded",
+    "description": "Compress a long completion into one brief grounded spoken update without corrupting deployment facts.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-rollout", "name": "Rollout Check", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 502,
+            "type": "session_completed",
+            "session_id": "session-rollout",
+            "name": "Rollout Check",
+            "status": "idle",
+            "output_delta": {
+              "changed": true,
+              "output": "The candidate image is live in the private cluster. Credential inspection passed, every regression test passed, and the image was imported directly without using an external registry. The coordinator remains focused on Primary Work.",
+              "cursor": "rollout-5"
+            }
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["rollout", "live"],
+          "speechAnyTerms": [
+            ["credential", "inspection"],
+            ["passed", "passing"],
+            ["private", "external", "directly"]
+          ],
+          "speechForbiddenTerms": ["docker hub", "public registry", "failed", "focus", "way work"],
+          "maxSpeechWords": 24,
+          "maxRounds": 0
         }
       }
     ]

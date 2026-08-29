@@ -9,6 +9,7 @@ describe("coordinator notification scheduling", () => {
         pendingUpdates: 1,
         timerActive: false,
         deliveryInFlight: false,
+        audiencePresent: true,
       }),
     ).toBe(true);
     expect(
@@ -17,6 +18,7 @@ describe("coordinator notification scheduling", () => {
         pendingUpdates: 1,
         timerActive: false,
         deliveryInFlight: true,
+        audiencePresent: true,
       }),
     ).toBe(false);
     expect(
@@ -25,6 +27,7 @@ describe("coordinator notification scheduling", () => {
         pendingUpdates: 1,
         timerActive: true,
         deliveryInFlight: false,
+        audiencePresent: true,
       }),
     ).toBe(false);
     expect(
@@ -33,6 +36,16 @@ describe("coordinator notification scheduling", () => {
         pendingUpdates: 0,
         timerActive: false,
         deliveryInFlight: false,
+        audiencePresent: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldScheduleCoordinatorNotification({
+        shuttingDown: false,
+        pendingUpdates: 1,
+        timerActive: false,
+        deliveryInFlight: false,
+        audiencePresent: false,
       }),
     ).toBe(false);
   });

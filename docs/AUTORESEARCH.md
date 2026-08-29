@@ -1082,3 +1082,52 @@ production MCP harness. Typecheck, build, and all 88 unit tests pass. The full
 isolated sweep passed all 31 valid trials; one retry trial was invalidated only
 by HTTP 429 and has separate 10-of-10 stability evidence. The stateful sweep
 passed 24 of 24 scenarios and all 88 linked turns, including both new flows.
+
+### 2026-08-29 — Production-shaped notifications and listener presence
+
+Hypothesis H39: the deployed zero-round completion path was operating as the
+stateful fixtures claimed. Live post-rollout logs disproved it. Six consecutive
+proactive completions, with no recognized human turn between them, all invoked
+Celeris for 679–885 ms and then occupied roughly 9–17 seconds of audio. Several
+paraphrases corrupted source terms, including “wayOps,” “thisProgramming,” and
+“way Work.” The fixture supplied a convenient `summary` field that the real
+coordinator never emits; production `session_completed` events carry the stable
+assistant text only in `output_delta`.
+
+The direct renderer now consumes that actual event shape. Safe short output is
+spoken exactly, and longer plain output is split into source clauses and ranked
+for outcome, validation, safety, and blocker evidence. The selected clauses are
+reassembled without changing a word under a 24-word budget; unchanged-focus
+clauses are excluded. A realistic long deployment update started at zero of ten
+under the old prompt-only path, with 27–30 spoken words and repeated factual
+omissions. A stricter prompt improved length but remained only five of ten and
+still garbled names. The accepted extractive path passed ten of ten in zero
+model rounds, as did the separate real-event-shape regression.
+
+The Discord scheduler also previously treated the bot's connection as enough
+audience and marked updates spoken even when no trusted human was in the voice
+channel. Scheduling and the final delivery check now require a non-bot channel
+member, narrowed to `ALLOWED_DISCORD_USER_ID` when configured. A voice-state
+join schedules waiting work. This preserves the cursor and conversation history
+until somebody can actually hear the update; a pure scheduling regression
+covers the absent-audience case.
+
+### 2026-08-29 — Exact voice repeat control
+
+Hypothesis H40: Celeris was reliable enough for “repeat that last bit.” One of
+the broad linked sweeps disproved it by replying without either “fixed” or
+“pass,” even though both facts were in the immediately preceding spoken update.
+The harness now recognizes only narrow repeat-the-last-speech forms and replays
+the prior assistant text byte-for-byte in zero model rounds. Audit language such
+as “repeat what was actually sent” is intentionally excluded so the ledger,
+not conversational memory, remains authoritative. The linked six-turn flow
+passed ten of ten runs after the change, including ten exact zero-round repeats.
+
+Promotion evidence is 91 passing unit tests, clean typecheck and build, 27 of
+27 valid isolated trials, and 26 of 26 stateful scenarios across 90 linked
+turns. Five isolated HTTP 429 trials were invalid rather than scored; every one
+passed on its immediate single-case rerun. Two earlier broad linked sweeps had
+different low-frequency model misses, and each affected scenario passed five
+of five targeted reruns before the final clean 26-of-26 sweep. All coordinator
+calls in these additions used the frozen production MCP executor; no live user
+session, including the excluded ESPN session, was read or mutated.

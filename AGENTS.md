@@ -139,13 +139,23 @@ Every tool result includes only this MCP connection's unread `updates` plus an
 cursor for clients without notifications. A cursor beyond the current process
 or older than the retained window sets `update_cursor_expired` and returns the
 available window. Events are never globally drained by one caller.
-When the channel is idle, those real events are sent to Celeris without tools
-and spoken proactively; a human turn takes priority and receives any unspoken
-event in its frozen context. The voice consumer advances its event cursor only
-after proactive playback completes.
-One plain `session_output` message or `session_completed` summary up to 240
-characters and three lines is spoken directly in zero model rounds. This keeps
-short proactive facts exact instead of risking lossy paraphrase. Bounded batches
+When the channel runtime is idle and at least one trusted non-bot human is
+actually present in the voice channel, those real events are spoken
+proactively; joining the channel schedules any waiting update. Never play into
+an empty channel or advance the voice consumer's event cursor merely because
+the bot itself is connected. A human turn takes priority and receives any
+unspoken event in its frozen context. The voice consumer advances its event
+cursor only after proactive playback completes.
+One plain `session_output` message or real `session_completed` output delta up
+to 240 characters and three lines is spoken directly in zero model rounds.
+The production completion event does not carry the synthetic `summary` used by
+older fixtures, so direct rendering must inspect `output_delta.output`. A longer
+plain single completion can use the bounded extractive path: it selects exact
+outcome, validation, safety, and blocker clauses within a 24-word budget and
+discards negative-value unchanged-focus prose. It never rewrites identifiers or
+facts. Complex or unsafe content still uses a one-sentence, 24-word Celeris
+adaptation contract. This keeps proactive facts exact and avoids the garbled
+proper nouns observed in live model paraphrases. Bounded batches
 of up to three structured `decision_needed` events are also rendered directly
 from their prompt messages: confirmation mode says “needs your approval,” while
 other modes say “needs your input.” URLs, code fences, longer output, and other
@@ -161,6 +171,10 @@ fact that the queued message was actually sent. The same direct path may append
 a bounded unrelated `decision_needed` prompt, preserving the dispatch and the
 new approval request without trusting a lossy model paraphrase. The complete
 speech must fit 300 characters; unsafe or longer batches fall back to Celeris.
+The narrow spoken controls “say that again,” “repeat that update,” and “repeat
+the last bit” replay the exact most recent assistant speech in zero model
+rounds. They deliberately do not match provenance questions such as “repeat
+what was actually sent,” which remain grounded in the action ledger.
 The action ledger records the
 same dispatch as `message_sent` with `delivery: queued_after_turn`; an immediate
 delivery audit and current-focus question is answered from that typed evidence.
