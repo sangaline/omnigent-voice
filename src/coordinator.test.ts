@@ -258,6 +258,22 @@ describe("Omnigent coordinator", () => {
         ],
       });
       expect(immediate).not.toHaveProperty("queued");
+      listItems.mockResolvedValue({
+        data: [
+          { id: "sent-user", type: "message", role: "user", content: "Continue." },
+          { id: "new", type: "message", role: "assistant", content: "Ready." },
+        ],
+        hasMore: false,
+      });
+      await expect(client.callTool("get_output", {})).resolves.toMatchObject({
+        recent_delivery_visibility: {
+          action_id: 1,
+          delivery: "immediate",
+          status: "visible_on_page",
+          matching_position: 2,
+          page: 1,
+        },
+      });
       await expect(
         client.callTool("send_message", { message: "Do this later.", delivery: "queued" }),
       ).resolves.toMatchObject({
@@ -401,6 +417,99 @@ describe("Omnigent coordinator", () => {
         "Audio Packet Research",
       );
     } finally {
+      coordinator.stop();
+      await client.close();
+    }
+  });
+
+  it("publishes stable assistant output while a session is still running", async () => {
+    const now = new Date().toISOString();
+    const session = {
+      id: "session-live",
+      title: "Live Work",
+      status: "running",
+      updated_at: now,
+    };
+    const oldMessage = {
+      id: "old-message",
+      type: "message",
+      role: "assistant",
+      content: "Starting the checks.",
+    };
+    const newMessage = {
+      id: "new-message",
+      type: "message",
+      role: "assistant",
+      content: "The decoder now passes eight reconnect tests; the soak is still running.",
+    };
+    const toolOnly = {
+      id: "tool-only",
+      type: "function_call",
+      name: "exec_command",
+      arguments: '{"cmd":"run soak"}',
+    };
+    const listItems = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [oldMessage], hasMore: false })
+      .mockResolvedValueOnce({ data: [newMessage, oldMessage], hasMore: false })
+      .mockResolvedValueOnce({ data: [toolOnly, newMessage, oldMessage], hasMore: false });
+    const omnigent = {
+      listSessions: vi.fn().mockResolvedValue([session]),
+      getSession: vi.fn().mockResolvedValue(session),
+      listItems,
+      sendMessage: vi.fn(),
+      resolveElicitation: vi.fn(),
+      createSession: vi.fn(),
+      archiveSession: vi.fn(),
+      renameSession: vi.fn(),
+      interruptSession: vi.fn(),
+    } as unknown as OmnigentClient;
+    const coordinator = new OmnigentCoordinator({
+      omnigent,
+      logger: new Logger("error"),
+      pollIntervalMs: 60_000,
+    });
+    await coordinator.start();
+    const pushed: Array<{ type?: unknown; session_id?: unknown }> = [];
+    const unsubscribe = coordinator.subscribeUpdates((update) => pushed.push(update));
+    const client = await CoordinatorMcpClient.create(coordinator);
+    try {
+      await expect(
+        client.callTool("check_updates", { after_event_id: 0 }),
+      ).resolves.toMatchObject({
+        output_delta: {
+          changed: true,
+          output: expect.stringContaining("eight reconnect tests"),
+        },
+        updates: [
+          {
+            event_id: 1,
+            type: "session_output",
+            session_id: "session-live",
+            name: "Live Work",
+            output_delta: {
+              changed: true,
+              output: expect.stringContaining("eight reconnect tests"),
+            },
+          },
+        ],
+      });
+      expect(pushed).toEqual([
+        expect.objectContaining({ type: "session_output", session_id: "session-live" }),
+      ]);
+      await expect(
+        client.callTool("check_updates", { after_event_id: 1 }),
+      ).resolves.toMatchObject({
+        output_delta: {
+          changed: true,
+          output: expect.stringContaining("run soak"),
+        },
+        updates: [],
+        update_cursor: 1,
+      });
+      expect(pushed).toHaveLength(1);
+    } finally {
+      unsubscribe();
       coordinator.stop();
       await client.close();
     }

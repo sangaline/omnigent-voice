@@ -81,7 +81,12 @@ every two seconds, including while the human is speaking. At ASR finalization,
 `check_updates` atomically drains the focused session's cursor-backed output
 delta into the model context. Output arriving later remains buffered for the
 next turn. Persisted conversation items exclude transient terminal animations.
-Completion, failure, and new-decision events remain in a bounded replay log.
+Completion, failure, new-decision, and stable assistant-progress events remain
+in a bounded replay log. A running monitored session emits `session_output`
+only when a newly persisted assistant message appears; tool-only terminal
+activity does not interrupt the user. If the same poll also detects completion,
+failure, or a decision, that lifecycle event owns the accumulated output so it
+is not announced twice.
 Every tool result includes only this MCP connection's unread `updates` plus an
 `update_cursor`; `check_updates(after_event_id)` can replay from an explicit
 cursor for clients without notifications. A cursor beyond the current process
@@ -91,17 +96,24 @@ When the channel is idle, those real events are sent to Celeris without tools
 and spoken proactively; a human turn takes priority and receives any unspoken
 event in its frozen context. The voice consumer advances its event cursor only
 after proactive playback completes.
+One plain `session_output` message up to 240 characters and three lines is
+spoken directly with its session name in zero model rounds. URLs, code fences,
+longer output, and multi-event batches still use Celeris adaptation.
 `waiting_for_input` is a
 voice-facing filter for a nonzero pending-elicitation count, not an Omnigent
 status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
 
 Celeris owns the low-latency conversation and uses its OpenAI-compatible native
 tool-call shape to invoke a real MCP client/server pair connected in memory.
-For a single successful `send_message`, `focus_session`, `start_session`,
-`rename_session`, or `archive_session` result with no concurrent updates, the
-harness renders a deterministic natural receipt from typed fields and skips the
-second Celeris request. Do not weaken the success predicates or drop the
-updates-empty guard: uncertain or composite results still need model synthesis.
+For successful `send_message`, `focus_session`, `start_session`,
+`rename_session`, and `archive_session` results with no concurrent updates, the
+harness renders deterministic natural receipts from typed fields and skips the
+second Celeris request. This includes a compound model response when every tool
+call has a verified renderable action result. If one call fails, verified
+receipts for the other completed actions are spoken before the deterministic
+failure. Do not weaken the success predicates or drop the updates-empty guard:
+reads, uncertain results, and composites containing a non-renderable result
+still need model synthesis.
 Immediately before every human message, the harness inserts a current-turn
 action invariant: no coordinator action has happened yet, requested actions and
 required reads must use a tool before speech, prior ledger entries do not satisfy
@@ -138,7 +150,11 @@ the finding in the current request. The harness also withholds and rejects
 switch/select/open/focus action or an ordinal selection. This is a runtime
 safety guard in addition to the prompt; ordinary latest/current-output language
 cannot mutate focus. Conservative name-token matching also withholds
-`focus_session` when the requested target is already focused. The harness
+`focus_session` when the requested target is already focused. One explicitly
+named focus target is resolved against `known_sessions`; the model-visible
+schema omits the opaque ID and the harness injects the authoritative value even
+if Celeris emits a malformed one. Multiple named targets without a clear
+destination fail closed. The harness
 withholds `check_updates` from the voice model because it calls that tool
 atomically before constructing every turn and later tool results carry updates.
 When the previous assistant claimed a send, no retained `message_sent` receipt
@@ -163,6 +179,9 @@ window. `send_message` defaults to
 `queued: true` response means asynchronous acceptance, not deferred delivery,
 and is exposed as such. `delivery: queued` is an explicit coordinator-managed
 wait until the current session turn becomes idle.
+For clear “start/make/create/open a session to/for …” language, the harness
+copies the user's exact task clause into `start_session.instruction`; Celeris
+still selects the tool and may choose the title, agent, and workspace.
 `get_output` reads `/v1/sessions/{id}/items`; arbitrary tmux scrollback is not
 available through the Omnigent HTTP API and must not be implied. It returns a
 JSON array instead of flattening the page into text. Page 1 contains the most
@@ -172,6 +191,12 @@ chronology. Every retained item has a one-based position, normalized timestamp,
 preformatted age, kind, text, and message role or tool name where applicable.
 `latest_message` is the newest conversation message on the most recent page; it is
 generic and may be from either role, so consumers must still inspect `role`.
+`recent_delivery_visibility` compares the latest server-recorded sent or queued
+message for that session with typed user messages on the returned page. Its
+status is exactly `visible_on_page` or `not_visible_on_page`; absence from one
+page is not a claim about all history or whether the agent replied. The voice
+harness renders a visibility-only result directly from this typed field after
+Celeris selects `get_output`, avoiding a second model round.
 Internal terminal/tool activity remains separate from conversation messages.
 Item text is shortened by preserving both its beginning and end, and only
 complete items are admitted to the bounded result. The voice client preserves
@@ -207,6 +232,15 @@ Working memory is process-local; the full transcript remains durable in the
 private JSONL audit log but is not automatically replayed into the model after a
 restart. Focused-session state, recent actions, output cursors, and prompts stay
 authoritative regardless of conversational compaction.
+
+The process also repeats `last_verified_action_outcome`, a short receipt derived
+only from typed tool results, after an action turn. It preserves partial-failure
+evidence that cannot appear in the successful-action ledger. An immediate
+follow-up asking only which part happened and where the user is is rendered
+directly from that receipt plus `focused_session`; visibility checks and new
+actions still go through Celeris. A completion containing neither text nor a
+valid tool call is retried once because no action ran; a second empty result
+fails the turn normally.
 
 The context contract also says that
 `output_delta` is only new stable output through speech finalization, and older
@@ -259,6 +293,8 @@ snapshots and tool results. This is the regression gate for notification
 references, sticky focus, incremental output, explicit focus changes, and
 archive restoration. A scenario passes only if every valid turn passes; never
 replace it with isolated case invocations when evaluating stateful behavior.
+Use `--json --include-trace` only with sanitized or otherwise private scenario
+data when raw completion shapes are needed to diagnose an empty model turn.
 
 The Discord voice channel is currently part of the MVP trust boundary. Before
 using a channel with more than one trusted human, configure

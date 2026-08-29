@@ -31,7 +31,9 @@ harness can route a message to one explicitly named known session without
 changing focus; ambiguous destinations fail closed. Archiving a temporary
 focused session restores the prior valid focus and reports both sides of the
 transition for the spoken response. Renaming reports the old and new names and
-does not change focus.
+does not change focus. Explicit named focus changes are resolved through the
+same authoritative map, so the small model never has to reproduce an opaque
+session ID and ambiguous targets fail closed.
 Background events are retained in a bounded log and every result carries an
 event cursor. Clients without server notifications can safely poll
 `check_updates` with their last cursor; one client reading events does not drain
@@ -43,15 +45,25 @@ Unresolved structured prompts are likewise repeated in `pending_decisions`
 with their exact session and prompt identifiers until resolution. This lets an
 approval arriving on a later utterance target the real prompt without relying
 on the model to remember or reconstruct opaque IDs.
+Output reads include a typed page-local comparison between the latest recorded
+delivery and returned user messages. Visibility questions are spoken directly
+from that result after Celeris selects the read, keeping “sent,” “visible,” and
+“agent replied” as separate facts.
 The same server can run over stdio with `npm run mcp`; the voice process uses an
 in-memory MCP transport to avoid network latency.
 
-Successful single-action receipts for sends, focus changes, starts, renames,
-and archives are spoken directly from verified structured tool results when no
-background update also needs narration. This removes a second model request
+Successful action receipts for sends, focus changes, starts, renames, and
+archives are spoken directly from verified structured tool results when no
+background update also needs narration. Multiple action receipts can be
+combined when every result is verified; if one action fails, completed actions
+are still acknowledged before the failure. This removes a second model request
 from common control turns and prevents the fast model from dropping or changing
-the target name. Composite reads and turns carrying updates still return to
+target names. Composite reads and turns carrying updates still return to
 Celeris for natural synthesis.
+The most recent verified action receipt is repeated in model context. A narrow
+immediate follow-up asking only which part happened and where the user is can be
+answered directly from that receipt and current focus, avoiding an unnecessary
+model request or output read.
 
 The voice model keeps a large raw dialogue tail. After the configurable working
 set reaches 80 messages or 48,000 characters, an idle background request
@@ -64,8 +76,12 @@ A native poll loop keeps collecting focused-session output while audio is
 playing and while the human is speaking. When recognition finalizes, the model
 receives one atomic snapshot of everything collected through that instant.
 Later events stay buffered for the next turn rather than changing an in-flight
-completion. Completion, failure, and decision-needed events can also produce a
-proactive spoken update while the channel is idle.
+completion. Completion, failure, decision-needed, and newly persisted assistant
+progress messages can produce a proactive spoken update while the channel is
+idle. Tool-only terminal activity is retained for reads but does not trigger an
+unsolicited interruption.
+One short plain progress message is spoken directly with its session name;
+longer, multi-event, code-heavy, or URL-bearing updates use Celeris adaptation.
 
 Discord speaking events alone do not stop playback: decoded audio must cross a
 configurable energy threshold, preventing phone echo from truncating speech.
@@ -155,9 +171,13 @@ wrong tool behavior still fail. `evals/scenarios.json` keeps one production
 conversation and MCP connection alive across linked human turns and proactive
 notifications. It exercises sticky focus, notification references, event
 cursors, chronological output chunks, actions during fresh output, named
-cross-session sends, structured decisions, rename, and archive-to-previous-focus
-behavior. The longest scenario combines primary, background, and temporary
-work over thirteen turns so accumulated state and references are tested rather
-than only isolated primitives. A scenario passes only when every turn passes.
+cross-session sends, structured decisions, rename, compound action receipts,
+partial failures, proactive running-session progress, and
+archive-to-previous-focus behavior. The longest scenario combines primary,
+background, and temporary work over thirteen turns so accumulated state and
+references are tested rather than only isolated primitives. A scenario passes
+only when every turn passes.
+For sanitized diagnostic fixtures, `--json --include-trace` includes raw model
+completion shapes so empty or malformed responses can be investigated.
 Keys, reports, and cases copied from private transcripts must remain outside the
 repository.

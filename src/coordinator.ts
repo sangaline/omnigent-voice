@@ -11,13 +11,13 @@ export type SessionFilter =
 
 export interface CoordinatorUpdate extends JsonObject {
   event_id: number;
-  type: "session_completed" | "decision_needed" | "session_failed";
+  type: "session_completed" | "session_output" | "decision_needed" | "session_failed";
   session_id: string;
   name: string;
 }
 
 interface CoordinatorUpdateInput extends JsonObject {
-  type: "session_completed" | "decision_needed" | "session_failed";
+  type: "session_completed" | "session_output" | "decision_needed" | "session_failed";
   session_id: string;
   name: string;
 }
@@ -292,6 +292,14 @@ const meaningfulOutput = (raw: JsonObject): string => {
   return "";
 };
 
+const comparableMessage = (value: string): string =>
+  value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const isAssistantMessage = (raw: JsonObject): boolean => {
+  const item = isObject(raw.data) ? raw.data : raw;
+  return stringValue(item.role) === "assistant" && Boolean(contentText(item.content).trim());
+};
+
 export class OmnigentCoordinator {
   private focusedSessionId: string | undefined;
   private focusedSession: JsonObject | undefined;
@@ -479,10 +487,30 @@ export class OmnigentCoordinator {
       cursor = listing.lastId;
     }
     const formatted = formatConversationItems(listing?.data ?? []);
-    const items = [...formatted.items]
+    const items: ConversationOutputItem[] = [...formatted.items]
       .reverse()
       .map((item, index) => ({ ...item, position: index + 1 }));
     const latestMessage = [...items].reverse().find((item) => item.kind === "message") ?? null;
+    const recentDelivery = [...this.recentActions]
+      .reverse()
+      .find(
+        (action) =>
+          (action.type === "message_sent" || action.type === "message_queued") &&
+          action.session_id === id &&
+          typeof action.message === "string",
+      );
+    const deliveredText =
+      recentDelivery && typeof recentDelivery.message === "string"
+        ? comparableMessage(recentDelivery.message)
+        : "";
+    const matchingItem = deliveredText
+      ? items.find(
+          (item) =>
+            item.kind === "message" &&
+            item.role === "user" &&
+            comparableMessage(item.text) === deliveredText,
+        )
+      : undefined;
     return {
       session_id: id,
       target_session: this.sessionSummaries.get(id) ?? null,
@@ -493,6 +521,15 @@ export class OmnigentCoordinator {
       items,
       items_omitted: formatted.omitted,
       has_more: listing?.hasMore ?? false,
+      recent_delivery_visibility: recentDelivery
+        ? {
+            action_id: recentDelivery.action_id,
+            delivery: recentDelivery.delivery,
+            status: matchingItem ? "visible_on_page" : "not_visible_on_page",
+            matching_position: matchingItem?.position ?? null,
+            page,
+          }
+        : null,
     };
   }
 
@@ -796,23 +833,36 @@ export class OmnigentCoordinator {
     this.rememberSessions(sessions);
     await this.refreshPendingDecisions(sessions);
     await this.dispatchDeferredMessages(sessions);
-    await Promise.all([...this.outputStates.keys()].map((id) => this.captureOutput(id)));
+    const monitoredIds = [...this.outputStates.keys()];
+    const assistantOutputIds = new Set(
+      (
+        await Promise.all(
+          monitoredIds.map(async (id) => ({ id, changed: await this.captureOutput(id) })),
+        )
+      )
+        .filter(({ changed }) => changed)
+        .map(({ id }) => id),
+    );
     for (const session of sessions) {
       const id = sessionId(session);
       if (!id) continue;
       const before = this.fingerprints.get(id);
       const after = this.fingerprint(session);
       this.fingerprints.set(id, after);
-      if (!before || before === after) continue;
       let previous: { status?: unknown; pending?: unknown } = {};
-      try {
-        previous = JSON.parse(before) as typeof previous;
-      } catch {
-        continue;
+      const lifecycleChanged = Boolean(before && before !== after);
+      if (lifecycleChanged && before) {
+        try {
+          previous = JSON.parse(before) as typeof previous;
+        } catch {
+          previous = {};
+        }
       }
       const status = stringValue(session.status) ?? "unknown";
       const name = sessionName(session);
-      if (status === "failed" && previous.status !== "failed") {
+      let lifecycleUpdate = false;
+      if (lifecycleChanged && status === "failed" && previous.status !== "failed") {
+        lifecycleUpdate = true;
         this.pushUpdate({
           type: "session_failed",
           session_id: id,
@@ -824,6 +874,7 @@ export class OmnigentCoordinator {
         status === "idle" &&
         (previous.status === "running" || previous.status === "waiting")
       ) {
+        lifecycleUpdate = true;
         this.pushUpdate({
           type: "session_completed",
           session_id: id,
@@ -832,13 +883,26 @@ export class OmnigentCoordinator {
           output_delta: this.readOutput(id, "notificationIndex"),
         });
       }
-      if (pendingCount(session) > Number(previous.pending ?? 0)) {
+      if (
+        lifecycleChanged &&
+        pendingCount(session) > Number(previous.pending ?? 0)
+      ) {
+        lifecycleUpdate = true;
         this.pushUpdate({
           type: "decision_needed",
           session_id: id,
           name,
           pending_prompts: pendingCount(session),
           prompts: this.pendingDecisions.get(id)?.prompts ?? [],
+          output_delta: this.readOutput(id, "notificationIndex"),
+        });
+      }
+      if (!lifecycleUpdate && status === "running" && assistantOutputIds.has(id)) {
+        this.pushUpdate({
+          type: "session_output",
+          session_id: id,
+          name,
+          status,
           output_delta: this.readOutput(id, "notificationIndex"),
         });
       }
@@ -903,9 +967,9 @@ export class OmnigentCoordinator {
     return initialization;
   }
 
-  private async captureOutput(id: string): Promise<void> {
+  private async captureOutput(id: string): Promise<boolean> {
     const state = this.outputStates.get(id);
-    if (!state) return;
+    if (!state) return false;
     const listing = await this.options.omnigent.listItems(id, 30);
     const unseen = listing.data
       .filter((raw) => {
@@ -913,11 +977,13 @@ export class OmnigentCoordinator {
         return Boolean(id && !state.seenIds.has(id));
       })
       .reverse();
+    let assistantMessageChanged = false;
     for (const raw of unseen) {
       const id = itemId(raw);
       if (!id) continue;
       state.seenIds.add(id);
       state.seenOrder.push(id);
+      if (isAssistantMessage(raw)) assistantMessageChanged = true;
       const text = meaningfulOutput(raw);
       if (text) state.entries.push({ id, text });
     }
@@ -931,6 +997,7 @@ export class OmnigentCoordinator {
       state.contextIndex = Math.max(0, state.contextIndex - removeCount);
       state.notificationIndex = Math.max(0, state.notificationIndex - removeCount);
     }
+    return assistantMessageChanged;
   }
 
   private readOutput(

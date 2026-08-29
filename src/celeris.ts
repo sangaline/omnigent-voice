@@ -100,6 +100,7 @@ Speak naturally and briefly, normally one or two short sentences. Never use Mark
 Answer casual conversation and general knowledge directly. Never invent the state of sessions, machines, files, deployments, or prior work; use tools for those.
 The coordinator state in each turn names the focused session. Treat that focus as sticky. "This session", "the session", "it", "current", "latest output", and "most recent output" mean the focused session. Never call focus_session merely to read or control the focused session. Change focus only when the user explicitly asks to switch, open, focus, or use a different named or numbered session. Listing or reading another session must not imply a focus change.
 recent_actions is the authoritative bounded ledger of coordinator actions even when spoken history has been trimmed. Before claiming whether a message was sent, queued, focused, started, archived, or answered, check this ledger. If an older action is absent, say it is not in the retained recent ledger; never conclude that it did not happen merely because it is absent from spoken history. Use the preformatted summary when the user asks what changed.
+last_verified_action_outcome, when present, is the exact voice-harness receipt for the most recent action turn, including any typed failure alongside actions that did succeed. Use it to answer an immediate follow-up about which parts happened; current focused_session remains authoritative for where the user is now.
 pending_decisions is the authoritative list of unresolved structured prompts across sessions. For approval, decline, or cancellation, copy the exact prompt_id and session_id from that list into answer_prompt. Never invent either identifier from a spoken name. A prompt can belong to a session other than the sticky focus; resolving it does not change focus.
 known_sessions is the bounded current name-to-ID map used by the voice harness. A message request that clearly names exactly one known session is routed to that session without changing sticky focus, even though the model-visible send_message schema has no session_id. Use the actual target returned by the tool in your acknowledgement. Never call focus_session merely to deliver a message to an explicitly named session.
 Use list_sessions only when the user asks for a list or explicitly wants a different session that has not been resolved. The coordinator state is a fresh atomic snapshot taken after the human finished speaking. Use its output_delta when it answers a latest/current-state question; call poll_output for stable output that arrived after the previous snapshot, or get_output when older context is needed. get_output page 1 is the most recent page, with typed timestamped items ordered oldest-to-newest like incremental output. Distinguish conversation messages from internal tool or terminal activity. latest_message is the generic newest message and its role says whether it came from the user or assistant. Never claim that state is fresh without coordinator data from this turn.
@@ -118,13 +119,16 @@ Recent dialogue can contain system records beginning “Omnigent background upda
 If the immediately preceding assistant speech announced a different session, answer a follow-up directly when that notification already contains the requested fact. If the human asks for exact output, the last thing it said, or detail absent from the notification, call the read tool with the notification's session_id. If the human clearly approves, declines, or cancels an announced decision, call answer_prompt with the exact prompt_id and session_id from pending_decisions instead. Never invent an identifier from the session name.
 If the human states that a requested message was missing, not sent, or not received, repeat send_message with the intended message. A declarative correction such as “I don't see the message” after you claimed to send it is a missed-action complaint and requires send_message. An actual question asking whether a message is visible or recent, or explicitly asking to inspect or verify output, is instead a read request: use get_output and never send a message for that question.
 No coordinator action has happened in this human turn yet. If the human asks for an action, or if answering requires current coordinator data, your next output must be the appropriate tool call, not prose. Only a successful tool result later in this turn proves the action happened. The recent_actions ledger describes prior turns and never satisfies a new request. “Another,” “again,” “retry,” “now,” and corrections that an action was missed require a new tool call. Execute tools before speaking. Never say that you will need to pull or check data, offer to check it, ask permission for a read-only check, or promise to perform a tool action after the response; call the tool now.
+An explicit request to switch, focus, or open another session requires focus_session before any speech. Never narrate a focus change from the request alone; only the tool result proves the active session changed.
 voice_message_routing is computed deterministically from this human transcript and known_sessions. When its mode is named, call send_message normally; the harness supplies that exact target without changing focus. When its mode is ambiguous, do not claim to send anything and ask the human to name one target.
 When the requested message content depends on a missing fact about what a different session found, said, or is doing, first call get_output for that source session. Only after receiving the source result may you call send_message with the grounded finding; never send a placeholder telling the destination merely to inspect or review the source session. If the human already states the complete finding to relay in the current request, send that supplied content directly without rereading the source.
 The coordinator snapshot immediately above is already current data for this turn. output_delta is the chronological stable output newly available since the prior human snapshot. When output_delta.changed is true and its content answers “latest,” “current,” “what's new,” or “since then,” answer directly from it and do not call get_output. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.
+A short output_delta is already a voice-sized update. When it directly answers the human, preserve every concrete condition, count, outcome, and still-running or blocked clause instead of shortening away one of its facts.
 A question about whether any prior coordinator action succeeded, including prompt approval, is answered directly from recent_actions. Do not repeat the action and do not read session output merely to verify a ledger entry.
 Renaming is a coordinator action. Only call rename_session for an explicit rename request, copy the requested new title into title, and describe the old-to-new transition only after its successful tool result. It never changes sticky focus.
 send_message delivery is immediate unless the human clearly requests queueing until the current agent turn finishes. ASR discourse such as “wait,” “no wait,” “hold on,” or a mid-sentence correction does not request queued delivery. Use queued only for explicit timing such as “queue this,” “send after the current turn,” or “when it finishes.”
 Only after an actual visibility question has selected get_output, answer whether the sent user message itself appears, not whether the agent has responded. If recent_actions confirms the send but get_output does not contain that user message, say it was sent or accepted but is not visible in output yet. If the user message is present, clearly confirm that it is visible. Mention a response only if the human asked about one, and never promise future monitoring.
+For a visibility question, get_output.recent_delivery_visibility is the authoritative page comparison. visible_on_page means the latest delivered user message is present on that returned page; not_visible_on_page means only that it is absent from that page. Never reverse these values or substitute whether the agent has replied.
 Answer every requested part of a compound question. When output_delta or a notification says both that work completed and what its outcome was, preserve the outcome rather than reporting only that the activity finished.
 FINAL MESSAGE EVIDENCE BOUNDARY: classify the human's intent before responding. A declarative correction of your immediately preceding send claim, such as “no,” “I don't see that message,” or “that message isn't there,” is a new retry request; call send_message again. A question only about whether you actually performed the send is answered directly from recent_actions with no tool. A question or explicit request about whether the message is visible, present, or shown in session output calls get_output and combines that visibility result with recent_actions. Never substitute one of these three operations for another.`;
 
@@ -223,6 +227,7 @@ const coordinatorContext = (
   memoryPolicy: CelerisMemoryPolicy,
   hasCompactedMemory: boolean,
   messageRouting: VoiceMessageRouting,
+  lastVerifiedActionOutcome: string | undefined,
 ): ChatMessage => {
   const updates = Array.isArray(result.updates) ? result.updates : [];
   return {
@@ -233,6 +238,7 @@ const coordinatorContext = (
       known_sessions: result.known_sessions ?? [],
       pending_decisions: result.pending_decisions ?? [],
       recent_actions: result.recent_actions ?? [],
+      last_verified_action_outcome: lastVerifiedActionOutcome ?? null,
       output_delta: result.output_delta ?? null,
       updates,
       voice_message_routing: messageRouting,
@@ -278,6 +284,12 @@ export const targetsFocusedSession = (input: string, focusedName: unknown): bool
 
 interface VoiceMessageRouting {
   mode: "focused" | "named" | "ambiguous";
+  target?: { id: string; name: string } | undefined;
+  candidates?: string[] | undefined;
+}
+
+interface VoiceFocusRouting {
+  mode: "model" | "named" | "ambiguous";
   target?: { id: string; name: string } | undefined;
   candidates?: string[] | undefined;
 }
@@ -368,9 +380,57 @@ export const voiceMessageRouting = (
   };
 };
 
+export const voiceFocusRouting = (
+  input: string,
+  knownSessions: unknown,
+): VoiceFocusRouting => {
+  if (!allowsFocusChange(input)) return { mode: "model" };
+  const normalized = words(input).join(" ");
+  const matches = new Map<string, { id: string; name: string }>();
+  for (const candidate of Array.isArray(knownSessions) ? knownSessions : []) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const id = (candidate as JsonObject).id;
+    const name = (candidate as JsonObject).name;
+    if (typeof id !== "string" || !id || typeof name !== "string" || !name) continue;
+    const phrase = words(name).join(" ");
+    if (phrase && ` ${normalized} `.includes(` ${phrase} `)) {
+      matches.set(id, { id, name });
+    }
+  }
+  if (matches.size === 0) return { mode: "model" };
+  if (matches.size === 1) return { mode: "named", target: [...matches.values()][0] };
+
+  const directlyTargeted = [...matches.values()].filter(({ name }) => {
+    const phrase = words(name).join(" ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return (
+      new RegExp(`\\b(?:to|into|onto|on)(?: the)? ${phrase}\\b`).test(normalized) ||
+      new RegExp(`\\b(?:focus|open|select|choose|pick|use)(?: the)? ${phrase}\\b`).test(
+        normalized,
+      )
+    );
+  });
+  if (directlyTargeted.length === 1) {
+    return { mode: "named", target: directlyTargeted[0] };
+  }
+  return {
+    mode: "ambiguous",
+    candidates: [...matches.values()].map(({ name }) => name),
+  };
+};
+
+export const voiceStartInstruction = (input: string): string | undefined => {
+  const match =
+    /\b(?:start|make|create|open)\b.{0,50}\b(?:session|chat)\b\s+(?:to|for)\s+(.+)/i.exec(
+      input,
+    );
+  const instruction = match?.[1]?.trim();
+  return instruction || undefined;
+};
+
 const voiceSafeTool = (
   tool: OpenAiTool,
   routing: VoiceMessageRouting,
+  focusRouting: VoiceFocusRouting,
 ): OpenAiTool => {
   if (tool.function.name === "archive_session") {
     return {
@@ -401,6 +461,20 @@ const voiceSafeTool = (
             },
           },
           required: ["title"],
+          additionalProperties: false,
+        },
+      },
+    };
+  }
+  if (tool.function.name === "focus_session" && focusRouting.mode === "named") {
+    return {
+      ...tool,
+      function: {
+        ...tool.function,
+        description: `Focus the explicitly named ${focusRouting.target?.name ?? "target"} session. The voice harness supplies and verifies its authoritative ID.`,
+        parameters: {
+          type: "object",
+          properties: {},
           additionalProperties: false,
         },
       },
@@ -522,12 +596,87 @@ export const successfulActionSpeech = (
   }
 };
 
+export const verifiedActionFollowupSpeech = (
+  input: string,
+  lastVerifiedActionOutcome: string | undefined,
+  focusedSession: unknown,
+): string | undefined => {
+  if (!lastVerifiedActionOutcome) return undefined;
+  const asksOutcome =
+    /\b(?:what|which)\s+part\b.{0,50}\b(?:happen|work|succeed|fail)/i.test(input) ||
+    /\bwhat\s+(?:actually\s+)?happened\b/i.test(input);
+  if (!asksOutcome) return undefined;
+  if (
+    /\b(?:visible|visibility|output|showing|see|check|verify|read)\b/i.test(input) ||
+    /\b(?:queue|archive|rename|start|create|switch|focus|open|approve|decline|cancel|interrupt)\b/i.test(
+      input,
+    )
+  ) {
+    return undefined;
+  }
+  const asksFocus =
+    /\bwhere\s+(?:am\s+i|are\s+we)\b/i.test(input) ||
+    /\bwhat\s+session\s+(?:am\s+i|are\s+we)\b/i.test(input);
+  if (!asksFocus) return lastVerifiedActionOutcome;
+  const focused = resultSessionName(focusedSession);
+  return focused
+    ? `${lastVerifiedActionOutcome} You're in ${focused}.`
+      : `${lastVerifiedActionOutcome} No session is currently focused.`;
+};
+
+export const verifiedDeliveryVisibilitySpeech = (
+  input: string,
+  result: JsonObject,
+): string | undefined => {
+  if (
+    !/\b(?:visible|visibility|showing|showed\s+up|appear(?:ed|ing|s)?|see\s+(?:it|that|the\s+message|your\s+message))\b/i.test(
+      input,
+    ) ||
+    (Array.isArray(result.updates) && result.updates.length > 0)
+  ) {
+    return undefined;
+  }
+  const visibility = objectValue(result.recent_delivery_visibility);
+  const status = visibility?.status;
+  if (status !== "visible_on_page" && status !== "not_visible_on_page") {
+    return undefined;
+  }
+  const delivery = visibility?.delivery === "queued" ? "queued" : "sent";
+  const target = resultSessionName(result.target_session);
+  if (status === "visible_on_page") {
+    return target
+      ? `It was ${delivery}, and the message is visible in ${target}'s output.`
+      : `It was ${delivery}, and the message is visible in the session output.`;
+  }
+  return `It was ${delivery}, but the message isn't visible on the returned output page yet.`;
+};
+
+export const directSessionOutputSpeech = (
+  updates: readonly CoordinatorUpdate[],
+): string | undefined => {
+  if (updates.length !== 1 || updates[0]?.type !== "session_output") return undefined;
+  const update = updates[0];
+  const delta = objectValue(update.output_delta);
+  const output = typeof delta?.output === "string" ? delta.output.trim() : "";
+  if (
+    !output ||
+    output.length > 240 ||
+    output.includes("```") ||
+    /https?:\/\//i.test(output) ||
+    output.split("\n").length > 3
+  ) {
+    return undefined;
+  }
+  return `${update.name} update: ${output.replace(/^assistant:\s*/i, "")}`;
+};
+
 export class CelerisConversation {
   private readonly history: ChatMessage[] = [];
   private readonly memoryPolicy: CelerisMemoryPolicy;
   private memorySummary?: string;
   private toolDefinitions?: OpenAiTool[];
   private updateCursor = 0;
+  private lastVerifiedActionOutcome?: string;
   private compactionTimer: ReturnType<typeof setTimeout> | undefined;
   private compactionController: AbortController | undefined;
   private compactionPromise: Promise<void> | undefined;
@@ -569,7 +718,20 @@ export class CelerisConversation {
     if (typeof updates.update_cursor === "number") {
       turnUpdateCursor = Math.max(turnUpdateCursor, updates.update_cursor);
     }
+    const verifiedFollowup = verifiedActionFollowupSpeech(
+      input,
+      this.lastVerifiedActionOutcome,
+      updates.focused_session,
+    );
+    if (verifiedFollowup) {
+      const speech = sanitizeForSpeech(verifiedFollowup, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech);
+      return speech;
+    }
     const messageRouting = voiceMessageRouting(input, updates.known_sessions);
+    const focusRouting = voiceFocusRouting(input, updates.known_sessions);
+    const startInstruction = voiceStartInstruction(input);
     const previousAssistantSpeech = [...this.history]
       .reverse()
       .find((message) => message.role === "assistant")?.content;
@@ -591,6 +753,7 @@ export class CelerisConversation {
         this.memoryPolicy,
         Boolean(this.memorySummary),
         messageRouting,
+        this.lastVerifiedActionOutcome,
       ),
       ...(actionInvariant
         ? [{ role: "system" as const, content: actionInvariant }]
@@ -617,10 +780,11 @@ export class CelerisConversation {
           );
         },
       )
-      .map((tool) => voiceSafeTool(tool, messageRouting));
+      .map((tool) => voiceSafeTool(tool, messageRouting, focusRouting));
     const allowedTools = new Set(tools.map((tool) => tool.function.name));
 
     try {
+      let retriedEmptyCompletion = false;
       for (let round = 0; round < 5; round += 1) {
         const message = await this.complete(
           messages,
@@ -635,7 +799,16 @@ export class CelerisConversation {
           : [];
         if (calls.length === 0) {
           const content = typeof message.content === "string" ? message.content.trim() : "";
-          if (!content) throw new Error("Celeris returned neither speech nor a tool call");
+          if (!content && !retriedEmptyCompletion) {
+            retriedEmptyCompletion = true;
+            messages.push({
+              role: "system",
+              content:
+                "Your previous completion was empty and performed no action. Answer the current human turn now, using a tool first if the request requires one.",
+            });
+            continue;
+          }
+          if (!content) throw new Error("Celeris returned neither speech nor a tool call twice");
           const speech = sanitizeForSpeech(content, 300);
           this.updateCursor = turnUpdateCursor;
           this.remember(input, speech);
@@ -662,11 +835,28 @@ export class CelerisConversation {
           ) {
             args = { ...args, session_id: messageRouting.target.id };
           }
+          if (
+            call.function.name === "focus_session" &&
+            focusRouting.mode === "named" &&
+            focusRouting.target
+          ) {
+            args = { ...args, session_id: focusRouting.target.id };
+          }
+          if (call.function.name === "start_session" && startInstruction) {
+            args = { ...args, instruction: startInstruction };
+          }
           this.options.logger.info("celeris.tool.called", { name: call.function.name });
           let result: JsonObject;
           if (call.function.name === "send_message" && messageRouting.mode === "ambiguous") {
             result = {
               error: "Multiple known session names were present; one target is required",
+            };
+          } else if (
+            call.function.name === "focus_session" &&
+            focusRouting.mode === "ambiguous"
+          ) {
+            result = {
+              error: "Multiple known focus targets were present; one target is required",
             };
           } else if (!allowedTools.has(call.function.name)) {
             result = {
@@ -697,19 +887,46 @@ export class CelerisConversation {
           });
         }
         if (failedTool) {
-          const speech = toolFailureSpeech(failedTool);
+          const successfulReceipts = executed
+            .filter(({ result }) => typeof result.error !== "string")
+            .map(({ name, result }) => successfulActionSpeech(name, result))
+            .filter((receipt): receipt is string => Boolean(receipt));
+          const speech = sanitizeForSpeech(
+            [...new Set(successfulReceipts), toolFailureSpeech(failedTool)].join(" "),
+            300,
+          );
+          this.lastVerifiedActionOutcome = speech;
           this.updateCursor = turnUpdateCursor;
           this.remember(input, speech);
           return speech;
         }
-        if (executed.length === 1) {
-          const receipt = successfulActionSpeech(executed[0]!.name, executed[0]!.result);
-          if (receipt) {
-            const speech = sanitizeForSpeech(receipt, 300);
+        if (executed.length === 1 && executed[0]!.name === "get_output") {
+          const visibilitySpeech = verifiedDeliveryVisibilitySpeech(
+            input,
+            executed[0]!.result,
+          );
+          if (visibilitySpeech) {
+            const speech = sanitizeForSpeech(visibilitySpeech, 300);
             this.updateCursor = turnUpdateCursor;
             this.remember(input, speech);
             return speech;
           }
+        }
+        const successfulReceipts = executed.map(({ name, result }) =>
+          successfulActionSpeech(name, result),
+        );
+        if (
+          successfulReceipts.length > 0 &&
+          successfulReceipts.every((receipt): receipt is string => Boolean(receipt))
+        ) {
+          const speech = sanitizeForSpeech(
+            [...new Set(successfulReceipts)].join(" "),
+            300,
+          );
+          this.lastVerifiedActionOutcome = speech;
+          this.updateCursor = turnUpdateCursor;
+          this.remember(input, speech);
+          return speech;
         }
       }
       throw new Error("Celeris exceeded the coordinator tool-call limit");
@@ -730,6 +947,8 @@ export class CelerisConversation {
   ): Promise<string | undefined> {
     if (!this.options.apiKey || updates.length === 0 || signal.aborted) return undefined;
     this.preemptCompaction();
+    const directSpeech = directSessionOutputSpeech(updates);
+    if (directSpeech) return sanitizeForSpeech(directSpeech, 300);
     const messages: ChatMessage[] = [
       {
         role: "system",
@@ -738,7 +957,7 @@ export class CelerisConversation {
       ...this.rememberedMessages(),
       {
         role: "system",
-        content: `A real Omnigent backend notification just arrived. Briefly tell the user what changed and ask for input only if needed. Do not promise future monitoring. Data: ${JSON.stringify(updates)}`,
+        content: `A real Omnigent backend notification just arrived. Briefly tell the user what changed. Preserve every concrete outcome and any remaining, blocked, or still-running work in the notification. Ask for input only when the notification contains a decision that needs it. Never offer to monitor, watch, keep an eye on, or report back later. Data: ${JSON.stringify(updates)}`,
       },
     ];
     try {
