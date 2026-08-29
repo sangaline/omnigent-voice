@@ -1282,3 +1282,41 @@ neighbor passed ten of ten, and the final linked sweep passed all 29 scenarios
 and all 97 turns. The conventional gate is 97 unit tests, clean typecheck and
 build, and 32 of 32 isolated cases. No live Omnigent session was used by H43 or
 H44; the excluded ESPN session remained untouched.
+
+### 2026-08-29 — Action-result notification composition
+
+Hypothesis H45: the event-continuity implementation was sufficient when a
+human asked for a named send and also asked whether anything arrived while they
+were speaking, with a third-session event first appearing in the send result.
+The first fixture draft incorrectly assumed a preexisting voice cursor and was
+discarded. In the corrected held-out three-turn flow, the unchanged harness
+passed four of ten runs. The other six replaced the explicit send with an
+unnecessary `get_output` call against its destination, so the later deictic
+incremental read also targeted the wrong session and had no cursor.
+
+The runtime now treats the atomic hidden `check_updates` snapshot as the answer
+to that generic incoming-event clause. On this narrow compound turn it hides
+older-output tools and forces the explicitly named `send_message` before
+speech. The deterministic instruction extractor removes the trailing “if
+anything came in … tell me too” clause, preventing that voice-layer question
+from being sent to the coding agent. A production-path test verifies the exact
+outbound message and that neither read tool is exposed.
+
+The first candidate reached nine of ten, but trace inspection found a separate
+tail: after the successful send, Celeris sometimes returned an empty completion
+before eventually speaking, and in another sample returned empty speech twice.
+It also tried to preserve the update question inside the outbound message when
+left to compose that argument. The accepted harness path composes a typed action
+receipt with concurrent events only when every execution is a successful
+renderable action, the existing bounded update renderer accepts the entire
+event batch, and the result stays under 300 characters. It therefore returns in
+one model round while unsafe, ambiguous, or longer batches still use Celeris.
+
+The strengthened scenario passed ten of ten runs and all 30 turns, including an
+exact outbound instruction, a safe third-session update, the exact `audit-31`
+cursor on the next `poll_output`, and unchanged Primary Work focus. Every turn
+used one model round; after the first cold request, the compound action took
+121–169 ms with a 127 ms median in this sample. Promotion evidence is 98 passing
+unit tests, clean typecheck and build, 32 of 32 isolated trials, and all 30
+stateful scenarios across 100 linked turns. No live Omnigent session was read or
+mutated, and the excluded ESPN session remained untouched.

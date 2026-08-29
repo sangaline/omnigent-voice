@@ -981,6 +981,10 @@ export const voiceMessageInstruction = (
       /\s*,?\s+(?:and|but|then)\s+(?:(?:do\s+not|don't|dont|never)\s+)?(?:switch|focus|move)\s+(?:me|us)(?:\s+(?:over\s+)?there)?[.!?]*$/i,
       "",
     )
+    .replace(
+      /\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:if\s+(?:anything|anything\s+new|any\s+updates?)\s+(?:came|comes|arrived|arrives)\s+in\b.*|(?:tell|let)\s+me\b.*\b(?:came|arrived|updates?)\b.*)$/i,
+      "",
+    )
     .trim();
   return instruction || undefined;
 };
@@ -2133,6 +2137,7 @@ export class CelerisConversation {
           }
         : undefined;
     const startInstruction = voiceStartInstruction(input);
+    const incomingUpdateQuestion = asksForIncomingUpdate(input);
     const messageInstruction = voiceMessageInstruction(
       input,
       messageRouting.target?.name,
@@ -2175,6 +2180,8 @@ export class CelerisConversation {
             (name !== "archive_session" || allowsArchive(input)) &&
             (name !== "rename_session" || allowsRename(input)) &&
             (!retryReadRouting || name !== "send_message") &&
+            (!incomingUpdateQuestion ||
+              (name !== "get_output" && name !== "poll_output")) &&
             (readRouting.mode !== "ambiguous" ||
               (name !== "get_output" && name !== "poll_output"))
           );
@@ -2190,6 +2197,10 @@ export class CelerisConversation {
         )
       );
     const allowedTools = new Set(tools.map((tool) => tool.function.name));
+    const sendBeforeIncomingUpdateReply =
+      incomingUpdateQuestion &&
+      messageRouting.mode === "named" &&
+      allowedTools.has("send_message");
     const requiredCompoundActions =
       messageRouting.mode === "named" &&
       requestsPositiveFocusAction(input) &&
@@ -2217,7 +2228,9 @@ export class CelerisConversation {
         ? "list_sessions"
         : incrementalPoll?.cursor
           ? "poll_output"
-          : undefined;
+          : sendBeforeIncomingUpdateReply
+            ? "send_message"
+            : undefined;
       const attemptedMessageTargetIds = new Set<string>();
       const executedAcrossRounds: Array<{ name: string; result: JsonObject }> = [];
       const verifiedActionReceipts = (): string[] =>
@@ -2641,6 +2654,33 @@ export class CelerisConversation {
           this.updateCursor = turnUpdateCursor;
           this.remember(input, speech, retainedTurnUpdates());
           return speech;
+        }
+        const concurrentUpdateSpeech = directCoordinatorUpdateSpeech(
+          retainedTurnUpdates(),
+        );
+        const concurrentActionReceipts = receiptExecutions.map(({ name, result }) =>
+          successfulActionSpeech(name, { ...result, updates: [] }),
+        );
+        if (
+          retainedTurnUpdates().length > 0 &&
+          concurrentUpdateSpeech &&
+          receiptExecutions.length === executedAcrossRounds.length &&
+          concurrentActionReceipts.length > 0 &&
+          concurrentActionReceipts.every(
+            (receipt): receipt is string => Boolean(receipt),
+          )
+        ) {
+          const receiptSpeech = [...new Set(concurrentActionReceipts)].join(" ");
+          const rawSpeech = `${receiptSpeech} ${concurrentUpdateSpeech}`;
+          if (rawSpeech.length <= 300) {
+            const speech = sanitizeForSpeech(rawSpeech, 300);
+            this.lastVerifiedActionOutcome = sanitizeForSpeech(receiptSpeech, 300);
+            this.lastVerifiedActionCount = concurrentActionReceipts.length;
+            this.rememberPollOutputCursors(executedAcrossRounds);
+            this.updateCursor = turnUpdateCursor;
+            this.remember(input, speech, retainedTurnUpdates());
+            return speech;
+          }
         }
         const actionReceipts = executedAcrossRounds
           .map(({ name, result }) => successfulActionSpeech(name, result))

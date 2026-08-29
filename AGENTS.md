@@ -213,7 +213,13 @@ harness renders deterministic natural receipts from typed fields and skips the
 second Celeris request. This includes a compound model response when every tool
 call has a verified renderable action result. If one call fails, verified
 receipts for the other completed actions are spoken before the deterministic
-failure. A compound turn that combines those action results with one safe,
+failure. One deliberately narrower concurrent-update path preserves the same
+guarantee: when every execution is a verified action, every event can be
+rendered by the existing exact bounded update renderer, and the combined speech
+fits 300 characters, the harness speaks the typed action receipt followed by
+the typed update in one model round. An unsafe or longer event batch still goes
+back to Celeris; this does not relax the ordinary updates-empty receipt guard.
+A compound turn that combines those action results with one safe,
 short assistant `latest_message` from `get_output` is also rendered directly:
 the typed action receipt is followed by a named session update, reducing the
 turn from two model rounds to one. The current turn's typed action receipt
@@ -222,6 +228,15 @@ synthesis, so a follow-up audit cannot repeat a stale older action. Do not
 weaken the success predicates or drop the updates-empty guard: unsafe reads,
 uncertain results, and composites containing a non-renderable result still need
 model synthesis.
+The runtime's hidden `check_updates` call already answers a generic “did
+anything come in while I was speaking?” question at speech finalization. When
+that question accompanies an explicit named send, older-output tools are hidden
+and the send is forced before speech rather than letting Celeris replace it with
+a redundant read. The harness also removes the trailing update question from
+the outbound instruction, so it is answered by the voice layer rather than
+being delivered to the coding agent. Any safe event returned by the send itself
+is included in the one-round typed receipt above and retained for later deictic
+cursor continuation.
 Every tool-using turn also records `last_verified_tool_workflow`, an ordered,
 process-local list of successful named reads and typed actions. It contains no
 opaque IDs. The next model turn uses it to answer whether two sources were

@@ -4414,5 +4414,177 @@
         }
       }
     ]
+  },
+  {
+    "id": "action_result_notification_retains_cursor",
+    "description": "Acknowledge a named background send and a concurrent third-session output event returned by that tool, then continue the event cursor deictically without changing sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-side-beta", "name": "Side Beta", "status": "running", "focused": false },
+        { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell side beta to rerun the cutoff checks and uh if anything came in while i was saying that tell me too",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side-beta", "name": "Side Beta", "status": "running", "focused": false },
+            { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-side-beta", "name": "Side Beta", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+              { "id": "session-side-beta", "name": "Side Beta", "status": "running", "focused": false },
+              { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              {
+                "action_id": 701,
+                "type": "message_sent",
+                "message": "Rerun the cutoff checks.",
+                "summary": "Sent immediately to Side Beta: Rerun the cutoff checks."
+              }
+            ],
+            "updates": [
+              {
+                "event_id": 701,
+                "type": "session_output",
+                "session_id": "session-audit-sweep",
+                "name": "Audit Sweep",
+                "status": "running",
+                "output_delta": {
+                  "changed": true,
+                  "output": "assistant: The queue soak passed 31 checks with zero dropped events.",
+                  "cursor": "audit-31"
+                }
+              }
+            ],
+            "update_cursor": 701,
+            "summary": "Sent immediately to Side Beta."
+          }
+        },
+        "checkUpdatesAfter": 0,
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session"],
+          "sessionId": "session-side-beta",
+          "messageTerms": ["rerun", "cutoff", "checks"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "send_message",
+              "sessionId": "session-side-beta",
+              "argumentEquals": { "message": "rerun the cutoff checks" }
+            }
+          ],
+          "speechTerms": ["side beta", "audit sweep", "31", "zero"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay whats newer from that one since that update",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side-beta", "name": "Side Beta", "status": "running", "focused": false },
+            { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 701,
+              "type": "message_sent",
+              "message": "Rerun the cutoff checks.",
+              "summary": "Sent immediately to Side Beta: Rerun the cutoff checks."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 701
+        },
+        "toolResults": {
+          "poll_output": {
+            "target_session": { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "running" },
+            "focus_changed": false,
+            "changed": true,
+            "output": "assistant: The final watcher pass reached 32 checks and found one stale cursor.",
+            "cursor": "audit-32",
+            "cursor_expired": false
+          }
+        },
+        "checkUpdatesAfter": 701,
+        "expected": {
+          "toolSequence": ["poll_output"],
+          "forbiddenTools": ["get_output", "focus_session", "send_message"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "poll_output",
+              "sessionId": "session-audit-sweep",
+              "argumentEquals": { "cursor": "audit-31" }
+            }
+          ],
+          "speechTerms": ["audit sweep", "32", "stale cursor"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "and did that rerun message go to side beta or did you switch me there where am i still",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side-beta", "name": "Side Beta", "status": "running", "focused": false },
+            { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 701,
+              "type": "message_sent",
+              "message": "Rerun the cutoff checks.",
+              "summary": "Sent immediately to Side Beta: Rerun the cutoff checks."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 701
+        },
+        "checkUpdatesAfter": 701,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session", "send_message", "get_output", "poll_output"],
+          "speechTerms": ["side beta", "primary work"],
+          "speechAnyTerms": [["sent", "went"], ["still", "didn't switch", "did not switch"]],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

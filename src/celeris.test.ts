@@ -721,6 +721,12 @@ describe("Celeris coordinator conversation", () => {
     ).toBe("rerun all 48 probes");
     expect(
       voiceMessageInstruction(
+        "tell side beta to rerun the cutoff checks and uh if anything came in while i was saying that tell me too",
+        "Side Beta",
+      ),
+    ).toBe("rerun the cutoff checks");
+    expect(
+      voiceMessageInstruction(
         "tell primary work what side worker found",
         "Primary Work",
       ),
@@ -1813,12 +1819,6 @@ describe("Celeris coordinator conversation", () => {
       )
       .mockResolvedValueOnce(
         response({
-          content:
-            "I sent that to Release Work. Side Audit update: The packet check passed.",
-        }),
-      )
-      .mockResolvedValueOnce(
-        response({
           content: null,
           tool_calls: [
             {
@@ -1888,7 +1888,88 @@ describe("Celeris coordinator conversation", () => {
       session_id: "session-side",
       cursor: "item-30",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends a named action before answering a redundant incoming-update question", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-send-before-update-reply",
+            type: "function",
+            function: {
+              name: "send_message",
+              arguments: JSON.stringify({ message: "rerun the cutoff checks" }),
+            },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) => {
+      if (name === "check_updates") {
+        return Promise.resolve({
+          focused_session: { id: "session-primary", name: "Primary Work" },
+          known_sessions: [
+            { id: "session-primary", name: "Primary Work" },
+            { id: "session-side-beta", name: "Side Beta" },
+            { id: "session-audit", name: "Audit Sweep" },
+          ],
+          updates: [],
+          update_cursor: 0,
+        });
+      }
+      return Promise.resolve({
+        accepted: true,
+        delivery: "immediate",
+        target_session: { id: "session-side-beta", name: "Side Beta" },
+        focused_session: { id: "session-primary", name: "Primary Work" },
+        updates: [
+          {
+            event_id: 701,
+            type: "session_output",
+            session_id: "session-audit",
+            name: "Audit Sweep",
+            output_delta: {
+              changed: true,
+              output: "assistant: The queue soak passed 31 checks with zero dropped events.",
+              cursor: "audit-31",
+            },
+          },
+        ],
+        update_cursor: 701,
+      });
+    });
+    const subject = conversation("test-key", tools);
+
+    await expect(
+      subject.respond(
+        "tell side beta to rerun the cutoff checks and uh if anything came in while i was saying that tell me too",
+      ),
+    ).resolves.toBe(
+      "I sent that to Side Beta. Audit Sweep update: The queue soak passed 31 checks with zero dropped events.",
+    );
+
+    expect(tools.callTool).toHaveBeenCalledTimes(2);
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "send_message", {
+      message: "rerun the cutoff checks",
+      session_id: "session-side-beta",
+    });
+    const firstRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tool_choice?: { function?: { name?: string } };
+      tools?: Array<{ function?: { name?: string } }>;
+    };
+    expect(firstRequest.tool_choice?.function?.name).toBe("send_message");
+    expect(firstRequest.tools?.map((tool) => tool.function?.name)).not.toContain(
+      "get_output",
+    );
+    expect(firstRequest.tools?.map((tool) => tool.function?.name)).not.toContain(
+      "poll_output",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("clarifies an ambiguous notification read without invoking the model", async () => {
