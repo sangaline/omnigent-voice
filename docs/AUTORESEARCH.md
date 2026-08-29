@@ -648,5 +648,13 @@ lock is held. New updates stay queued, and the single `finally` path releases
 the lock and schedules the next batch. Start/finish events expose only counts
 for live verification. A pure scheduling regression proves pending work does
 not start while a timer or delivery is active. The conventional gate is now 57
-tests with clean typecheck and build; live queue-contention verification remains
-the rollout gate.
+tests with clean typecheck and build.
+
+Result: accepted and deployed. Two isolated, no-change Omnigent probe sessions
+created a real burst of three proactive KAME delivery transactions. Their
+sanitized intervals were 19.269 seconds, 20.350 seconds, and 14.629 seconds.
+The second transaction began 732 ms after the first finished; the third began
+only after the second finished. No `delivery_started` interval overlapped a
+prior interval, every transaction reached audible KAME playback, and all probe
+sessions were archived afterward. This closes the live queue-contention rollout
+gate without touching existing user work.

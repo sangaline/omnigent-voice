@@ -407,6 +407,9 @@ Proactive delivery is strictly serialized across hidden-trigger synthesis,
 guidance, output detection, retry, and requeue. Newly arriving updates remain
 pending until the active transaction finishes; neither the KAME settle callback
 nor a queue listener may schedule a second oracle turn while one is in flight.
+A live contention probe produced three queued audible KAME transactions with no
+overlap between their `delivery_started`/`delivery_finished` intervals; the
+probe sessions were archived after verification.
 
 The first live Discord deployment verified two proactive turns end to end.
 Hidden-trigger synthesis took 90-97 ms, KAME speech began 1.17-1.82 seconds
