@@ -369,6 +369,56 @@ describe("voice harness evaluation", () => {
     ).toBe(true);
   });
 
+  it("accepts semantic alternatives for required outbound-message evidence", () => {
+    const alternatives: VoiceEvalCase = {
+      ...testCase,
+      expected: {
+        toolSequence: ["send_message"],
+        callExpectations: [
+          {
+            index: 0,
+            name: "send_message",
+            messageAnyTerms: [
+              ["launch blocker", "blocking launch"],
+              ["reconnect", "connection timeout"],
+            ],
+          },
+        ],
+      },
+    };
+    expect(
+      scoreVoiceEval(alternatives, {
+        ...observation,
+        toolCalls: [
+          {
+            name: "send_message",
+            arguments: {
+              message: "Memory is blocking launch after the network connection timeout.",
+            },
+            result: { accepted: true },
+          },
+        ],
+      }).passed,
+    ).toBe(true);
+    expect(
+      scoreVoiceEval(alternatives, {
+        ...observation,
+        toolCalls: [
+          {
+            name: "send_message",
+            arguments: { message: "Memory needs another check." },
+            result: { accepted: true },
+          },
+        ],
+      }).failures,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("launch blocker"),
+        expect.stringContaining("connection timeout"),
+      ]),
+    );
+  });
+
   it("rejects invented spoken numbers while allowing configured thresholds", () => {
     const numericCase: VoiceEvalCase = {
       ...testCase,

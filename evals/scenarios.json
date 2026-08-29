@@ -3133,7 +3133,7 @@
           "toolSequence": [],
           "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
           "speechTerms": ["websocket", "48", "poll", "cursor"],
-          "maxRounds": 1
+          "maxRounds": 0
         }
       }
     ]
@@ -3312,7 +3312,7 @@
           "toolSequence": [],
           "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
           "speechTerms": ["stream", "40", "fallback", "4", "cursor"],
-          "maxRounds": 1
+          "maxRounds": 0
         }
       }
     ]
@@ -3778,7 +3778,7 @@
           "toolSequence": [],
           "forbiddenTools": ["send_message", "get_output", "focus_session"],
           "speechTerms": ["voice coordinator", "misunderstood", "human"],
-          "maxRounds": 1
+          "maxRounds": 0
         }
       }
     ]
@@ -4020,6 +4020,178 @@
           ],
           "speechForbiddenTerms": ["docker hub", "public registry", "failed", "focus", "way work"],
           "maxSpeechWords": 24,
+          "maxRounds": 0
+        }
+      }
+    ]
+  },
+  {
+    "id": "compare_three_sources_and_relay_blocker",
+    "description": "Read three named background results, relay the exact blocker and competing evidence to sticky focus, then audit the outbound message without rereading or switching.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+        { "id": "session-audio", "name": "Audio Sweep", "status": "idle", "focused": false },
+        { "id": "session-network", "name": "Network Sweep", "status": "idle", "focused": false },
+        { "id": "session-memory", "name": "Memory Sweep", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "okay uh pull audio sweep then network sweep and memory sweep check all three and tell release work which one is actually blocking launch with all the exact numbers and causes don't just pick from the names and don't switch me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+            { "id": "session-audio", "name": "Audio Sweep", "status": "idle", "focused": false },
+            { "id": "session-network", "name": "Network Sweep", "status": "idle", "focused": false },
+            { "id": "session-memory", "name": "Memory Sweep", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "get_output": [
+            {
+              "session_id": "session-audio",
+              "target_session": { "id": "session-audio", "name": "Audio Sweep", "status": "idle" },
+              "focus_changed": false,
+              "page": 1,
+              "order": "oldest_to_newest",
+              "latest_message": {
+                "position": 2,
+                "kind": "message",
+                "role": "assistant",
+                "text": "Audio Sweep passed all 60 calls with a 74 millisecond p95 response."
+              },
+              "items": [
+                { "position": 1, "kind": "message", "role": "user", "text": "Run 60 calls." },
+                { "position": 2, "kind": "message", "role": "assistant", "text": "Audio Sweep passed all 60 calls with a 74 millisecond p95 response." }
+              ],
+              "has_more": false
+            },
+            {
+              "session_id": "session-network",
+              "target_session": { "id": "session-network", "name": "Network Sweep", "status": "idle" },
+              "focus_changed": false,
+              "page": 1,
+              "order": "oldest_to_newest",
+              "latest_message": {
+                "position": 2,
+                "kind": "message",
+                "role": "assistant",
+                "text": "Network Sweep passed 58 of 60 calls; two reconnects timed out."
+              },
+              "items": [
+                { "position": 1, "kind": "message", "role": "user", "text": "Run 60 calls." },
+                { "position": 2, "kind": "message", "role": "assistant", "text": "Network Sweep passed 58 of 60 calls; two reconnects timed out." }
+              ],
+              "has_more": false
+            },
+            {
+              "session_id": "session-memory",
+              "target_session": { "id": "session-memory", "name": "Memory Sweep", "status": "idle" },
+              "focus_changed": false,
+              "page": 1,
+              "order": "oldest_to_newest",
+              "latest_message": {
+                "position": 2,
+                "kind": "message",
+                "role": "assistant",
+                "text": "Memory Sweep failed 7 of 60 calls when memory usage spiked by 9 gigabytes, making it the launch blocker."
+              },
+              "items": [
+                { "position": 1, "kind": "message", "role": "user", "text": "Run 60 calls." },
+                { "position": 2, "kind": "message", "role": "assistant", "text": "Memory Sweep failed 7 of 60 calls when memory usage spiked by 9 gigabytes, making it the launch blocker." }
+              ],
+              "has_more": false
+            }
+          ],
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+            "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+            "recent_actions": [
+              {
+                "action_id": 520,
+                "type": "message_sent",
+                "session_id": "session-release",
+                "name": "Release Work",
+                "delivery": "immediate",
+                "message": "Memory Sweep is the launch blocker: it failed 7 of 60 calls after a 9 gigabyte spike. Network Sweep passed 58 of 60 with two reconnect timeouts, while Audio Sweep passed all 60 at 74 milliseconds p95.",
+                "summary": "Sent immediately to Release Work with all three sweep results."
+              }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["get_output", "get_output", "get_output", "send_message"],
+          "forbiddenTools": ["focus_session"],
+          "unorderedCallExpectations": [
+            { "name": "get_output", "sessionId": "session-audio" },
+            { "name": "get_output", "sessionId": "session-network" },
+            { "name": "get_output", "sessionId": "session-memory" },
+            {
+              "name": "send_message",
+              "sessionId": "session-release",
+              "messageTerms": ["memory sweep", "7", "60", "9", "network sweep", "58", "audio sweep", "74"],
+              "messageAnyTerms": [
+                ["launch blocker", "blocking launch", "blocking the launch", "blocks launch", "holding up launch"],
+                ["memory usage", "memory spike", "spiked", "memory increase"],
+                ["reconnect", "connection"],
+                ["timeout", "timed out", "timed-out", "timing out"]
+              ],
+              "delivery": "not_queued"
+            }
+          ],
+          "speechTerms": ["release work"],
+          "speechAnyTerms": [["sent", "told"]],
+          "maxRounds": 4
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait read back what you actually sent and where am i still",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+            { "id": "session-audio", "name": "Audio Sweep", "status": "idle", "focused": false },
+            { "id": "session-network", "name": "Network Sweep", "status": "idle", "focused": false },
+            { "id": "session-memory", "name": "Memory Sweep", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 520,
+              "type": "message_sent",
+              "session_id": "session-release",
+              "name": "Release Work",
+              "delivery": "immediate",
+              "message": "Memory Sweep is the launch blocker: it failed 7 of 60 calls after a 9 gigabyte spike. Network Sweep passed 58 of 60 with two reconnect timeouts, while Audio Sweep passed all 60 at 74 milliseconds p95.",
+              "summary": "Sent immediately to Release Work with all three sweep results."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "send_message", "focus_session"],
+          "speechTerms": ["memory sweep", "7", "9", "network sweep", "58", "audio sweep", "74", "release work"],
           "maxRounds": 0
         }
       }

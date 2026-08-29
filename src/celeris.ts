@@ -338,6 +338,7 @@ voice_message_routing is computed deterministically from this human transcript a
 voice_read_routing also resolves a deictic read against authoritative notification history. When its mode is named, call the read tool normally and the harness supplies that exact session. When its mode is ambiguous, do not read or guess; ask the human which named session they mean.
 After a successful get_output or poll_output for a nonfocused or clarified session, name target_session.name in the spoken answer before summarizing its result. The read does not change sticky focus; naming its source prevents the result from sounding as though it came from the focused session.
 When the requested message content depends on a missing fact about what a different session found, said, or is doing, first call get_output for that source session. Only after receiving the source result may you call send_message with the grounded finding; never send a placeholder telling the destination merely to inspect or review the source session. If more than one source must be compared, complete every requested read before the send, name each source in the outbound comparison, and preserve the decisive counts, outcomes, and causes. If the human already states the complete finding to relay in the current request, send that supplied content directly without rereading the source.
+When the human explicitly asks for exact numbers, counts, or metrics in a grounded multi-source relay, copy every numeric fact from every returned source into the outbound message; do not summarize away a passing source's metric or a failing source's cause magnitude.
 The coordinator snapshot immediately above is already current data for this turn. output_delta is the chronological stable output newly available since the prior human snapshot. When output_delta.changed is true and its content answers “latest,” “current,” “what's new,” or “since then,” answer directly from it and do not call get_output. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.
 A short output_delta is already a voice-sized update. When it directly answers the human, preserve every concrete condition, count, outcome, and still-running or blocked clause instead of shortening away one of its facts.
 A question about whether any prior coordinator action succeeded, including prompt approval, is answered directly from recent_actions. Do not repeat the action and do not read session output merely to verify a ledger entry.
@@ -1218,6 +1219,179 @@ export const missingMultiSourceNames = (
   });
 };
 
+const multiSourceEvidence = (
+  executions: readonly { name: string; result: JsonObject }[],
+): string[] =>
+  executions
+    .filter(
+      ({ name, result }) =>
+        (name === "get_output" || name === "poll_output") &&
+        typeof result.error !== "string",
+    )
+    .map(({ result }) => {
+      const latest = objectValue(result.latest_message);
+      if (typeof latest?.text === "string") return latest.text;
+      const delta = objectValue(result.output_delta);
+      return typeof delta?.output === "string" ? delta.output : "";
+    })
+    .filter(Boolean);
+
+const numberWords = new Map(
+  [
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+  ].map((word, value) => [word, String(value)]),
+);
+
+const numericFacts = (value: string): string[] => [
+  ...[...value.matchAll(/\d+(?:[.,]\d+)*/g)].map(([number]) =>
+    number.replaceAll(",", "")
+  ),
+  ...(value.toLocaleLowerCase().match(/[a-z]+/g) ?? [])
+    .map((word) => numberWords.get(word))
+    .filter((number): number is string => Boolean(number)),
+];
+
+export const missingMultiSourceNumbers = (
+  input: string,
+  message: unknown,
+  executions: readonly { name: string; result: JsonObject }[],
+): string[] => {
+  if (
+    typeof message !== "string" ||
+    !/\b(?:exact|actual|all)\s+(?:numbers?|counts?|metrics?)\b/i.test(input)
+  ) {
+    return [];
+  }
+  const evidence = multiSourceEvidence(executions);
+  if (evidence.length < 2) return [];
+  const required = [...new Set(evidence.flatMap(numericFacts))];
+  const present = new Set(numericFacts(message));
+  return required.filter((number) => !present.has(number));
+};
+
+const evidenceStopWords = new Set([
+  "after",
+  "also",
+  "been",
+  "calls",
+  "from",
+  "into",
+  "making",
+  "response",
+  "that",
+  "their",
+  "these",
+  "this",
+  "those",
+  "usage",
+  "when",
+  "where",
+  "which",
+  "while",
+  "with",
+]);
+
+const evidenceWords = (value: string): string[] =>
+  (value.toLocaleLowerCase().match(/[a-z][a-z'-]*/g) ?? [])
+    .filter((word) => word.length >= 4 && !evidenceStopWords.has(word));
+
+const evidenceSignature = (word: string): string =>
+  /^tim(?:e|ed|ing)/.test(word) ? "time" : word.slice(0, 4);
+
+export const missingMultiSourceCauseTerms = (
+  input: string,
+  message: unknown,
+  executions: readonly { name: string; result: JsonObject }[],
+): string[] => {
+  if (
+    typeof message !== "string" ||
+    !/\b(?:cause|causes|reason|reasons)\b/i.test(input) ||
+    !/\b(?:exact|actual|all)\b/i.test(input)
+  ) {
+    return [];
+  }
+  const evidence = multiSourceEvidence(executions);
+  if (evidence.length < 2) return [];
+  const required = new Map<string, string>();
+  for (const word of evidence.flatMap(evidenceWords)) {
+    required.set(evidenceSignature(word), word);
+  }
+  const present = new Set(evidenceWords(message).map(evidenceSignature));
+  return [...required]
+    .filter(([signature, word]) =>
+      word === "timed"
+        ? !/\b(?:timed\s+out|timed-out|timeouts?|timing\s+out)\b/i.test(message)
+        : !present.has(signature)
+    )
+    .map(([, word]) => word);
+};
+
+export const verifiedExactMessageSpeech = (
+  input: string,
+  recentActions: unknown,
+  focusedSession: unknown,
+): string | undefined => {
+  const asksForExactMessage =
+    /\bwhat\s+(?:exactly\s+)?did\s+you\s+(?:send|tell)\b/i.test(input) ||
+    /\b(?:read\s+back|repeat)\s+what\s+(?:you\s+)?(?:actually\s+)?sent\b/i.test(input) ||
+    /\brepeat\s+what\s+was\s+(?:actually\s+)?sent\b/i.test(input) ||
+    /\bwhat\s+did\s+(?:that|the)\s+(?:last\s+|second\s+)?(?:message|note)\s+actually\s+say\b/i.test(
+      input,
+    );
+  if (
+    !asksForExactMessage ||
+    /\b(?:visible|visibility|output|showing|appear|received|see\s+it)\b/i.test(input)
+  ) {
+    return undefined;
+  }
+  const actions = Array.isArray(recentActions) ? recentActions : [];
+  const action = actions
+    .toReversed()
+    .map(objectValue)
+    .find(
+      (value) =>
+        (value?.type === "message_sent" || value?.type === "message_queued") &&
+        typeof value.message === "string" &&
+        value.message.trim().length > 0,
+    );
+  if (!action) return undefined;
+  const target = resultSessionName(action);
+  const message = typeof action.message === "string" ? action.message.trim() : "";
+  if (!target || !message) return undefined;
+  const verb = action.type === "message_queued" ? "queued for" : "sent to";
+  let speech = `I ${verb} ${target}: ${message}`;
+  if (
+    /\bwhere\s+(?:am\s+i|are\s+we)\b/i.test(input) ||
+    /\b(?:am\s+i|are\s+we)\s+still\b/i.test(input)
+  ) {
+    const focused = resultSessionName(focusedSession);
+    speech += focused
+      ? ` You're in ${focused}.`
+      : " No session is currently focused.";
+  }
+  return speech.length <= 300 ? speech : undefined;
+};
+
 export const verifiedActionFollowupSpeech = (
   input: string,
   lastVerifiedActionOutcome: string | undefined,
@@ -1701,6 +1875,20 @@ export class CelerisConversation {
       this.remember(input, speech);
       return speech;
     }
+    const exactMessage =
+      (!Array.isArray(updates.updates) || updates.updates.length === 0)
+        ? verifiedExactMessageSpeech(
+            input,
+            updates.recent_actions,
+            updates.focused_session,
+          )
+        : undefined;
+    if (exactMessage) {
+      const speech = sanitizeForSpeech(exactMessage, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech);
+      return speech;
+    }
     const verifiedFollowup = verifiedActionFollowupSpeech(
       input,
       this.lastVerifiedActionOutcome,
@@ -1943,6 +2131,8 @@ export class CelerisConversation {
         );
         let deferredSendForReadEvidence = false;
         const deferredMissingSourceNames = new Set<string>();
+        const deferredMissingSourceNumbers = new Set<string>();
+        const deferredMissingSourceEvidence = new Set<string>();
         for (const call of calls) {
           let args: Record<string, unknown> = {};
           let resolvedMultipleMessageTarget: VoiceSessionTarget | undefined;
@@ -2049,14 +2239,36 @@ export class CelerisConversation {
               args.message,
               executedAcrossRounds,
             );
-            if (missingSources.length > 0) {
+            const missingNumbers = missingMultiSourceNumbers(
+              input,
+              args.message,
+              executedAcrossRounds,
+            );
+            const missingEvidence = missingMultiSourceCauseTerms(
+              input,
+              args.message,
+              executedAcrossRounds,
+            );
+            if (
+              missingSources.length > 0 ||
+              missingNumbers.length > 0 ||
+              missingEvidence.length > 0
+            ) {
               for (const name of missingSources) {
                 deferredMissingSourceNames.add(name);
               }
+              for (const number of missingNumbers) {
+                deferredMissingSourceNumbers.add(number);
+              }
+              for (const term of missingEvidence) {
+                deferredMissingSourceEvidence.add(term);
+              }
               this.options.logger.info("celeris.tool.deferred", {
                 name: call.function.name,
-                reason: "missing_multi_source_names",
+                reason: "missing_multi_source_evidence",
                 missingCount: missingSources.length,
+                missingNumberCount: missingNumbers.length,
+                missingEvidenceCount: missingEvidence.length,
               });
               messages.push({
                 role: "tool",
@@ -2064,8 +2276,10 @@ export class CelerisConversation {
                 content: JSON.stringify({
                   deferred: true,
                   reason:
-                    "The comparison omitted one or more source-session names. No message was sent.",
+                    "The comparison omitted requested source evidence. No message was sent.",
                   missing_sources: missingSources,
+                  missing_numeric_facts: missingNumbers,
+                  missing_evidence_terms: missingEvidence,
                 }),
               });
               continue;
@@ -2149,14 +2363,28 @@ export class CelerisConversation {
               "The send_message call from the prior completion was not executed because its read calls had not returned yet. Use the read results now, then call send_message with the grounded message. Do not repeat the reads.",
           });
         }
-        if (deferredMissingSourceNames.size > 0) {
+        if (
+          deferredMissingSourceNames.size > 0 ||
+          deferredMissingSourceNumbers.size > 0 ||
+          deferredMissingSourceEvidence.size > 0
+        ) {
           forcedToolName = "send_message";
+          const missingRequirements = [
+            ...(deferredMissingSourceNames.size > 0
+              ? [`source names ${[...deferredMissingSourceNames].join(" and ")}`]
+              : []),
+            ...(deferredMissingSourceNumbers.size > 0
+              ? [`numeric facts ${[...deferredMissingSourceNumbers].join(", ")}`]
+              : []),
+            ...(deferredMissingSourceEvidence.size > 0
+              ? [`source evidence ${[...deferredMissingSourceEvidence].join(", ")}`]
+              : []),
+          ];
           messages.push({
             role: "system",
             content:
-              `The proposed comparison was not sent because it omitted ${[
-                ...deferredMissingSourceNames,
-              ].join(" and ")}. Reissue send_message now, naming every source and preserving the decisive evidence from each returned result. Do not repeat the reads.`,
+              `The proposed comparison was not sent because it omitted ${missingRequirements.join(" and ")}. ` +
+              "Reissue send_message now, naming every source and copying every requested numeric fact and each missing source phrase verbatim from the returned results. Do not repeat the reads.",
           });
         }
         this.lastVerifiedToolWorkflow = verifiedToolWorkflowOutcome(

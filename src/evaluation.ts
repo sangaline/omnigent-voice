@@ -7,6 +7,7 @@ export interface VoiceToolCallExpectation {
   name?: string | undefined;
   sessionId?: string | undefined;
   messageTerms?: Array<string> | undefined;
+  messageAnyTerms?: Array<Array<string>> | undefined;
   delivery?: "immediate" | "queued" | "not_queued" | undefined;
   argumentEquals?: Record<string, unknown> | undefined;
 }
@@ -23,6 +24,7 @@ export interface VoiceEvalExpectation {
   sessionId?: string | undefined;
   sessionIdIfTool?: string | undefined;
   messageTerms?: Array<string> | undefined;
+  messageAnyTerms?: Array<Array<string>> | undefined;
   argumentTerms?: Record<string, Array<string>> | undefined;
   delivery?: "immediate" | "queued" | "not_queued" | undefined;
   argumentEquals?: Record<string, unknown> | undefined;
@@ -257,6 +259,17 @@ export const scoreVoiceEval = (
       check(lowerIncludes(message, term), `message omitted ${JSON.stringify(term)}`);
     }
   }
+  if (testCase.expected.messageAnyTerms) {
+    const message = typeof first?.arguments.message === "string"
+      ? first.arguments.message
+      : "";
+    for (const alternatives of testCase.expected.messageAnyTerms) {
+      check(
+        alternatives.some((term) => lowerIncludes(message, term)),
+        `message omitted all of ${JSON.stringify(alternatives)}`,
+      );
+    }
+  }
   for (const [name, terms] of Object.entries(testCase.expected.argumentTerms ?? {})) {
     const argument = typeof first?.arguments[name] === "string"
       ? first.arguments[name]
@@ -307,6 +320,17 @@ export const scoreVoiceEval = (
         check(
           lowerIncludes(message, term),
           `tool call ${label} message omitted ${JSON.stringify(term)}`,
+        );
+      }
+    }
+    if (expectedCall.messageAnyTerms) {
+      const message = typeof call.arguments.message === "string"
+        ? call.arguments.message
+        : "";
+      for (const alternatives of expectedCall.messageAnyTerms) {
+        check(
+          alternatives.some((term) => lowerIncludes(message, term)),
+          `tool call ${label} message omitted all of ${JSON.stringify(alternatives)}`,
         );
       }
     }

@@ -1131,3 +1131,60 @@ different low-frequency model misses, and each affected scenario passed five
 of five targeted reruns before the final clean 26-of-26 sweep. All coordinator
 calls in these additions used the frozen production MCP executor; no live user
 session, including the excluded ESPN session, was read or mutated.
+
+### 2026-08-29 — Exact multi-source relay evidence
+
+Hypothesis H41: prompt instructions alone could reliably read three concurrent
+session results, preserve every requested metric and cause, relay the actual
+launch blocker to sticky focus, and then quote the outbound message exactly. A
+new ASR-style two-turn scenario reads Audio Sweep, Network Sweep, and Memory
+Sweep before sending to Release Work without changing focus. The first draft
+incorrectly required a latency value after asking only for “exact counts”; that
+zero-of-ten result was an evaluator defect and was discarded. After the human
+request was corrected to ask for all exact numbers and causes, the unchanged
+harness passed nine of ten. It once omitted the passing source's 74 millisecond
+p95 result.
+
+An explicit prompt rule initially produced twenty of twenty passes, but a later
+nineteen-valid-run sample still omitted both 58 and 74 once. Prompt-only
+fidelity was therefore rejected. For this narrow explicit request, the harness
+now extracts numeric tokens and number words through twenty from every
+successful `get_output` or `poll_output` source and compares them with Celeris's
+proposed outbound message. If a number is absent, the send is not executed; a
+typed result names the missing facts and forces one corrected `send_message`
+round without repeating the reads. The guard does not compose or deliver a
+message itself. A production-path test proves that an attempted relay omitting
+both 74 and the metric label's p95 is withheld, and that only the corrected
+message reaches the frozen coordinator.
+
+The first numeric-only post-guard gate passed thirty of thirty, but a stronger
+cause-aware judge showed that this was not enough. Exact keyword requirements
+initially produced false negatives for legitimate variants such as “blocking
+the launch,” so the evaluator gained explicit semantic-alternative groups.
+Traces then exposed genuine source corruption: Celeris sometimes changed “two
+reconnects timed out” to “interconnects timing out,” dropped reconnects, or used
+the ambiguous phrase “timed reconnects.” An explicit all/exact-causes request
+now activates a second bounded comparison over stable lexical source evidence.
+Missing or corrupted evidence defers the send and asks Celeris to copy the
+missing source phrase verbatim. Valid morphology remains accepted, while the
+observed corruptions are not.
+
+The final cause-aware three-source gate passed twenty of twenty valid runs; four
+runs used one corrective model round and sixteen were accepted immediately. Its
+next “read back what you actually sent and where am I still” audit always used
+zero model rounds. Before the direct audit path, Celeris preserved the exact
+ledger message in eighteen of twenty runs. The harness now quotes the newest
+typed `message_sent` or `message_queued` entry directly and appends typed focus
+when requested; output visibility language remains excluded. The two older
+comparison-order scenarios each passed five of five targeted runs. A separate
+attribution scenario had one strict term failure in an untraced five-run sample,
+followed by ten of ten traced passes; it was retained unchanged rather than
+assigning an unsupported cause or adding an unrelated guard.
+
+Result: accepted as a deployment candidate. Typecheck, build, and all 93 unit
+tests pass. The isolated corpus passed 32 of 32 valid trials with no transport
+invalidations. One broad linked run had an unrelated start-instruction term
+miss; that scenario then passed five of five targeted runs and the complete
+linked rerun passed all 27 scenarios and all 92 turns. Every coordinator
+interaction in this experiment used the frozen exact production MCP path; no
+live Omnigent session, including the excluded ESPN session, was read or mutated.

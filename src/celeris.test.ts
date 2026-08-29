@@ -13,7 +13,9 @@ import {
   directSessionOutputSpeech,
   immediateNotificationTargets,
   isDeclarativeMissedSend,
+  missingMultiSourceCauseTerms,
   missingMultiSourceNames,
+  missingMultiSourceNumbers,
   requestsPositiveFocusAction,
   serializeToolResult,
   StreamingSpeechSegmenter,
@@ -21,6 +23,7 @@ import {
   targetsFocusedSession,
   verifiedActionFollowupSpeech,
   verifiedDeliveryVisibilitySpeech,
+  verifiedExactMessageSpeech,
   verifiedQueuedDeliverySpeech,
   verifiedToolWorkflowOutcome,
   voiceFocusRouting,
@@ -454,6 +457,48 @@ describe("Celeris coordinator conversation", () => {
       ),
     ).toBe("The queued message was sent to Side Worker. You're in Primary Work.");
     expect(
+      verifiedExactMessageSpeech(
+        "wait read back what you actually sent and where am i still",
+        [
+          {
+            type: "message_sent",
+            name: "Release Work",
+            message: "Memory Sweep failed 7 of 60 calls after a 9 gigabyte spike.",
+          },
+        ],
+        { id: "session-release", name: "Release Work" },
+      ),
+    ).toBe(
+      "I sent to Release Work: Memory Sweep failed 7 of 60 calls after a 9 gigabyte spike. " +
+      "You're in Release Work.",
+    );
+    expect(
+      verifiedExactMessageSpeech(
+        "can you see whether that message is visible",
+        [
+          {
+            type: "message_sent",
+            name: "Release Work",
+            message: "Run the checks.",
+          },
+        ],
+        { id: "session-release", name: "Release Work" },
+      ),
+    ).toBeUndefined();
+    expect(
+      verifiedExactMessageSpeech(
+        "what did the last message say",
+        [
+          {
+            type: "message_sent",
+            name: "Release Work",
+            message: "Run the checks.",
+          },
+        ],
+        { id: "session-release", name: "Release Work" },
+      ),
+    ).toBeUndefined();
+    expect(
       verifiedToolWorkflowOutcome([
         {
           name: "get_output",
@@ -519,6 +564,77 @@ describe("Celeris coordinator conversation", () => {
         "read both but only tell primary what socket probe said",
         "Socket Probe passed.",
         readExecutions,
+      ),
+    ).toEqual([]);
+    expect(
+      missingMultiSourceNumbers(
+        "compare all three with all exact numbers",
+        "Audio Sweep passed 60 while Network Sweep passed 58 of 60.",
+        [
+          {
+            name: "get_output",
+            result: {
+              latest_message: { text: "Audio Sweep passed all 60 at 74 milliseconds." },
+              target_session: { name: "Audio Sweep" },
+            },
+          },
+          {
+            name: "get_output",
+            result: {
+              latest_message: { text: "Network Sweep passed 58 of 60." },
+              target_session: { name: "Network Sweep" },
+            },
+          },
+        ],
+      ),
+    ).toEqual(["74"]);
+    expect(
+      missingMultiSourceNumbers(
+        "compare all three with all exact numbers",
+        "Audio Sweep passed 60 at 74 milliseconds; Network Sweep passed 58 of 60.",
+        [
+          {
+            name: "get_output",
+            result: { latest_message: { text: "Audio passed 60 at 74." } },
+          },
+          {
+            name: "get_output",
+            result: { latest_message: { text: "Network passed 58 of 60." } },
+          },
+        ],
+      ),
+    ).toEqual([]);
+    const causeExecutions = [
+      {
+        name: "get_output",
+        result: {
+          latest_message: {
+            text: "Network Sweep passed 58 of 60 calls; two reconnects timed out.",
+          },
+        },
+      },
+      {
+        name: "get_output",
+        result: {
+          latest_message: {
+            text:
+              "Memory Sweep failed 7 of 60 calls when memory usage spiked by 9 gigabytes, making it the launch blocker.",
+          },
+        },
+      },
+    ];
+    expect(
+      missingMultiSourceCauseTerms(
+        "compare them with all exact numbers and causes",
+        "Network Sweep passed 58 of 60; two interconnects timed out. Memory Sweep failed 7 of 60 when memory spiked by 9 gigabytes and is blocking launch.",
+        causeExecutions,
+      ),
+    ).toEqual(["reconnects"]);
+    expect(
+      missingMultiSourceCauseTerms(
+        "compare them with all exact numbers and causes",
+        "Network Sweep passed 58 of 60; two reconnects timed out. Memory Sweep failed 7 of 60 when memory spiked by 9 gigabytes and is blocking launch.",
+        causeExecutions,
       ),
     ).toEqual([]);
   });
@@ -2130,6 +2246,149 @@ describe("Celeris coordinator conversation", () => {
       role: "tool",
       tool_call_id: "call-incomplete-send",
       content: expect.stringContaining("Beta Probe"),
+    });
+  });
+
+  it("does not send an exact multi-source relay until every numeric fact is present", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-alpha-numbers",
+              type: "function",
+              function: {
+                name: "get_output",
+                arguments: JSON.stringify({ session_id: "session-alpha" }),
+              },
+            },
+            {
+              id: "call-beta-numbers",
+              type: "function",
+              function: {
+                name: "get_output",
+                arguments: JSON.stringify({ session_id: "session-beta" }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-incomplete-numbers",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({
+                  message:
+                    "Alpha Probe passed all 60 calls while Beta Probe passed 58 of 60 after two interconnects timing out.",
+                }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-complete-numbers",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({
+                  message:
+                    "Alpha Probe passed all 60 calls at 74 milliseconds p95 while Beta Probe passed 58 of 60; two reconnects timed out.",
+                }),
+              },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation(
+      (name: string, args: Record<string, unknown>) => {
+        if (name === "check_updates") {
+          return Promise.resolve({
+            focused_session: { id: "session-primary", name: "Primary Work" },
+            known_sessions: [
+              { id: "session-primary", name: "Primary Work" },
+              { id: "session-alpha", name: "Alpha Probe" },
+              { id: "session-beta", name: "Beta Probe" },
+            ],
+            updates: [],
+          });
+        }
+        if (name === "get_output") {
+          const alpha = args.session_id === "session-alpha";
+          return Promise.resolve({
+            target_session: {
+              id: String(args.session_id),
+              name: alpha ? "Alpha Probe" : "Beta Probe",
+            },
+            latest_message: {
+              role: "assistant",
+              text: alpha
+                ? "Passed all 60 calls at 74 milliseconds p95."
+                : "Passed 58 of 60 calls; two reconnects timed out.",
+            },
+            updates: [],
+          });
+        }
+        return Promise.resolve({
+          accepted: true,
+          delivery: "immediate",
+          target_session: { id: "session-primary", name: "Primary Work" },
+          updates: [],
+        });
+      },
+    );
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "compare alpha probe and beta probe and tell primary work all the exact numbers and causes",
+      ),
+    ).resolves.toContain("I sent that to Primary Work.");
+    expect(tools.callTool).toHaveBeenCalledTimes(4);
+    expect(tools.callTool).toHaveBeenLastCalledWith("send_message", {
+      message:
+        "Alpha Probe passed all 60 calls at 74 milliseconds p95 while Beta Probe passed 58 of 60; two reconnects timed out.",
+      session_id: "session-primary",
+    });
+    const retriedRequest = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as {
+      tool_choice?: unknown;
+      messages?: Array<{ role?: string; content?: string; tool_call_id?: string }>;
+    };
+    expect(retriedRequest.tool_choice).toEqual({
+      type: "function",
+      function: { name: "send_message" },
+    });
+    expect(retriedRequest.messages).toContainEqual({
+      role: "tool",
+      tool_call_id: "call-incomplete-numbers",
+      content: expect.stringContaining('"missing_numeric_facts":["74","95"]'),
+    });
+    expect(retriedRequest.messages).toContainEqual({
+      role: "tool",
+      tool_call_id: "call-incomplete-numbers",
+      content: expect.stringContaining(
+        '"missing_evidence_terms":["milliseconds","reconnects"]',
+      ),
+    });
+    expect(retriedRequest.messages).toContainEqual({
+      role: "system",
+      content: expect.stringContaining("numeric facts 74, 95"),
+    });
+    expect(retriedRequest.messages).toContainEqual({
+      role: "system",
+      content: expect.stringContaining("Do not repeat the reads"),
     });
   });
 

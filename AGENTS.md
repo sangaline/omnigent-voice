@@ -205,6 +205,12 @@ process-local list of successful named reads and typed actions. It contains no
 opaque IDs. The next model turn uses it to answer whether two sources were
 actually read before a send; a new read is never evidence about prior ordering.
 The action ledger remains the durable authority for what exact message was sent.
+A narrow “what exactly did you send” or “read back what you actually sent”
+follow-up is therefore rendered directly from the newest typed `message_sent`
+or `message_queued` ledger entry in zero model rounds, subject only to the normal
+speech sanitizer and 300-character bound. A compound
+“where am I still” adds the current typed focus. Visibility questions remain on
+the output-read path; they are never mistaken for an exact-message audit.
 Immediately before every human message, the harness inserts a current-turn
 action invariant: no coordinator action has happened yet, requested actions and
 required reads must use a tool before speech, prior ledger entries do not satisfy
@@ -285,7 +291,17 @@ completion as any output read is never executed because those results could not
 have informed it; the harness returns a typed deferral and forces a grounded send
 on the next round without repeating the reads. For an explicit multi-source
 comparison, an outbound message that omits any successfully read source name is
-also withheld and retried with the missing names. Clear dictated forms such as
+also withheld and retried with the missing names. When that request explicitly
+asks for all exact numbers, counts, or metrics, the harness also compares the
+proposed message against numeric tokens and number words through twenty in every
+successful source result. An accompanying request for all exact causes also
+checks stable lexical evidence from every source, including causal phrases such
+as reconnect timeouts; corrupted variants such as “interconnects” are rejected.
+A message missing any of that evidence is not executed. Celeris receives the
+omitted facts or terms and must reissue the send without rereading, copying the
+missing source phrasing. This is a bounded evidence guard, not a deterministic
+sender: the model still composes the comparison and the real coordinator must
+confirm it. Clear dictated forms such as
 “queue it a message to …” and “tell Side Worker to …” copy the exact task clause
 into `send_message` when no read participated, stripping only separate voice
 navigation controls such as “then switch me there” or “don't switch me.” This
