@@ -2,12 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   allowsArchive,
   allowsFocusChange,
+  allowsRename,
   CelerisConversation,
   CelerisTraceEvent,
   CelerisMemoryPolicy,
   CoordinatorToolClient,
+  isDeclarativeMissedSend,
   serializeToolResult,
+  successfulActionSpeech,
   targetsFocusedSession,
+  voiceMessageRouting,
 } from "./celeris.js";
 import { Logger } from "./log.js";
 import { CoordinatorExecutor, CoordinatorMcpClient } from "./mcp.js";
@@ -47,6 +51,18 @@ const toolClient = (): CoordinatorToolClient => ({
       inputSchema: {
         type: "object",
         properties: { session_id: { type: "string" } },
+      },
+    },
+    {
+      name: "rename_session",
+      description: "Rename the focused session without changing focus.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          session_id: { type: "string" },
+        },
+        required: ["title"],
       },
     },
     {
@@ -99,6 +115,40 @@ describe("Celeris coordinator conversation", () => {
     expect(parsed.items?.at(-1)).toHaveProperty("omitted_items");
   });
 
+  it("renders verified action receipts directly unless an update also needs speech", () => {
+    expect(
+      successfulActionSpeech("send_message", {
+        accepted: true,
+        delivery: "queued",
+        target_session: { id: "session-1", name: "Primary Work" },
+        updates: [],
+      }),
+    ).toBe("I queued that for Primary Work.");
+    expect(
+      successfulActionSpeech("rename_session", {
+        renamed: true,
+        previous_name: "Voice MVP",
+        new_name: "Receipt Lab",
+        updates: [],
+      }),
+    ).toBe("I renamed Voice MVP to Receipt Lab.");
+    expect(
+      successfulActionSpeech("archive_session", {
+        archived: true,
+        archived_session: { id: "session-side", name: "Receipt Lab" },
+        focused_session: { id: "session-primary", name: "Primary Work" },
+        updates: [],
+      }),
+    ).toBe("I archived Receipt Lab; you're back in Primary Work.");
+    expect(
+      successfulActionSpeech("send_message", {
+        accepted: true,
+        target_session: { id: "session-1", name: "Primary Work" },
+        updates: [{ type: "session_completed" }],
+      }),
+    ).toBeUndefined();
+  });
+
   it("only allows focus mutation for an explicit session switch", () => {
     expect(allowsFocusChange("Use the second one you mentioned.")).toBe(true);
     expect(allowsFocusChange("Switch to the voice agent session.")).toBe(true);
@@ -106,6 +156,9 @@ describe("Celeris coordinator conversation", () => {
     expect(allowsFocusChange("Check the session we were already in.")).toBe(false);
     expect(allowsArchive("Archive this temporary session.")).toBe(true);
     expect(allowsArchive("What is this session doing?")).toBe(false);
+    expect(allowsRename("Rename this session to Voice Research.")).toBe(true);
+    expect(allowsRename("Call this session Voice Research.")).toBe(true);
+    expect(allowsRename("What is this session called?")).toBe(false);
     expect(targetsFocusedSession("Switch back to Primary Work.", "Primary Work")).toBe(true);
     expect(
       targetsFocusedSession(
@@ -115,6 +168,61 @@ describe("Celeris coordinator conversation", () => {
     ).toBe(true);
     expect(
       targetsFocusedSession("Switch from Primary Work to Side Research.", "Primary Work"),
+    ).toBe(false);
+    expect(
+      voiceMessageRouting("tell side beta to rerun it", [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-beta", name: "Side Beta" },
+      ]),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-beta", name: "Side Beta" },
+    });
+    expect(
+      voiceMessageRouting("tell primary work what side beta found", [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-beta", name: "Side Beta" },
+      ]),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-primary", name: "Primary Work" },
+    });
+    expect(
+      voiceMessageRouting("tell primary work and ask side beta to compare", [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-beta", name: "Side Beta" },
+      ]),
+    ).toEqual({ mode: "ambiguous", candidates: ["Primary Work", "Side Beta"] });
+  });
+
+  it("distinguishes an unsupported declarative send correction from inspection", () => {
+    expect(
+      isDeclarativeMissedSend(
+        "i'm looking and i don't see that message",
+        [],
+        "I've sent that message to Primary Work.",
+      ),
+    ).toBe(true);
+    expect(
+      isDeclarativeMissedSend(
+        "no that testing delivery message isn't there either",
+        [],
+        "I've sent the delivery test to Primary Work.",
+      ),
+    ).toBe(true);
+    expect(
+      isDeclarativeMissedSend(
+        "did it send or not because i can't see it",
+        [{ type: "message_sent" }],
+        "I've sent that to Primary Work.",
+      ),
+    ).toBe(false);
+    expect(
+      isDeclarativeMissedSend(
+        "can you check whether it is visible",
+        [],
+        "I've sent that to Primary Work.",
+      ),
     ).toBe(false);
   });
 
@@ -183,6 +291,26 @@ describe("Celeris coordinator conversation", () => {
     expect(archive?.function?.parameters?.properties).not.toHaveProperty("session_id");
   });
 
+  it("offers rename only on an explicit rename turn and fixes its target to focus", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({ content: "Renamed Voice MVP to Audio Packet Research." }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await conversation("test-key").respond(
+      "Rename this session to Audio Packet Research.",
+    );
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tools?: Array<{
+        function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
+      }>;
+    };
+    const rename = request.tools?.find((tool) => tool.function?.name === "rename_session");
+    expect(rename).toBeDefined();
+    expect(rename?.function?.parameters?.properties).toHaveProperty("title");
+    expect(rename?.function?.parameters?.properties).not.toHaveProperty("session_id");
+  });
+
   it("executes an MCP coordinator tool and voices the immediate result", async () => {
     const fetchMock = vi
       .fn()
@@ -215,6 +343,66 @@ describe("Celeris coordinator conversation", () => {
       message: "Inspect the deployment",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("routes an explicitly named send without exposing its session id to the model", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-1",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({ message: "Rerun the worker" }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(response({ content: "I sent that to Side Beta." }));
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) =>
+      Promise.resolve(
+        name === "check_updates"
+          ? {
+              focused_session: { id: "session-primary", name: "Primary Work" },
+              known_sessions: [
+                { id: "session-primary", name: "Primary Work" },
+                { id: "session-beta", name: "Side Beta" },
+              ],
+              updates: [],
+            }
+          : { accepted: true, target_session: { id: "session-beta", name: "Side Beta" } },
+      ),
+    );
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "tell side beta to rerun the worker but don't switch me there",
+      ),
+    ).resolves.toBe("I sent that to Side Beta.");
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "send_message", {
+      message: "Rerun the worker",
+      session_id: "session-beta",
+    });
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tools?: Array<{
+        function?: {
+          name?: string;
+          description?: string;
+          parameters?: { properties?: Record<string, unknown> };
+        };
+      }>;
+    };
+    const send = request.tools?.find((tool) => tool.function?.name === "send_message");
+    expect(send?.function?.description).toContain("Side Beta");
+    expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("speaks a deterministic failure and skips another model call after a tool error", async () => {
@@ -321,10 +509,15 @@ describe("Celeris coordinator conversation", () => {
       const firstRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
         temperature?: number;
         seed?: number;
+        tool_choice?: unknown;
         messages?: Array<{ role?: string; content?: string }>;
       };
       expect(firstRequest.temperature).toBe(0.2);
       expect(firstRequest.seed).toBe(11);
+      expect(firstRequest.tool_choice).toEqual({
+        type: "function",
+        function: { name: "send_message" },
+      });
       expect(firstRequest.messages?.[0]).toEqual({
         role: "system",
         content: "Candidate system prompt.",

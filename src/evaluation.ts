@@ -2,6 +2,15 @@ import { CelerisHistoryMessage, CelerisTraceEvent } from "./celeris.js";
 import { CoordinatorExecutor } from "./mcp.js";
 import { JsonObject } from "./omnigent.js";
 
+export interface VoiceToolCallExpectation {
+  index: number;
+  name?: string | undefined;
+  sessionId?: string | undefined;
+  messageTerms?: Array<string> | undefined;
+  delivery?: "immediate" | "queued" | "not_queued" | undefined;
+  argumentEquals?: Record<string, unknown> | undefined;
+}
+
 export interface VoiceEvalExpectation {
   toolSequence: Array<string>;
   alternativeToolSequences?: Array<Array<string>> | undefined;
@@ -15,8 +24,10 @@ export interface VoiceEvalExpectation {
   speechTerms?: Array<string> | undefined;
   speechAnyTerms?: Array<Array<string>> | undefined;
   speechForbiddenTerms?: Array<string> | undefined;
+  allowedSpeechNumbers?: Array<number> | undefined;
   speechExact?: string | undefined;
   maxRounds?: number | undefined;
+  callExpectations?: VoiceToolCallExpectation[] | undefined;
 }
 
 export interface VoiceEvalCase {
@@ -59,6 +70,7 @@ const lowerIncludes = (value: string, term: string): boolean =>
 
 const authoritativeEnvelope = (state: JsonObject): JsonObject => ({
   focused_session: state.focused_session ?? null,
+  known_sessions: state.known_sessions ?? [],
   pending_decisions: state.pending_decisions ?? [],
   recent_actions: state.recent_actions ?? [],
   updates: state.updates ?? [],
@@ -108,6 +120,7 @@ export class FrozenCoordinatorExecutor implements CoordinatorExecutor {
       const result = { ...envelope, ...supplied };
       for (const key of [
         "focused_session",
+        "known_sessions",
         "pending_decisions",
         "recent_actions",
         "updates",
@@ -231,6 +244,49 @@ export const scoreVoiceEval = (
       `argument ${name} ${JSON.stringify(first?.arguments[name])} != ${JSON.stringify(value)}`,
     );
   }
+  for (const expectedCall of testCase.expected.callExpectations ?? []) {
+    const call = observation.toolCalls[expectedCall.index];
+    check(Boolean(call), `missing tool call at index ${expectedCall.index}`);
+    if (!call) continue;
+    if (expectedCall.name) {
+      check(
+        call.name === expectedCall.name,
+        `tool call ${expectedCall.index} name ${call.name} != ${expectedCall.name}`,
+      );
+    }
+    if (expectedCall.sessionId) {
+      check(
+        call.arguments.session_id === expectedCall.sessionId,
+        `tool call ${expectedCall.index} session_id ${String(call.arguments.session_id)} != ${expectedCall.sessionId}`,
+      );
+    }
+    if (expectedCall.messageTerms) {
+      const message = typeof call.arguments.message === "string"
+        ? call.arguments.message
+        : "";
+      for (const term of expectedCall.messageTerms) {
+        check(
+          lowerIncludes(message, term),
+          `tool call ${expectedCall.index} message omitted ${JSON.stringify(term)}`,
+        );
+      }
+    }
+    if (expectedCall.delivery) {
+      const delivery = call.arguments.delivery;
+      check(
+        expectedCall.delivery === "not_queued"
+          ? delivery !== "queued"
+          : delivery === expectedCall.delivery,
+        `tool call ${expectedCall.index} delivery ${String(delivery)} != ${expectedCall.delivery}`,
+      );
+    }
+    for (const [name, value] of Object.entries(expectedCall.argumentEquals ?? {})) {
+      check(
+        JSON.stringify(call.arguments[name]) === JSON.stringify(value),
+        `tool call ${expectedCall.index} argument ${name} ${JSON.stringify(call.arguments[name])} != ${JSON.stringify(value)}`,
+      );
+    }
+  }
   for (const term of testCase.expected.speechTerms ?? []) {
     check(lowerIncludes(observation.speech, term), `speech omitted ${JSON.stringify(term)}`);
   }
@@ -242,6 +298,15 @@ export const scoreVoiceEval = (
   }
   for (const term of testCase.expected.speechForbiddenTerms ?? []) {
     check(!lowerIncludes(observation.speech, term), `speech included forbidden ${JSON.stringify(term)}`);
+  }
+  if (testCase.expected.allowedSpeechNumbers) {
+    const allowed = new Set(testCase.expected.allowedSpeechNumbers);
+    const spokenNumbers = [...observation.speech.matchAll(/\b\d[\d,]*(?:\.\d+)?\b/g)]
+      .map(([value]) => Number(value.replaceAll(",", "")))
+      .filter((value) => Number.isFinite(value));
+    for (const value of spokenNumbers) {
+      check(allowed.has(value), `speech included unapproved number ${value}`);
+    }
   }
   if (testCase.expected.speechExact) {
     check(

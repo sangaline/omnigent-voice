@@ -30,6 +30,7 @@ interface CoordinatorAction extends JsonObject {
     | "message_sent"
     | "prompt_answered"
     | "session_archived"
+    | "session_renamed"
     | "session_started";
   occurred_at: string;
   summary: string;
@@ -296,6 +297,7 @@ export class OmnigentCoordinator {
   private focusedSession: JsonObject | undefined;
   private readonly focusHistory: string[] = [];
   private readonly sessionSummaries = new Map<string, JsonObject>();
+  private recentSessionIds: string[] = [];
   private readonly deferredMessages: Array<{
     sessionId: string;
     sessionName: string;
@@ -380,6 +382,9 @@ export class OmnigentCoordinator {
       case "archive_session":
         result = await this.archiveSession(args);
         break;
+      case "rename_session":
+        result = await this.renameSession(args);
+        break;
       case "answer_prompt":
         result = await this.answerPrompt(args);
         break;
@@ -400,6 +405,10 @@ export class OmnigentCoordinator {
     return {
       ...result,
       focused_session: this.focusedSession ?? null,
+      known_sessions: this.recentSessionIds.slice(0, 8).map((id) => ({
+        ...(this.sessionSummaries.get(id) ?? { id, name: "Untitled session" }),
+        focused: id === this.focusedSessionId,
+      })),
       pending_decisions: [...this.pendingDecisions.values()],
       recent_actions: this.recentActions.slice(-5),
       ...this.updatesAfter(afterEventId),
@@ -604,6 +613,35 @@ export class OmnigentCoordinator {
     };
   }
 
+  private async renameSession(args: Record<string, unknown>): Promise<JsonObject> {
+    const id = this.sessionFrom(args);
+    const title = this.requiredString(args, "title");
+    if (title.length > 120) throw new Error("title must be 120 characters or fewer");
+    const before = await this.options.omnigent.getSession(id);
+    const previousName = sessionName(before);
+    const response = await this.options.omnigent.renameSession(id, title);
+    const renamed = summary({ ...before, ...response, id, title });
+    this.sessionSummaries.set(id, renamed);
+    if (id === this.focusedSessionId) this.focusedSession = renamed;
+    const decision = this.pendingDecisions.get(id);
+    if (decision) this.pendingDecisions.set(id, { ...decision, name: title });
+    this.recordAction({
+      type: "session_renamed",
+      session_id: id,
+      name: title,
+      previous_name: previousName,
+      new_name: title,
+      summary: `Renamed ${previousName} to ${title}.`,
+    });
+    return {
+      renamed: true,
+      previous_name: previousName,
+      new_name: title,
+      renamed_session: renamed,
+      focus_changed: false,
+    };
+  }
+
   private async answerPrompt(args: Record<string, unknown>): Promise<JsonObject> {
     const focusedId = this.sessionFrom(args);
     const promptId = this.requiredString(args, "prompt_id");
@@ -651,6 +689,10 @@ export class OmnigentCoordinator {
     this.focusedSessionId = id;
     this.focusedSession = summary(created);
     this.sessionSummaries.set(id, this.focusedSession);
+    this.recentSessionIds = [
+      id,
+      ...this.recentSessionIds.filter((sessionId) => sessionId !== id),
+    ];
     await this.ensureOutputMonitor(id);
     this.fingerprints.set(id, this.fingerprint(created));
     this.recordAction({
@@ -725,6 +767,9 @@ export class OmnigentCoordinator {
   }
 
   private rememberSessions(sessions: JsonObject[]): void {
+    this.recentSessionIds = sessions
+      .map(sessionId)
+      .filter((id): id is string => Boolean(id));
     for (const session of sessions) {
       const id = sessionId(session);
       if (!id) continue;

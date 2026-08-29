@@ -97,6 +97,11 @@ status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
 
 Celeris owns the low-latency conversation and uses its OpenAI-compatible native
 tool-call shape to invoke a real MCP client/server pair connected in memory.
+For a single successful `send_message`, `focus_session`, `start_session`,
+`rename_session`, or `archive_session` result with no concurrent updates, the
+harness renders a deterministic natural receipt from typed fields and skips the
+second Celeris request. Do not weaken the success predicates or drop the
+updates-empty guard: uncertain or composite results still need model synthesis.
 Immediately before every human message, the harness inserts a current-turn
 action invariant: no coordinator action has happened yet, requested actions and
 required reads must use a tool before speech, prior ledger entries do not satisfy
@@ -123,19 +128,34 @@ explicit request to queue or wait for the current turn does. For a true output
 visibility check, the response combines the action ledger's delivery evidence
 with whether the sent user item appears in the read result.
 The voice harness removes `send_message.session_id` from the model-visible
-schema so messages can only target the focused session. It also withholds and
-rejects `focus_session` unless the current transcript explicitly requests a
+schema. Messages default to the focused session; when one known destination is
+explicitly named, deterministic grammar resolves its server-owned ID and the
+harness injects that target without changing focus. Multiple direct
+destinations fail closed. When a message depends on another session's output,
+Celeris must read that source before sending unless the human already supplied
+the finding in the current request. The harness also withholds and rejects
+`focus_session` unless the current transcript explicitly requests a
 switch/select/open/focus action or an ordinal selection. This is a runtime
 safety guard in addition to the prompt; ordinary latest/current-output language
 cannot mutate focus. Conservative name-token matching also withholds
 `focus_session` when the requested target is already focused. The harness
 withholds `check_updates` from the voice model because it calls that tool
 atomically before constructing every turn and later tool results carry updates.
-The nine tools are `list_sessions`, `focus_session`, `get_output`,
-`poll_output`, `send_message`, `archive_session`, `answer_prompt`,
-`start_session`, and `check_updates`. `archive_session` is withheld unless the
-human explicitly says archive, and its voice-facing schema can only target the
-focused session. `poll_output` accepts and returns an explicit opaque cursor,
+When the previous assistant claimed a send, no retained `message_sent` receipt
+exists, and the human makes a declarative correction that the message is
+missing, a narrow evidence guard requires `send_message` for the first model
+round. It never sends by itself: Celeris still reconstructs the intended
+message and the real coordinator must confirm success. Explicit inspection
+questions and ledger-backed visibility questions are excluded from this guard.
+The ten tools are `list_sessions`, `focus_session`, `get_output`,
+`poll_output`, `send_message`, `archive_session`, `rename_session`,
+`answer_prompt`, `start_session`, and `check_updates`. `archive_session` is
+withheld unless the human explicitly says archive, and its voice-facing schema
+can only target the focused session. `rename_session` is likewise withheld
+unless the human explicitly asks to rename or call the current session; its
+voice schema requires only the new title, the coordinator returns both names,
+and focus never changes. General stdio MCP clients may supply a session ID for
+either action. `poll_output` accepts and returns an explicit opaque cursor,
 returns only stable newer output, and never changes focus. This makes the tool
 usable by stateless remote MCP clients; omission returns the bounded buffered
 window. `send_message` defaults to

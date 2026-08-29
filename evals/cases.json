@@ -23,7 +23,16 @@
   {
     "id": "deny_context_page_estimate",
     "description": "Describe the context contract without inventing a page count.",
-    "history": [],
+    "history": [
+      {
+        "role": "user",
+        "content": "how much conversational context can you see"
+      },
+      {
+        "role": "assistant",
+        "content": "I retain recent dialogue according to the supplied context contract, but I cannot inspect a token or page count."
+      }
+    ],
     "input": "right but i ask you is that like one page of data two pages of data three pages of data",
     "coordinatorState": {
       "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
@@ -34,8 +43,17 @@
     },
     "expected": {
       "toolSequence": [],
-      "speechTerms": ["context"],
-      "speechAnyTerms": [["estimate", "measure"]],
+      "speechTerms": ["page"],
+      "speechAnyTerms": [["recent dialogue", "messages", "characters", "context"]],
+      "allowedSpeechNumbers": [80, 48000],
+      "speechForbiddenTerms": [
+        "44,000",
+        "44000",
+        "44 thousand",
+        "one page",
+        "two pages",
+        "three pages"
+      ],
       "maxRounds": 1
     }
   },

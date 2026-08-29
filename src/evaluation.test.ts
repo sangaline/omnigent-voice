@@ -169,4 +169,86 @@ describe("voice harness evaluation", () => {
       }).failures,
     ).toContain("session_id session-primary != session-side");
   });
+
+  it("scores each call in a grounded cross-session transaction", () => {
+    const transaction: VoiceEvalCase = {
+      ...testCase,
+      expected: {
+        toolSequence: ["get_output", "send_message"],
+        callExpectations: [
+          { index: 0, name: "get_output", sessionId: "session-source" },
+          {
+            index: 1,
+            name: "send_message",
+            sessionId: "session-target",
+            messageTerms: ["stale cache"],
+            delivery: "not_queued",
+          },
+        ],
+      },
+    };
+    const grounded: VoiceEvalObservation = {
+      ...observation,
+      toolCalls: [
+        {
+          name: "get_output",
+          arguments: { session_id: "session-source" },
+          result: { latest_message: { text: "The worker used a stale cache key." } },
+        },
+        {
+          name: "send_message",
+          arguments: {
+            session_id: "session-target",
+            message: "The source found a stale cache key.",
+          },
+          result: { accepted: true },
+        },
+      ],
+    };
+    expect(scoreVoiceEval(transaction, grounded).passed).toBe(true);
+    expect(
+      scoreVoiceEval(transaction, {
+        ...grounded,
+        toolCalls: [
+          grounded.toolCalls[0]!,
+          {
+            ...grounded.toolCalls[1]!,
+            arguments: {
+              session_id: "session-source",
+              message: "Please inspect the other session.",
+            },
+          },
+        ],
+      }).failures,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("session_id session-source != session-target"),
+        expect.stringContaining("message omitted"),
+      ]),
+    );
+  });
+
+  it("rejects invented spoken numbers while allowing configured thresholds", () => {
+    const numericCase: VoiceEvalCase = {
+      ...testCase,
+      expected: {
+        toolSequence: [],
+        allowedSpeechNumbers: [80, 48_000],
+      },
+    };
+    expect(
+      scoreVoiceEval(numericCase, {
+        ...observation,
+        toolCalls: [],
+        speech: "The contract retains 80 messages or 48,000 characters.",
+      }).passed,
+    ).toBe(true);
+    expect(
+      scoreVoiceEval(numericCase, {
+        ...observation,
+        toolCalls: [],
+        speech: "The contract retains 80 messages or 44,000 characters.",
+      }).failures,
+    ).toContain("speech included unapproved number 44000");
+  });
 });

@@ -675,5 +675,698 @@
         }
       }
     ]
+  },
+  {
+    "id": "named_background_send_keeps_focus",
+    "description": "Route a message to one explicitly named background session without focusing it, then prove sticky focus remains unchanged.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-beta", "name": "Side Beta", "status": "waiting", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell side beta to rerun the worker but don't switch me over there",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-beta", "name": "Side Beta", "status": "waiting", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-beta", "name": "Side Beta", "status": "waiting" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+              { "id": "session-beta", "name": "Side Beta", "status": "waiting", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 60, "type": "message_sent", "summary": "Sent immediately to Side Beta: rerun the worker." }
+            ],
+            "summary": "Sent immediately to Side Beta."
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-beta",
+          "messageTerms": ["rerun", "worker"],
+          "delivery": "not_queued",
+          "speechTerms": ["side beta"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay and where am i still",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-beta", "name": "Side Beta", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 60, "type": "message_sent", "summary": "Sent immediately to Side Beta: rerun the worker." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session"],
+          "speechTerms": ["primary work"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "cross_session_grounded_send_keeps_focus",
+    "description": "Read one named source session, send its finding to a separately named destination, and preserve sticky focus through the multi-tool transaction.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell primary work what side beta found",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "get_output": {
+            "session_id": "session-beta",
+            "target_session": { "id": "session-beta", "name": "Side Beta", "status": "idle" },
+            "focus_changed": false,
+            "page": 1,
+            "order": "oldest_to_newest",
+            "latest_message": { "position": 2, "kind": "message", "role": "assistant", "text": "The worker was using a stale cache key." },
+            "items": [
+              { "position": 1, "kind": "message", "role": "user", "text": "Find the worker inconsistency." },
+              { "position": 2, "kind": "message", "role": "assistant", "text": "The worker was using a stale cache key." }
+            ],
+            "has_more": false
+          },
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 61, "type": "message_sent", "summary": "Sent immediately to Primary Work: Side Beta found a stale cache key in the worker." }
+            ],
+            "summary": "Sent immediately to Primary Work."
+          }
+        },
+        "expected": {
+          "toolSequence": ["get_output", "send_message"],
+          "forbiddenTools": ["focus_session"],
+          "callExpectations": [
+            { "index": 0, "name": "get_output", "sessionId": "session-beta" },
+            { "index": 1, "name": "send_message", "sessionId": "session-primary", "messageTerms": ["stale cache"], "delivery": "not_queued" }
+          ],
+          "speechTerms": ["primary work"],
+          "maxRounds": 3
+        }
+      },
+      {
+        "type": "user",
+        "input": "and where am i still",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 61, "type": "message_sent", "summary": "Sent immediately to Primary Work: Side Beta found a stale cache key in the worker." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session"],
+          "speechTerms": ["primary work"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "rename_focused_session_updates_authoritative_state",
+    "description": "Rename the focused session as a typed action, acknowledge the exact transition, and use its new authoritative name on the next turn without changing focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-voice", "name": "Voice MVP", "status": "idle" },
+      "known_sessions": [
+        { "id": "session-voice", "name": "Voice MVP", "status": "idle", "focused": true },
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "okay rename this session audio packet research",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice MVP", "status": "idle" },
+          "known_sessions": [
+            { "id": "session-voice", "name": "Voice MVP", "status": "idle", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "rename_session": {
+            "renamed": true,
+            "previous_name": "Voice MVP",
+            "new_name": "Audio Packet Research",
+            "renamed_session": { "id": "session-voice", "name": "Audio Packet Research", "status": "idle" },
+            "focus_changed": false,
+            "focused_session": { "id": "session-voice", "name": "Audio Packet Research", "status": "idle" },
+            "known_sessions": [
+              { "id": "session-voice", "name": "Audio Packet Research", "status": "idle", "focused": true },
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 70, "type": "session_renamed", "previous_name": "Voice MVP", "new_name": "Audio Packet Research", "summary": "Renamed Voice MVP to Audio Packet Research." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["rename_session"],
+          "forbiddenTools": ["focus_session", "send_message"],
+          "argumentTerms": { "title": ["audio packet research"] },
+          "speechTerms": ["voice mvp", "audio packet research"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "and what session am i in now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Audio Packet Research", "status": "idle" },
+          "known_sessions": [
+            { "id": "session-voice", "name": "Audio Packet Research", "status": "idle", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 70, "type": "session_renamed", "previous_name": "Voice MVP", "new_name": "Audio Packet Research", "summary": "Renamed Voice MVP to Audio Packet Research." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session", "rename_session"],
+          "speechTerms": ["audio packet research"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "compound_multi_session_workday",
+    "description": "Exercise a realistic compound workflow across primary, background, and temporary sessions with exact reads, routed messages, a background decision, incremental output, rename, archive restoration, and completion reporting.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-audit", "name": "Receipt Audit", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "hey what's primary doing right now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": true, "output": "Primary Work is building voice packet timing fixtures.", "cursor": "primary-1" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["packet", "timing"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 81,
+            "type": "session_completed",
+            "session_id": "session-audit",
+            "name": "Receipt Audit",
+            "summary": "Receipt Audit completed. It found that resend acknowledgements occasionally omit the target session name."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["receipt audit", "target", "name"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay pull the exact last thing that audit said",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 81
+        },
+        "checkUpdatesAfter": 81,
+        "toolResults": {
+          "get_output": {
+            "session_id": "session-audit",
+            "target_session": { "id": "session-audit", "name": "Receipt Audit", "status": "idle" },
+            "focus_changed": false,
+            "page": 1,
+            "order": "oldest_to_newest",
+            "latest_message": { "position": 2, "kind": "message", "role": "assistant", "text": "The coordinator receipt has the right typed target, but the spoken acknowledgement can omit its name." },
+            "items": [
+              { "position": 1, "kind": "message", "role": "user", "text": "Audit target acknowledgement behavior." },
+              { "position": 2, "kind": "message", "role": "assistant", "text": "The coordinator receipt has the right typed target, but the spoken acknowledgement can omit its name." }
+            ],
+            "has_more": false
+          }
+        },
+        "expected": {
+          "toolSequence": ["get_output"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-audit",
+          "speechTerms": ["typed target", "spoken", "name"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "tell primary work that the audit found the typed target is right but the spoken ack can drop the name and don't switch me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 81
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 82, "type": "message_sent", "summary": "Sent immediately to Primary Work: the audit found the typed target is right but the spoken acknowledgement can omit the name." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["get_output", "focus_session"],
+          "sessionId": "session-primary",
+          "messageTerms": ["typed target", "spoken", "name"],
+          "delivery": "not_queued",
+          "speechTerms": ["primary work"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "make a temporary session to test that receipt wording",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 82, "type": "message_sent", "summary": "Sent immediately to Primary Work: the audit found the typed target is right but the spoken acknowledgement can omit the name." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 81
+        },
+        "toolResults": {
+          "start_session": {
+            "started": true,
+            "focused_session": { "id": "session-lab", "name": "Receipt Wording", "status": "running" },
+            "known_sessions": [
+              { "id": "session-lab", "name": "Receipt Wording", "status": "running", "focused": true },
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+              { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 83, "type": "session_started", "summary": "Started and focused Receipt Wording from Primary Work." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["start_session"],
+          "argumentTerms": { "instruction": ["receipt", "wording"] },
+          "speechTerms": ["receipt wording"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 84,
+            "type": "decision_needed",
+            "session_id": "session-primary",
+            "name": "Primary Work",
+            "summary": "Primary Work needs approval to restart the voice worker.",
+            "prompts": [
+              { "prompt_id": "prompt-worker-restart", "message": "Restart the voice worker now?", "mode": "confirmation", "schema": null }
+            ]
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["primary work", "restart"],
+          "speechAnyTerms": [["approve", "approval", "permission", "confirm"]],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "yeah approve that primary restart",
+        "coordinatorState": {
+          "focused_session": { "id": "session-lab", "name": "Receipt Wording", "status": "running" },
+          "known_sessions": [
+            { "id": "session-lab", "name": "Receipt Wording", "status": "running", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "waiting", "focused": false },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [
+            {
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "prompts": [
+                { "prompt_id": "prompt-worker-restart", "message": "Restart the voice worker now?", "mode": "confirmation", "schema": null }
+              ]
+            }
+          ],
+          "recent_actions": [
+            { "action_id": 83, "type": "session_started", "summary": "Started and focused Receipt Wording from Primary Work." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 84
+        },
+        "checkUpdatesAfter": 84,
+        "toolResults": {
+          "answer_prompt": {
+            "resolved": true,
+            "session_id": "session-primary",
+            "prompt_id": "prompt-worker-restart",
+            "action": "accept",
+            "focused_session": { "id": "session-lab", "name": "Receipt Wording", "status": "running" },
+            "pending_decisions": [],
+            "recent_actions": [
+              { "action_id": 85, "type": "prompt_answered", "summary": "Accepted a pending prompt in Primary Work." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["answer_prompt"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-primary",
+          "argumentEquals": { "prompt_id": "prompt-worker-restart", "action": "accept" },
+          "speechTerms": ["primary work"],
+          "speechAnyTerms": [["approved", "accepted", "approval"]],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "what's this temporary one found so far",
+        "coordinatorState": {
+          "focused_session": { "id": "session-lab", "name": "Receipt Wording", "status": "running" },
+          "known_sessions": [
+            { "id": "session-lab", "name": "Receipt Wording", "status": "running", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 85, "type": "prompt_answered", "summary": "Accepted a pending prompt in Primary Work." }
+          ],
+          "output_delta": { "changed": true, "output": "Receipt Wording confirmed the typed target is correct; only the spoken acknowledgement varies.", "cursor": "lab-1" },
+          "updates": [],
+          "update_cursor": 84
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "focus_session"],
+          "speechTerms": ["typed target", "spoken"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "rename this session receipt lab",
+        "coordinatorState": {
+          "focused_session": { "id": "session-lab", "name": "Receipt Wording", "status": "running" },
+          "known_sessions": [
+            { "id": "session-lab", "name": "Receipt Wording", "status": "running", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 85, "type": "prompt_answered", "summary": "Accepted a pending prompt in Primary Work." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 84
+        },
+        "toolResults": {
+          "rename_session": {
+            "renamed": true,
+            "previous_name": "Receipt Wording",
+            "new_name": "Receipt Lab",
+            "renamed_session": { "id": "session-lab", "name": "Receipt Lab", "status": "running" },
+            "focus_changed": false,
+            "focused_session": { "id": "session-lab", "name": "Receipt Lab", "status": "running" },
+            "known_sessions": [
+              { "id": "session-lab", "name": "Receipt Lab", "status": "running", "focused": true },
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+              { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+            ],
+            "pending_decisions": [],
+            "recent_actions": [
+              { "action_id": 86, "type": "session_renamed", "summary": "Renamed Receipt Wording to Receipt Lab." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["rename_session"],
+          "forbiddenTools": ["focus_session"],
+          "argumentTerms": { "title": ["receipt lab"] },
+          "speechTerms": ["receipt wording", "receipt lab"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "tell primary work the receipt lab confirmed the typed target is correct and only the spoken ack varies don't switch",
+        "coordinatorState": {
+          "focused_session": { "id": "session-lab", "name": "Receipt Lab", "status": "running" },
+          "known_sessions": [
+            { "id": "session-lab", "name": "Receipt Lab", "status": "running", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 86, "type": "session_renamed", "summary": "Renamed Receipt Wording to Receipt Lab." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 84
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "focused_session": { "id": "session-lab", "name": "Receipt Lab", "status": "running" },
+            "recent_actions": [
+              { "action_id": 87, "type": "message_sent", "summary": "Sent immediately to Primary Work: Receipt Lab confirmed the typed target is correct and only the spoken acknowledgement varies." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["get_output", "focus_session"],
+          "sessionId": "session-primary",
+          "messageTerms": ["typed target", "spoken", "varies"],
+          "delivery": "not_queued",
+          "speechTerms": ["primary work"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 88,
+            "type": "session_completed",
+            "session_id": "session-primary",
+            "name": "Primary Work",
+            "summary": "Primary Work completed the restart. Voice readiness is healthy."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["primary work", "restart", "healthy"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "great archive this side thing and take me back",
+        "coordinatorState": {
+          "focused_session": { "id": "session-lab", "name": "Receipt Lab", "status": "running" },
+          "known_sessions": [
+            { "id": "session-lab", "name": "Receipt Lab", "status": "running", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "idle", "focused": false },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 87, "type": "message_sent", "summary": "Sent immediately to Primary Work: Receipt Lab confirmed the typed target is correct and only the spoken acknowledgement varies." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 88
+        },
+        "checkUpdatesAfter": 88,
+        "toolResults": {
+          "archive_session": {
+            "archived": true,
+            "archived_session": { "id": "session-lab", "name": "Receipt Lab" },
+            "focus_reason": "previous_focus",
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+            "known_sessions": [
+              { "id": "session-primary", "name": "Primary Work", "status": "idle", "focused": true },
+              { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 89, "type": "session_archived", "summary": "Archived Receipt Lab; focus returned to Primary Work." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["archive_session"],
+          "forbiddenTools": ["focus_session"],
+          "speechTerms": ["receipt lab", "primary work"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "where am i now and what finished while i was over there",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "idle", "focused": true },
+            { "id": "session-audit", "name": "Receipt Audit", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 89, "type": "session_archived", "summary": "Archived Receipt Lab; focus returned to Primary Work." }
+          ],
+          "output_delta": { "changed": true, "output": "Primary Work completed the restart. Voice readiness is healthy.", "cursor": "primary-2" },
+          "updates": [],
+          "update_cursor": 88
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "focus_session"],
+          "speechTerms": ["primary work", "restart", "healthy"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

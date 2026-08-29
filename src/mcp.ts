@@ -87,7 +87,7 @@ export const createCoordinatorMcpServer = (
     "get_output",
     {
       description:
-        "Read a page of recent typed conversation and internal activity. Page 1 is the most recent page; items inside every page are oldest_to_newest so later incremental updates continue the same chronology. Each item has a position and timestamp, messages remain distinct from tool and terminal activity, and page 1 identifies the latest conversation message.",
+        "Read a page of recent typed conversation and internal activity when the human asks what output contains or whether a sent user message is visible there. Never use it to verify whether a coordinator action occurred; recent_actions is authoritative for that. Do not use it for a declarative correction that a message you claimed to send is missing; that requires send_message again. Page 1 is the most recent page; items inside every page are oldest_to_newest so later incremental updates continue the same chronology. Each item has a position and timestamp, messages remain distinct from tool and terminal activity, and page 1 identifies the latest conversation message.",
       inputSchema: {
         session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
         page: z.number().int().min(1).max(10).optional().describe("Page 1 is newest."),
@@ -118,7 +118,7 @@ export const createCoordinatorMcpServer = (
     "send_message",
     {
       description:
-        "Send the user's request to the focused session. Immediate delivery is the default and steers active work at its next safe boundary. Queued delivery waits until the current turn finishes.",
+        "Send the user's request to the focused session. Also repeat the intended message when the human declaratively corrects a prior send claim as missing, including 'I don't see that message' or 'that message isn't there.' Immediate delivery is the default and steers active work at its next safe boundary. Queued delivery waits until the current turn finishes.",
       inputSchema: {
         message: z.string().min(1).describe("The user's complete message in their own intent."),
         session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
@@ -141,6 +141,19 @@ export const createCoordinatorMcpServer = (
       },
     },
     (args) => toolResult(coordinator, "archive_session", args, state),
+  );
+
+  server.registerTool(
+    "rename_session",
+    {
+      description:
+        "Rename a session without changing focus. Returns both the previous and new names.",
+      inputSchema: {
+        title: z.string().trim().min(1).max(120).describe("New concise session title."),
+        session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
+      },
+    },
+    (args) => toolResult(coordinator, "rename_session", args, state),
   );
 
   server.registerTool(

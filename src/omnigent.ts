@@ -105,6 +105,14 @@ export class OmnigentClient {
     });
   }
 
+  public async renameSession(sessionId: string, title: string): Promise<JsonObject> {
+    return this.requestJson(`/v1/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+  }
+
   public async listItems(
     sessionId: string,
     limit: number,

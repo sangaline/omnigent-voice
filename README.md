@@ -22,12 +22,16 @@ exact assistant text whose audio begins playing. These logs are intentionally
 sensitive and belong only on private runtime storage; they are never built into
 the image.
 
-The coordinator exposes nine tools: list and explicitly focus sessions, read
+The coordinator exposes ten tools: list and explicitly focus sessions, read
 recent output, poll only stable new output, send an immediate or deliberately
-queued message, archive the focused session, answer a structured prompt, start
-a session, and drain background updates. Focus is server-owned state included
-in every tool result. Archiving a temporary focused session restores the prior
-valid focus and reports both sides of the transition for the spoken response.
+queued message, archive or rename a session, answer a structured prompt, start
+a session, and drain background updates. Focus and a bounded current
+name-to-ID map are server-owned state included in every tool result. The voice
+harness can route a message to one explicitly named known session without
+changing focus; ambiguous destinations fail closed. Archiving a temporary
+focused session restores the prior valid focus and reports both sides of the
+transition for the spoken response. Renaming reports the old and new names and
+does not change focus.
 Background events are retained in a bounded log and every result carries an
 event cursor. Clients without server notifications can safely poll
 `check_updates` with their last cursor; one client reading events does not drain
@@ -41,6 +45,13 @@ approval arriving on a later utterance target the real prompt without relying
 on the model to remember or reconstruct opaque IDs.
 The same server can run over stdio with `npm run mcp`; the voice process uses an
 in-memory MCP transport to avoid network latency.
+
+Successful single-action receipts for sends, focus changes, starts, renames,
+and archives are spoken directly from verified structured tool results when no
+background update also needs narration. This removes a second model request
+from common control turns and prevents the fast model from dropping or changing
+the target name. Composite reads and turns carrying updates still return to
+Celeris for natural synthesis.
 
 The voice model keeps a large raw dialogue tail. After the configurable working
 set reaches 80 messages or 48,000 characters, an idle background request
@@ -143,7 +154,10 @@ reported as invalid rather than quality failures, while empty model turns and
 wrong tool behavior still fail. `evals/scenarios.json` keeps one production
 conversation and MCP connection alive across linked human turns and proactive
 notifications. It exercises sticky focus, notification references, event
-cursors, chronological output chunks, actions during fresh output, and
-archive-to-previous-focus behavior. A scenario passes only when every turn
-passes. Keys, reports, and cases copied from private transcripts must remain
-outside the repository.
+cursors, chronological output chunks, actions during fresh output, named
+cross-session sends, structured decisions, rename, and archive-to-previous-focus
+behavior. The longest scenario combines primary, background, and temporary
+work over thirteen turns so accumulated state and references are tested rather
+than only isolated primitives. A scenario passes only when every turn passes.
+Keys, reports, and cases copied from private transcripts must remain outside the
+repository.

@@ -243,3 +243,97 @@ The unchanged isolated model corpus passed 27 of 27. Full linked sweeps retained
 correct tools, targets, focus, and actions; one 26-turn run had a single
 speech-only omission of the word “reconnect,” which passed three immediate
 reruns and remains recorded as model-output variance.
+
+### 2026-08-28 — Named routing, rename, and compound work
+
+Hypothesis H8: repeating a bounded `known_sessions` map in coordinator results
+and resolving an explicitly addressed destination in the voice harness can send
+to background work without the unsafe intermediate focus change that caused the
+original wrong-session incident.
+
+The simple baseline listed sessions but did not send. Deterministic destination
+resolution then passed five of five two-turn runs while retaining primary
+focus. A harder request named both a source and destination. It initially passed
+two of three because one trial sent before reading the source. A late invariant
+requiring source grounding produced five of five clean runs. The grammar treats
+the name directly governed by tell, ask, message, send-to, or let-know as the
+destination; multiple direct destinations fail closed. A human-supplied finding
+does not trigger a redundant source read.
+
+Hypothesis H9: renaming should be a typed coordinator mutation whose state
+transition is returned by the server, not a natural-language message to an
+agent. The installed Omnigent `v0.11.0` contract exposes
+`PATCH /v1/sessions/{session_id}` with an update request containing `title`.
+`rename_session` now updates the focused snapshot, known-session map, pending
+decision label, and recent-action ledger atomically without changing focus.
+Three initial model runs all selected the correct tool and title; their only
+failure was an evaluator that incorrectly required title-case JSON for a
+lowercase ASR utterance. The corrected linked scenario passed both the rename
+and next-turn authoritative-name checks. Conventional coverage is 36 tests.
+
+Hypothesis H10: passing isolated primitives can conceal failures after focus,
+notification subject, message destination, prompt owner, and conversational
+referent diverge over a longer exchange. A thirteen-turn compound scenario now
+combines a primary session, a background completion and exact read, two routed
+sends, temporary session creation, a decision owned by the background primary
+session, incremental temporary output, rename, another completion, archive
+restoration, and a final compound status question.
+
+The first run selected every correct tool and identifier but exposed an
+over-strict approval synonym rubric and a real omission of the completion
+outcome from the final compound answer. The rubric now accepts faithful
+approval language, while the production invariant requires every requested
+part and preserves a completion's outcome. The revised scenario passed 13 of
+13 turns. A full nine-scenario sweep then passed 44 of 45 turn rubrics with all
+tools, targets, focus transitions, and mutations correct; its sole miss was a
+speech-only omission after a correct exact-output read. An immediate traced
+compound rerun passed all 13 turns, recording the remaining issue as Celeris
+speech variance rather than a state or action failure.
+
+During the same promotion gate, adding named-routing instructions regressed two
+declarative missed-send cases to zero of three by making `get_output` too
+salient. Moving the general correction boundary to the end of the turn prompt
+was insufficient at one of two trials. Clarifying the shared MCP tool
+descriptions fixed both distinct retry phrasings at three of three each while
+the neighboring combined sent-versus-visible question stayed three of three.
+The full isolated corpus then passed 27 of 27. This remains prompt/tool-contract
+behavior; no brittle classifier automatically executes a send.
+
+### 2026-08-28 — Typed receipts and evidence-backed retry routing
+
+Hypothesis H11: once a typed mutation succeeds, asking the fast model for a
+second acknowledgement completion adds latency and reintroduces uncertainty
+about fields already known exactly. A deterministic renderer can safely speak
+single successful send, focus, start, rename, and archive receipts when the tool
+result contains no concurrent update; composite turns still return to Celeris.
+
+The queued-message regression passed three of three after this change in one
+model round and 194–293 ms. In the final full gates, common action turns usually
+completed in one round and roughly 103–206 ms. The previous two-round path was
+typically 200–600 ms and had recurring speech-only omissions of target names or
+result words. This is both a latency and correctness improvement.
+
+The shared `get_output` description initially destabilized the boundary between
+a missed-send correction, an action-occurrence question, and an output-
+visibility question. Tool-description and final-turn prompt changes improved
+targeted trials but a later full run still selected a read for the correction.
+A first runtime guard that merely hid `get_output` was rejected: three of five
+trials returned an empty model turn. The accepted guard uses prior assistant
+speech plus the authoritative action ledger and a narrow declarative-correction
+grammar to require `send_message` as Celeris's first tool choice. It does not
+execute the tool itself. The model still reconstructs the message arguments,
+and the coordinator still must return success. This passed five of five
+targeted trials in one round; explicit inspection and ledger-backed visibility
+cases remained separate.
+
+A context-honesty trial also revealed a fabricated 44,000-character retention
+threshold. The prompt now requires exact copying of configured thresholds or
+omission, and the evaluator structurally rejects every spoken number outside the
+actual 80-message and 48,000-character values rather than depending on one
+refusal phrase. The corrected case passed three of three.
+
+Final promotion result: 39 conventional tests, 27 of 27 isolated production-
+harness model cases, and all 45 turns across nine persistent linked scenarios.
+There were no invalid model-service trials. The linked suite includes the
+thirteen-turn compound workflow as well as notification, cursor, decision,
+named routing, rename, and focus-restoration regressions.

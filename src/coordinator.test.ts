@@ -107,6 +107,7 @@ describe("Omnigent coordinator", () => {
       resolveElicitation: vi.fn(),
       createSession: vi.fn(),
       archiveSession: vi.fn(),
+      renameSession: vi.fn(),
       interruptSession: vi.fn(),
     } as unknown as OmnigentClient;
     const coordinator = new OmnigentCoordinator({
@@ -125,6 +126,7 @@ describe("Omnigent coordinator", () => {
         "poll_output",
         "send_message",
         "archive_session",
+        "rename_session",
         "answer_prompt",
         "start_session",
         "check_updates",
@@ -136,6 +138,9 @@ describe("Omnigent coordinator", () => {
           { id: "session-1", name: "Voice MVP", pending_prompts: 1, focused: true },
         ],
         focused_session: { id: "session-1", name: "Voice MVP" },
+        known_sessions: [
+          { id: "session-1", name: "Voice MVP", focused: true },
+        ],
         updates: [],
       });
       await expect(
@@ -206,6 +211,7 @@ describe("Omnigent coordinator", () => {
       resolveElicitation: vi.fn(),
       createSession: vi.fn(),
       archiveSession: vi.fn(),
+      renameSession: vi.fn(),
       interruptSession: vi.fn(),
     } as unknown as OmnigentClient;
     const coordinator = new OmnigentCoordinator({
@@ -296,6 +302,7 @@ describe("Omnigent coordinator", () => {
       resolveElicitation: vi.fn(),
       createSession: vi.fn(),
       archiveSession,
+      renameSession: vi.fn(),
       interruptSession: vi.fn(),
     } as unknown as OmnigentClient;
     const coordinator = new OmnigentCoordinator({
@@ -328,6 +335,77 @@ describe("Omnigent coordinator", () => {
     }
   });
 
+  it("renames the focused session without changing focus", async () => {
+    const now = new Date().toISOString();
+    const session = {
+      id: "session-voice",
+      title: "Voice MVP",
+      status: "idle",
+      updated_at: now,
+    };
+    const renameSession = vi.fn().mockResolvedValue({
+      ...session,
+      title: "Audio Packet Research",
+    });
+    const omnigent = {
+      listSessions: vi.fn().mockResolvedValue([session]),
+      getSession: vi.fn().mockResolvedValue(session),
+      listItems: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
+      sendMessage: vi.fn(),
+      resolveElicitation: vi.fn(),
+      createSession: vi.fn(),
+      archiveSession: vi.fn(),
+      renameSession,
+      interruptSession: vi.fn(),
+    } as unknown as OmnigentClient;
+    const coordinator = new OmnigentCoordinator({
+      omnigent,
+      logger: new Logger("error"),
+      pollIntervalMs: 60_000,
+    });
+    await coordinator.start();
+    const client = await CoordinatorMcpClient.create(coordinator);
+    try {
+      await expect(
+        client.callTool("rename_session", { title: "Audio Packet Research" }),
+      ).resolves.toMatchObject({
+        renamed: true,
+        previous_name: "Voice MVP",
+        new_name: "Audio Packet Research",
+        renamed_session: {
+          id: "session-voice",
+          name: "Audio Packet Research",
+        },
+        focus_changed: false,
+        focused_session: {
+          id: "session-voice",
+          name: "Audio Packet Research",
+        },
+        known_sessions: [
+          {
+            id: "session-voice",
+            name: "Audio Packet Research",
+            focused: true,
+          },
+        ],
+        recent_actions: [
+          {
+            type: "session_renamed",
+            previous_name: "Voice MVP",
+            new_name: "Audio Packet Research",
+          },
+        ],
+      });
+      expect(renameSession).toHaveBeenCalledWith(
+        "session-voice",
+        "Audio Packet Research",
+      );
+    } finally {
+      coordinator.stop();
+      await client.close();
+    }
+  });
+
   it("supports replayable event cursors without globally draining updates", async () => {
     const now = new Date().toISOString();
     const running = {
@@ -348,6 +426,7 @@ describe("Omnigent coordinator", () => {
       resolveElicitation: vi.fn(),
       createSession: vi.fn(),
       archiveSession: vi.fn(),
+      renameSession: vi.fn(),
       interruptSession: vi.fn(),
     } as unknown as OmnigentClient;
     const coordinator = new OmnigentCoordinator({
@@ -428,6 +507,7 @@ describe("Omnigent coordinator", () => {
       resolveElicitation,
       createSession: vi.fn(),
       archiveSession: vi.fn(),
+      renameSession: vi.fn(),
       interruptSession: vi.fn(),
     } as unknown as OmnigentClient;
     const coordinator = new OmnigentCoordinator({
