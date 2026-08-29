@@ -114,7 +114,7 @@ CELERIS_API_KEY=... npm run replay -- \
 ```
 
 The optional result file is a JSON object such as
-`{"get_output":{"order":"newest_first","items":[]}}`; use an array when the
+`{"get_output":{"order":"oldest_to_newest","items":[]}}`; use an array when the
 same tool is called more than once. Replay output and supplied tool results can
 contain private transcript or session text and tool arguments. Keep them local
 and never commit copied logs, result fixtures, or reports.

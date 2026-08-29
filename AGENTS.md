@@ -134,10 +134,12 @@ and is exposed as such. `delivery: queued` is an explicit coordinator-managed
 wait until the current session turn becomes idle.
 `get_output` reads `/v1/sessions/{id}/items`; arbitrary tmux scrollback is not
 available through the Omnigent HTTP API and must not be implied. It returns a
-JSON array in explicit `newest_first` order instead of flattening the page into
-text. Every retained item has a one-based position, normalized timestamp,
+JSON array instead of flattening the page into text. Page 1 contains the most
+recent page of items, but items within every page are returned in explicit
+`oldest_to_newest` order so cursor-based incremental updates continue the same
+chronology. Every retained item has a one-based position, normalized timestamp,
 preformatted age, kind, text, and message role or tool name where applicable.
-`latest_message` is the newest conversation message on the newest page; it is
+`latest_message` is the newest conversation message on the most recent page; it is
 generic and may be from either role, so consumers must still inspect `role`.
 Internal terminal/tool activity remains separate from conversation messages.
 Item text is shortened by preserving both its beginning and end, and only

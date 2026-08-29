@@ -462,17 +462,20 @@ export class OmnigentCoordinator {
       if (current < page && (!listing.hasMore || !listing.lastId)) break;
       cursor = listing.lastId;
     }
-    const { items, omitted } = formatConversationItems(listing?.data ?? []);
-    const latestMessage = items.find((item) => item.kind === "message") ?? null;
+    const formatted = formatConversationItems(listing?.data ?? []);
+    const items = [...formatted.items]
+      .reverse()
+      .map((item, index) => ({ ...item, position: index + 1 }));
+    const latestMessage = [...items].reverse().find((item) => item.kind === "message") ?? null;
     return {
       session_id: id,
       target_session: this.sessionSummaries.get(id) ?? null,
       focus_changed: false,
       page,
-      order: "newest_first",
+      order: "oldest_to_newest",
       latest_message: page === 1 ? latestMessage : null,
       items,
-      items_omitted: omitted,
+      items_omitted: formatted.omitted,
       has_more: listing?.hasMore ?? false,
     };
   }

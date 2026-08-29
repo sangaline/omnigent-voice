@@ -87,7 +87,7 @@ const replayTools = (input: string): ReplayTool[] => {
       function: {
         name: "get_output",
         description:
-          "Read recent typed conversation and internal activity from a session. The result explicitly uses newest_first order, gives each item a position and timestamp, distinguishes messages from tool and terminal activity, and identifies the latest conversation message on page 1.",
+          "Read a page of recent typed conversation and internal activity. Page 1 is the most recent page; items inside every page are oldest_to_newest so later incremental updates continue the same chronology. Each item has a position and timestamp, messages remain distinct from tool and terminal activity, and page 1 identifies the latest conversation message.",
         parameters: objectSchema({
           session_id: { type: "string" },
           page: { type: "number", minimum: 1, maximum: 10 },

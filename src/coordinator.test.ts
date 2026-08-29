@@ -147,21 +147,21 @@ describe("Omnigent coordinator", () => {
         recent_actions: [],
       });
       await expect(client.callTool("get_output", {})).resolves.toMatchObject({
-        order: "newest_first",
+        order: "oldest_to_newest",
         latest_message: {
-          position: 2,
+          position: 1,
           kind: "message",
           role: "assistant",
           text: "The replay harness is ready.",
         },
         items: [
-          { position: 1, kind: "tool_call", tool_name: "exec_command" },
           {
-            position: 2,
+            position: 1,
             kind: "message",
             role: "assistant",
             text: "The replay harness is ready.",
           },
+          { position: 2, kind: "tool_call", tool_name: "exec_command" },
         ],
         items_omitted: 0,
       });
