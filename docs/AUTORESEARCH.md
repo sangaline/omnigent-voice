@@ -1466,3 +1466,25 @@ was recovered exactly by the bundled Nemotron recognizer. The compatible state
 was provisioned privately and the replacement pod reached Pocket, coordinator,
 and Discord readiness with zero restarts. Three batching regressions bring the
 conventional gate to 105 passing tests with clean typecheck and build.
+
+### 2026-08-29 — Rename requests without a title
+
+Hypothesis H51: the base prompt was sufficient to make the fast model ask for
+the missing title when the human said only “can you rename the temporary
+session.” The unchanged production harness failed all five trials. Every run
+called `rename_session` and invented a replacement title, matching the live
+failure that unexpectedly mutated the session after the human had asked a
+question rather than supplied a name. Those failing first model rounds took
+184–1,626 ms.
+
+The voice harness now extracts the requested title from the narrow supported
+rename grammar. A rename tool is exposed only when both an explicit rename
+request and a nonempty new title are present. When the title is absent and no
+concurrent coordinator event needs attention, the harness asks what to call the
+focused session without invoking Celeris or any coordinator tool. Concurrent
+events and pending decisions retain the ordinary model path so clarification
+does not hide fresh state.
+
+The sanitized regression passed ten of ten trials at zero model rounds and
+0–4 ms. Focus remains unchanged and no live coordinator session was read or
+mutated.

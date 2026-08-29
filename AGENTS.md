@@ -413,9 +413,11 @@ The ten tools are `list_sessions`, `focus_session`, `get_output`,
 `answer_prompt`, `start_session`, and `check_updates`. `archive_session` is
 withheld unless the human explicitly says archive, and its voice-facing schema
 can only target the focused session. `rename_session` is likewise withheld
-unless the human explicitly asks to rename or call the current session; its
-voice schema requires only the new title, the coordinator returns both names,
-and focus never changes. General stdio MCP clients may supply a session ID for
+unless the human explicitly asks to rename or call the current session and
+supplies the new title. A rename request without a title is answered with a
+deterministic clarification and cannot reach Celeris or the tool. Its voice
+schema requires only the new title, the coordinator returns both names, and
+focus never changes. General stdio MCP clients may supply a session ID for
 either action. `poll_output` accepts and returns an explicit opaque cursor,
 returns only stable newer output, and never changes focus. This makes the tool
 usable by stateless remote MCP clients; omission returns the bounded buffered

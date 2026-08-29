@@ -1336,5 +1336,30 @@
       "speechAnyTerms": [["no new", "nothing new", "no additional", "nothing else"]],
       "maxRounds": 1
     }
+  },
+  {
+    "id": "rename_without_title_requires_clarification",
+    "description": "Ask for the missing new title instead of inventing one or mutating the focused session when an ASR-style rename request names only the existing session.",
+    "history": [],
+    "input": "can you rename the temporary session",
+    "coordinatorState": {
+      "focused_session": { "id": "session-temp", "name": "Temporary Session", "status": "idle" },
+      "known_sessions": [
+        { "id": "session-temp", "name": "Temporary Session", "status": "idle", "focused": true },
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["rename_session", "focus_session", "send_message"],
+      "speechAnyTerms": [["what", "which"], ["call", "name"]],
+      "speechForbiddenTerms": ["renamed", "new temporary session"],
+      "maxRounds": 1
+    }
   }
 ]

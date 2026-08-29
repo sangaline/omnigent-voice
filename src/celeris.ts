@@ -343,7 +343,7 @@ The coordinator snapshot immediately above is already current data for this turn
 A short output_delta is already a voice-sized update. When it directly answers the human, preserve every concrete condition, count, outcome, and still-running or blocked clause instead of shortening away one of its facts.
 A question about whether any prior coordinator action succeeded, including prompt approval, is answered directly from recent_actions. Do not repeat the action and do not read session output merely to verify a ledger entry.
 When the human asks what exact message was sent, answer from the newest matching message_sent entry in recent_actions. Its typed message and summary are authoritative. Do not call get_output because session output cannot establish the exact outbound message. When the human asks whether reads preceded a send, answer from last_verified_tool_workflow; a new read cannot prove prior ordering.
-Renaming is a coordinator action. Only call rename_session for an explicit rename request, copy the requested new title into title, and describe the old-to-new transition only after its successful tool result. It never changes sticky focus.
+Renaming is a coordinator action. Only call rename_session for an explicit rename request that includes the new title, copy that requested title into title, and describe the old-to-new transition only after its successful tool result. If the human asks to rename a session but supplies no new title, ask what they want to call it and do not invent a name or call the tool. Renaming never changes sticky focus.
 send_message delivery is immediate unless the human clearly requests queueing until the current agent turn finishes. ASR discourse such as “wait,” “no wait,” “hold on,” or a mid-sentence correction does not request queued delivery. Use queued only for explicit timing such as “queue this,” “send after the current turn,” or “when it finishes.”
 Only after an actual visibility question has selected get_output, answer whether the sent user message itself appears, not whether the agent has responded. If recent_actions confirms the send but get_output does not contain that user message, say it was sent or accepted but is not visible in output yet. If the user message is present, clearly confirm that it is visible. Mention a response only if the human asked about one, and never promise future monitoring.
 For a visibility question, get_output.recent_delivery_visibility is the authoritative page comparison. visible_on_page means the latest delivered user message is present on that returned page; not_visible_on_page means only that it is absent from that page. Never reverse these values or substitute whether the agent has replied.
@@ -497,6 +497,20 @@ export const allowsArchive = (input: string): boolean => /\barchive\b/i.test(inp
 
 export const allowsRename = (input: string): boolean =>
   /\brename\b/i.test(input) || /\bcall\s+(?:this|the)\s+session\b/i.test(input);
+
+export const requestedRenameTitle = (input: string): string | undefined => {
+  const normalized = input.trim().replace(/[.!?]+$/g, "").trim();
+  const patterns = [
+    /\brename\b[\s\S]*?\bto\s+(.+)$/i,
+    /\brename\s+(?:(?:(?:this|the\s+current|current|the\s+focused|focused|the)\s+session)|this|it)\s+(.+)$/i,
+    /\bcall\s+(?:(?:this|the\s+current|current|the\s+focused|focused|the)\s+session)\s+(.+)$/i,
+  ];
+  for (const pattern of patterns) {
+    const title = pattern.exec(normalized)?.[1]?.trim();
+    if (title) return title;
+  }
+  return undefined;
+};
 
 const words = (value: string): string[] =>
   value
@@ -2196,6 +2210,25 @@ export class CelerisConversation {
     const focusedName = typeof focusedAtTurn?.name === "string"
       ? focusedAtTurn.name.trim()
       : "";
+    const renameTitle = requestedRenameTitle(input);
+    const outputDelta = objectValue(updates.output_delta);
+    if (
+      allowsRename(input) &&
+      !renameTitle &&
+      retainedTurnUpdates().length === 0 &&
+      outputDelta?.changed !== true &&
+      (!Array.isArray(updates.pending_decisions) || updates.pending_decisions.length === 0)
+    ) {
+      const speech = sanitizeForSpeech(
+        focusedName
+          ? `What would you like me to rename ${focusedName} to?`
+          : "What would you like me to call the current session?",
+        300,
+      );
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
     if (
       focusedName &&
       (!Array.isArray(updates.updates) || updates.updates.length === 0) &&
@@ -2305,7 +2338,7 @@ export class CelerisConversation {
             (name !== "focus_session" ||
               (allowsFocusChange(input) && !targetsFocusedSession(input, focusedName))) &&
             (name !== "archive_session" || allowsArchive(input)) &&
-            (name !== "rename_session" || allowsRename(input)) &&
+            (name !== "rename_session" || (allowsRename(input) && Boolean(renameTitle))) &&
             (!retryReadRouting || name !== "send_message") &&
             (!incomingUpdateQuestion ||
               (name !== "get_output" && name !== "poll_output")) &&

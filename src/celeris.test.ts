@@ -19,6 +19,7 @@ import {
   missingMultiSourceNames,
   missingMultiSourceNumbers,
   requestsPositiveFocusAction,
+  requestedRenameTitle,
   serializeToolResult,
   StreamingSpeechSegmenter,
   successfulActionSpeech,
@@ -697,6 +698,16 @@ describe("Celeris coordinator conversation", () => {
     expect(allowsRename("Rename this session to Voice Research.")).toBe(true);
     expect(allowsRename("Call this session Voice Research.")).toBe(true);
     expect(allowsRename("What is this session called?")).toBe(false);
+    expect(requestedRenameTitle("Rename this session to Voice Research.")).toBe(
+      "Voice Research",
+    );
+    expect(requestedRenameTitle("rename this session audio packet research")).toBe(
+      "audio packet research",
+    );
+    expect(requestedRenameTitle("Call this session Voice Research.")).toBe(
+      "Voice Research",
+    );
+    expect(requestedRenameTitle("can you rename the temporary session")).toBeUndefined();
     expect(
       requestsPositiveFocusAction("tell side beta to rerun it and switch me there"),
     ).toBe(true);
@@ -1238,6 +1249,16 @@ describe("Celeris coordinator conversation", () => {
     expect(rename).toBeDefined();
     expect(rename?.function?.parameters?.properties).toHaveProperty("title");
     expect(rename?.function?.parameters?.properties).not.toHaveProperty("session_id");
+  });
+
+  it("asks for a missing rename title without calling Celeris", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      conversation("test-key").respond("Can you rename the temporary session?"),
+    ).resolves.toBe("What would you like me to call the current session?");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("executes an MCP coordinator tool and voices the immediate result", async () => {
