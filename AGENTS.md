@@ -114,6 +114,14 @@ a correction that a requested send was missing repeats `send_message` rather
 than substituting an output read. Celeris must not invent missing context or
 access as the cause of a prior bad answer; when no exact cause is established it
 states only that it misinterpreted the available data.
+Notification history records are authoritative for resolving “that one,” “the
+first one,” and “the other one”; a read copies the referenced notification's
+session ID rather than substituting sticky focus. A changed `output_delta`
+directly answers “what's new” and “since then” without an older-output read.
+ASR discourse repairs such as “no wait” do not select queued delivery; only an
+explicit request to queue or wait for the current turn does. For a true output
+visibility check, the response combines the action ledger's delivery evidence
+with whether the sent user item appears in the read result.
 The voice harness removes `send_message.session_id` from the model-visible
 schema so messages can only target the focused session. It also withholds and
 rejects `focus_session` unless the current transcript explicitly requests a

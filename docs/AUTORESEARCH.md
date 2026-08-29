@@ -199,4 +199,14 @@ defines changed output as the chronological delta for “what's new” questions
 and limits queued delivery to explicit timing language. It also includes H5's
 delivery-versus-visibility rule. The first clean candidate run passed all 23
 stateful turns, and the unchanged isolated corpus passed 27 of 27. Repeated
-stateful stability trials remain the promotion gate.
+stateful stability trials then passed 69 of 69 turns across three complete runs
+of each scenario with no invalid trials. Two earlier candidate runs each had one
+speech-quality miss: one omitted the pass result and one malformed the final
+word “reconnect”; neither changed a tool, target, cursor, focus, or action.
+
+Result: accepted. After promotion into the production invariant, the complete
+scenario set passed 22 of 23 once before the clean stability sweep. The isolated
+production run passed 26 of 27 because one queued-delivery acknowledgement
+omitted the session name; that same case then passed five of five immediate
+reruns. Together with the earlier 27-of-27 candidate run, all isolated cases
+have clean confirmation without relaxing their action or grounding rubrics.
