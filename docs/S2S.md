@@ -128,3 +128,10 @@ answer produced 12.8 seconds of audio, ended naturally, and recovered 96.4% of
 the intended words. A 400 ms delay missed a turn, so the faster setting is not
 eligible for live rollout. A real phone conversation remains a required gate;
 offline English and termination are necessary but not sufficient.
+
+Every guided transaction owns a fresh Discord raw-audio resource. The resource
+is created in the buffering state before guidance and ended when the transaction
+settles. `@discordjs/voice` destroys a playing resource after five missing 20 ms
+frames, so a process-lifetime resource cannot survive the deliberately silent
+gaps between guided turns. Closed-gate KAME frames remain discarded rather than
+being forwarded as audible or silent keepalive audio.

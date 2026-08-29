@@ -805,3 +805,25 @@ conservative 720 ms / 400 ms-guidance sequences passed all seven turns with
 ended naturally, and scored 96.4%. The live rollout gate is now explicit:
 offline silence containment, English fidelity, multi-turn termination, then a
 controlled phone test; synthetic probes alone do not promote KAME.
+
+### 2026-08-29 — Discord response-scoped raw audio resources
+
+Hypothesis H29: the live caller's silence after a correctly generated response
+was a transport-lifetime failure rather than an ASR or Celeris latency failure.
+Private retained metadata confirmed a 1.58-second utterance, a Celeris response
+791 ms after ASR finalization, and an initial KAME speech-start timeout with a
+0.0004 peak. The same process had 194 later raw-stream writes rejected with a
+zero-byte writable queue. Inspection of `@discordjs/voice` showed that a
+playing resource is stopped and destroyed after its default five consecutive
+missing 20 ms frames. Closing the generation gate after the preceding response
+therefore killed the process-lifetime raw resource before the next turn.
+
+The output resource now has the same lifetime as one guided transaction. It is
+created in the buffering state before oracle guidance, receives only verified
+open-gate frames, and ends on completion, timeout, abort, barge-in, or shutdown.
+This preserves complete idle containment without clocking Discord with KAME's
+unguided audio or synthetic keepalive frames. The conventional gate is a clean
+typecheck plus 69 tests. Promotion additionally requires a live start, more
+than one minute idle, then a guided response with no backpressure events. The
+KAME no-speech timeout remains a distinct model reliability failure and is not
+considered fixed by this transport change.

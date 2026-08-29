@@ -440,6 +440,11 @@ guided transaction, and the gate closes immediately on completion, timeout,
 barge-in, abort, or shutdown. Normal completion is eight silent frames. The
 10-120 second guidance-length-scaled completion timeout is only a runaway
 watchdog; never replace normal endpointing with a fixed response-duration cap.
+Every guided transaction owns a fresh Discord raw-audio resource created before
+guidance and ended when the transaction settles. `@discordjs/voice` destroys a
+playing resource after five missing 20 ms frames, so a process-lifetime resource
+cannot survive the gated idle period between responses. Do not regress to one
+process-lifetime resource or forward unguided KAME frames as keepalive audio.
 
 Unsolicited coordinator updates retain one audible voice. Local TTS generates a
 short input-side question that is fed only into KAME after idle; the user never

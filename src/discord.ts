@@ -81,7 +81,7 @@ export class DiscordVoiceBot {
   private unsubscribeCoordinator?: () => void;
   private unsubscribeS2SAudio?: () => void;
   private s2sTimer?: NodeJS.Timeout | undefined;
-  private s2sOutput?: PassThrough;
+  private s2sOutput: PassThrough | undefined;
   private readonly s2sInput = new DelayedS2SInput();
   private s2sResponseAbort: AbortController | undefined;
   private s2sResponseActive = false;
@@ -122,6 +122,12 @@ export class DiscordVoiceBot {
     });
     this.player.on("error", (error) => {
       this.options.logger.error("discord.playback.failed", error);
+    });
+    this.player.on("stateChange", (_oldState, newState) => {
+      this.options.logger.info("discord.playback.state", {
+        status: newState.status,
+        runtime: this.options.s2s ? "kame" : "staged",
+      });
     });
     if (this.options.s2s) this.startS2SLoop();
     this.unsubscribeCoordinator = this.options.coordinator.subscribeUpdates((update) => {
@@ -181,11 +187,17 @@ export class DiscordVoiceBot {
 
   private startS2SLoop(): void {
     const s2s = this.options.s2s!;
-    const output = new PassThrough({ highWaterMark: 1024 * 1024 });
-    this.s2sOutput = output;
-    this.player.play(createAudioResource(output, { inputType: StreamType.Raw }));
     this.unsubscribeS2SAudio = s2s.subscribeAudio((audio) => {
-      if (this.shuttingDown || !this.s2sOutputGate.isOpen) return;
+      const output = this.s2sOutput;
+      if (
+        this.shuttingDown ||
+        !this.s2sOutputGate.isOpen ||
+        !output ||
+        output.destroyed ||
+        output.writableEnded
+      ) {
+        return;
+      }
       const pcm = monoFloatToStereoPcm16(
         resampleLinear(audio, s2s.ready.sampleRate, 48_000),
       );
@@ -215,6 +227,25 @@ export class DiscordVoiceBot {
     this.options.logger.info("discord.s2s.started", {
       frameMs: intervalMs,
     });
+  }
+
+  private beginS2SOutput(): PassThrough {
+    // A Discord raw resource is intentionally scoped to one guided response.
+    // @discordjs/voice destroys a playing resource after five missing 20 ms
+    // frames, so a process-lifetime resource cannot survive KAME's gated idle
+    // periods. A fresh buffering resource per transaction stays alive until
+    // verified guided audio arrives and never needs unguided keepalive audio.
+    this.s2sOutput?.end();
+    const output = new PassThrough({ highWaterMark: 1024 * 1024 });
+    this.s2sOutput = output;
+    this.player.play(createAudioResource(output, { inputType: StreamType.Raw }));
+    return output;
+  }
+
+  private endS2SOutput(output: PassThrough): void {
+    if (this.s2sOutput !== output) return;
+    this.s2sOutput = undefined;
+    output.end();
   }
 
   private queueS2SInput(
@@ -543,13 +574,17 @@ export class DiscordVoiceBot {
     }
     this.s2sResponseAbort?.abort();
     const outputGeneration = this.s2sOutputGate.begin();
+    const output = this.beginS2SOutput();
     const controller = new AbortController();
     this.s2sResponseAbort = controller;
     const abort = (): void => controller.abort();
     parentSignal?.addEventListener("abort", abort, { once: true });
     controller.signal.addEventListener(
       "abort",
-      () => this.s2sOutputGate.close(outputGeneration),
+      () => {
+        this.s2sOutputGate.close(outputGeneration);
+        this.endS2SOutput(output);
+      },
       { once: true },
     );
     this.s2sResponseActive = true;
@@ -577,6 +612,7 @@ export class DiscordVoiceBot {
     const settle = async (): Promise<boolean> => {
       const completed = await completion;
       this.s2sOutputGate.close(outputGeneration);
+      this.endS2SOutput(output);
       parentSignal?.removeEventListener("abort", abort);
       if (this.s2sResponseAbort === controller) {
         this.s2sResponseAbort = undefined;
