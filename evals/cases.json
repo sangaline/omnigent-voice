@@ -878,5 +878,183 @@
       ],
       "maxRounds": 2
     }
+  },
+  {
+    "id": "form_prompt_preserves_spoken_fields",
+    "description": "Resolve a structured background form with the caller's exact ASR-style field values while preserving sticky focus.",
+    "history": [
+      {
+        "role": "system",
+        "content": "Omnigent background update: [{\"event_id\":61,\"type\":\"decision_needed\",\"session_id\":\"session-release\",\"name\":\"Release Setup\",\"summary\":\"Release Setup needs deployment settings.\",\"prompts\":[{\"prompt_id\":\"prompt-release-form\",\"message\":\"Choose the target environment and replica count.\",\"mode\":\"form\",\"schema\":{\"type\":\"object\",\"properties\":{\"environment\":{\"type\":\"string\",\"enum\":[\"staging\",\"production\"]},\"replicas\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"environment\",\"replicas\"]}}]}]"
+      },
+      {
+        "role": "assistant",
+        "content": "Release Setup needs the target environment and replica count."
+      }
+    ],
+    "input": "yeah okay for that release one use staging and uh make it three replicas go ahead",
+    "coordinatorState": {
+      "focused_session": {
+        "id": "session-primary",
+        "name": "Primary Work",
+        "status": "running"
+      },
+      "known_sessions": [
+        {
+          "id": "session-primary",
+          "name": "Primary Work",
+          "status": "running",
+          "focused": true
+        },
+        {
+          "id": "session-release",
+          "name": "Release Setup",
+          "status": "waiting",
+          "focused": false
+        }
+      ],
+      "pending_decisions": [
+        {
+          "session_id": "session-release",
+          "name": "Release Setup",
+          "prompts": [
+            {
+              "prompt_id": "prompt-release-form",
+              "message": "Choose the target environment and replica count.",
+              "mode": "form",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "environment": {
+                    "type": "string",
+                    "enum": ["staging", "production"]
+                  },
+                  "replicas": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": ["environment", "replicas"]
+              }
+            }
+          ]
+        }
+      ],
+      "recent_actions": [],
+      "output_delta": {
+        "changed": false,
+        "output": ""
+      },
+      "updates": [],
+      "update_cursor": 61
+    },
+    "toolResults": {
+      "answer_prompt": {
+        "resolved": true,
+        "session_id": "session-release",
+        "prompt_id": "prompt-release-form",
+        "action": "accept",
+        "target_session": {
+          "id": "session-release",
+          "name": "Release Setup",
+          "status": "waiting"
+        },
+        "focused_session": {
+          "id": "session-primary",
+          "name": "Primary Work",
+          "status": "running"
+        },
+        "pending_decisions": [],
+        "recent_actions": [
+          {
+            "action_id": 62,
+            "type": "prompt_answered",
+            "session_id": "session-release",
+            "name": "Release Setup",
+            "summary": "Accepted the deployment settings in Release Setup."
+          }
+        ]
+      }
+    },
+    "expected": {
+      "toolSequence": ["answer_prompt"],
+      "forbiddenTools": ["focus_session", "send_message"],
+      "sessionId": "session-release",
+      "argumentEquals": {
+        "prompt_id": "prompt-release-form",
+        "action": "accept",
+        "answers": {
+          "environment": "staging",
+          "replicas": 3
+        }
+      },
+      "speechTerms": ["approved", "release setup"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "ambiguous_notification_read_fails_closed",
+    "description": "Ask for clarification instead of reading sticky focus when a deictic read follows two background notifications.",
+    "history": [
+      {
+        "role": "system",
+        "content": "Omnigent background update: [{\"event_id\":81,\"type\":\"session_completed\",\"session_id\":\"session-alpha\",\"name\":\"Side Alpha\",\"summary\":\"Side Alpha completed.\"}]"
+      },
+      {
+        "role": "assistant",
+        "content": "Side Alpha completed its checks."
+      },
+      {
+        "role": "system",
+        "content": "Omnigent background update: [{\"event_id\":82,\"type\":\"session_completed\",\"session_id\":\"session-beta\",\"name\":\"Side Beta\",\"summary\":\"Side Beta completed.\"}]"
+      },
+      {
+        "role": "assistant",
+        "content": "Side Beta completed its checks."
+      }
+    ],
+    "input": "wait uh what was the last thing that one actually said",
+    "coordinatorState": {
+      "focused_session": {
+        "id": "session-primary",
+        "name": "Primary Work",
+        "status": "running"
+      },
+      "known_sessions": [
+        {
+          "id": "session-primary",
+          "name": "Primary Work",
+          "status": "running",
+          "focused": true
+        },
+        {
+          "id": "session-alpha",
+          "name": "Side Alpha",
+          "status": "idle",
+          "focused": false
+        },
+        {
+          "id": "session-beta",
+          "name": "Side Beta",
+          "status": "idle",
+          "focused": false
+        }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": {
+        "changed": false,
+        "output": ""
+      },
+      "updates": [],
+      "update_cursor": 82
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+      "speechTerms": ["side alpha", "side beta"],
+      "speechAnyTerms": [["which", "do you mean", "which one"]],
+      "maxRounds": 1
+    }
   }
 ]

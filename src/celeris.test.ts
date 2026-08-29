@@ -503,6 +503,44 @@ describe("Celeris coordinator conversation", () => {
       target: { id: "session-beta", name: "Side Beta" },
     });
     expect(
+      voiceReadRouting(
+        "yeah okay what's the last thing that one actually said",
+        [],
+        undefined,
+        notificationTargets,
+      ),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-beta", name: "Side Beta" },
+    });
+    expect(
+      voiceReadRouting(
+        "what did the second one say",
+        [],
+        undefined,
+        notificationBurst,
+      ),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-beta", name: "Side Beta" },
+    });
+    expect(
+      voiceReadRouting(
+        "what did that one say",
+        [],
+        undefined,
+        notificationBurst,
+      ),
+    ).toEqual({ mode: "ambiguous", candidates: ["Side Alpha", "Side Beta"] });
+    expect(
+      voiceReadRouting(
+        "what's latest on this session",
+        [],
+        undefined,
+        notificationTargets,
+      ),
+    ).toEqual({ mode: "model" });
+    expect(
       voiceStartInstruction("make a temporary session to test that receipt wording"),
     ).toBe("test that receipt wording");
     expect(voiceStartInstruction("what is this session doing")).toBeUndefined();
@@ -857,6 +895,113 @@ describe("Celeris coordinator conversation", () => {
     const read = request.tools?.find((tool) => tool.function?.name === "get_output");
     expect(read?.function?.description).toContain("Side Worker");
     expect(read?.function?.parameters?.properties).not.toHaveProperty("session_id");
+  });
+
+  it("injects the authoritative ID for a read following a spoken notification", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-read-notification",
+              type: "function",
+              function: {
+                name: "get_output",
+                arguments: JSON.stringify({ session_id: "session-primary" }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(response({ content: "The route audit passed all checks." }));
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) =>
+      Promise.resolve(
+        name === "check_updates"
+          ? {
+              focused_session: { id: "session-primary", name: "Primary Work" },
+              known_sessions: [{ id: "session-primary", name: "Primary Work" }],
+              updates: [],
+              update_cursor: 7,
+            }
+          : {
+              target_session: { id: "session-side", name: "Side Audit" },
+              latest_message: {
+                role: "assistant",
+                text: "The route audit passed all checks.",
+              },
+              updates: [],
+            },
+      ),
+    );
+    const subject = conversation("test-key", tools);
+    subject.restoreHistory([
+      {
+        role: "system",
+        content:
+          'Omnigent background update: [{"event_id":7,"type":"session_completed","session_id":"session-side","name":"Side Audit","summary":"Side Audit completed."}]',
+      },
+      { role: "assistant", content: "Side Audit completed." },
+    ]);
+
+    await expect(
+      subject.respond("yeah okay what's the last thing that one actually said"),
+    ).resolves.toBe("The route audit passed all checks.");
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "get_output", {
+      session_id: "session-side",
+    });
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tools?: Array<{
+        function?: {
+          name?: string;
+          description?: string;
+          parameters?: { properties?: Record<string, unknown> };
+        };
+      }>;
+    };
+    const read = request.tools?.find((tool) => tool.function?.name === "get_output");
+    expect(read?.function?.description).toContain("Side Audit");
+    expect(read?.function?.parameters?.properties).not.toHaveProperty("session_id");
+  });
+
+  it("clarifies an ambiguous notification read without invoking the model", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockResolvedValue({
+      focused_session: { id: "session-primary", name: "Primary Work" },
+      known_sessions: [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-alpha", name: "Side Alpha" },
+        { id: "session-beta", name: "Side Beta" },
+      ],
+      updates: [],
+      update_cursor: 82,
+    });
+    const subject = conversation("test-key", tools);
+    subject.restoreHistory([
+      {
+        role: "system",
+        content:
+          'Omnigent background update: [{"event_id":81,"session_id":"session-alpha","name":"Side Alpha"}]',
+      },
+      { role: "assistant", content: "Side Alpha completed." },
+      {
+        role: "system",
+        content:
+          'Omnigent background update: [{"event_id":82,"session_id":"session-beta","name":"Side Beta"}]',
+      },
+      { role: "assistant", content: "Side Beta completed." },
+    ]);
+
+    await expect(
+      subject.respond("wait what did that one actually say"),
+    ).resolves.toBe("Which session do you mean, Side Alpha or Side Beta?");
+    expect(tools.callTool).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("speaks a deterministic failure and skips another model call after a tool error", async () => {

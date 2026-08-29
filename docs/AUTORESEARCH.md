@@ -864,3 +864,40 @@ Multiple 27-30 second retries and one response producing over 1,400 transcript
 characters confirm that the caller's more-than-one-minute gibberish report was a
 model/runtime termination failure, not merely a Discord stream-lifetime bug.
 Only the staged Pocket path is eligible for the next live test.
+
+### 2026-08-29 — Deterministic notification-read targets
+
+Hypothesis H32: the prompt rule requiring a follow-up read to copy the session
+ID from notification history was sufficient. A full linked-scenario sweep
+falsified it. After Side Audit was spoken proactively, the ASR-style question
+“what's the last thing that one actually said” called `get_output` with sticky
+Voice Build in one run. The other 71 turns passed, making this exactly the kind
+of low-frequency, high-cost routing failure the stateful corpus is intended to
+find.
+
+The harness now resolves read-shaped deictic references from the same
+authoritative, since-last-human notification records already used for message
+routing. With one target, the model-visible read schema omits `session_id` and
+the server injects the recorded target even if Celeris emits a different ID.
+First, second, third, and last map to notification order. An unqualified read
+after multiple notifications is answered by a deterministic zero-round
+clarification naming the candidates; withholding tools alone was rejected after
+five of five trials returned empty model turns.
+
+This loop also added the first structured-form coverage. A standalone prompt
+preserved `environment: staging` and `replicas: 3` in three of three baseline
+runs. A longer three-turn scenario interleaved that form with a research-session
+completion, submitted the form, sent the supplied DNS finding to sticky focus,
+and audited both actions. The original judge scored it zero of three because it
+incorrectly required an ID on a focused send and a verbatim session title; trace
+inspection showed correct one-round actions, so the over-specific expectations
+were fixed rather than changing production behavior. The corrected scenario
+passed five of five runs across 15 turns.
+
+Result: accepted for deployment. The wrong-session scenario passed five of five
+targeted runs across 35 turns. The ambiguity case passed five of five in zero
+model rounds. The final gates are 74 conventional tests with clean typecheck,
+29 of 29 isolated cases, and all 72 turns across 18 linked scenarios with no
+invalid trials. On the live staged pod, two naturally occurring long proactive
+updates measured 800-882 ms for Celeris, 53-55 ms to first Pocket audio, and
+continuous 10.08-11.60 second playback without underruns.

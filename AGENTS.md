@@ -178,7 +178,12 @@ access as the cause of a prior bad answer; when no exact cause is established it
 states only that it misinterpreted the available data.
 Notification history records are authoritative for resolving “that one,” “the
 first one,” and “the other one”; a read copies the referenced notification's
-session ID rather than substituting sticky focus. A changed `output_delta`
+session ID rather than substituting sticky focus. The harness enforces this
+outside the model: a read-shaped follow-up after one spoken notification hides
+the opaque ID and injects the notification's recorded target even if Celeris
+emits sticky focus. Ordinals resolve against notification order. An unqualified
+read after multiple notifications returns an immediate zero-round clarification
+that names the candidates; it never guesses or offers a read tool. A changed `output_delta`
 directly answers “what's new” and “since then” without an older-output read.
 For a plain current/latest/progress question with no concurrent update, pending
 decision, or action language, the harness voices a short safe focused-session
@@ -283,7 +288,9 @@ across all watched sessions. Every snapshot and tool result repeats unresolved
 prompts with exact session IDs, prompt IDs, natural-language messages, modes,
 and schemas until successful resolution; the decision event carries the same
 prompt data. Celeris must copy these opaque IDs, never recreate them from a
-spoken name. Successful resolution removes the prompt before the result is
+spoken name. Form-mode prompts pass their JSON schema to Celeris;
+`answer_prompt.answers` must preserve the caller's typed field values.
+Successful resolution removes the prompt before the result is
 returned and the action ledger becomes authoritative for later verification.
 The result includes a typed `target_session`, allowing one or several
 successful prompt resolutions to be acknowledged without another model round.

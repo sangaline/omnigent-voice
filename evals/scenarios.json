@@ -2507,5 +2507,319 @@
         }
       }
     ]
+  },
+  {
+    "id": "form_decision_and_grounded_send",
+    "description": "Preserve an interleaved background completion, submit exact structured form fields, send the supplied finding to sticky focus, and prove both actions on follow-up.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": {
+        "id": "session-primary",
+        "name": "Primary Work",
+        "status": "running"
+      },
+      "known_sessions": [
+        {
+          "id": "session-primary",
+          "name": "Primary Work",
+          "status": "running",
+          "focused": true
+        },
+        {
+          "id": "session-release",
+          "name": "Release Setup",
+          "status": "waiting",
+          "focused": false
+        },
+        {
+          "id": "session-research",
+          "name": "Research Worker",
+          "status": "idle",
+          "focused": false
+        }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": {
+        "changed": false,
+        "output": ""
+      },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 71,
+            "type": "decision_needed",
+            "session_id": "session-release",
+            "name": "Release Setup",
+            "summary": "Release Setup needs deployment settings.",
+            "prompts": [
+              {
+                "prompt_id": "prompt-release-form",
+                "message": "Choose the target environment and replica count.",
+                "mode": "form",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "environment": {
+                      "type": "string",
+                      "enum": ["staging", "production"]
+                    },
+                    "replicas": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": ["environment", "replicas"]
+                }
+              }
+            ]
+          },
+          {
+            "event_id": 72,
+            "type": "session_completed",
+            "session_id": "session-research",
+            "name": "Research Worker",
+            "summary": "Research Worker finished. The reconnect failure came from a stale DNS cache."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": [
+            "release setup",
+            "environment",
+            "replica",
+            "research worker",
+            "reconnect",
+            "dns"
+          ],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay uh set release to staging with three replicas go ahead and tell primary research found the reconnect bug was stale DNS cache",
+        "coordinatorState": {
+          "focused_session": {
+            "id": "session-primary",
+            "name": "Primary Work",
+            "status": "running"
+          },
+          "known_sessions": [
+            {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running",
+              "focused": true
+            },
+            {
+              "id": "session-release",
+              "name": "Release Setup",
+              "status": "waiting",
+              "focused": false
+            },
+            {
+              "id": "session-research",
+              "name": "Research Worker",
+              "status": "idle",
+              "focused": false
+            }
+          ],
+          "pending_decisions": [
+            {
+              "session_id": "session-release",
+              "name": "Release Setup",
+              "prompts": [
+                {
+                  "prompt_id": "prompt-release-form",
+                  "message": "Choose the target environment and replica count.",
+                  "mode": "form",
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "environment": {
+                        "type": "string",
+                        "enum": ["staging", "production"]
+                      },
+                      "replicas": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": ["environment", "replicas"]
+                  }
+                }
+              ]
+            }
+          ],
+          "recent_actions": [],
+          "output_delta": {
+            "changed": false,
+            "output": ""
+          },
+          "updates": [],
+          "update_cursor": 72
+        },
+        "toolResults": {
+          "answer_prompt": {
+            "resolved": true,
+            "session_id": "session-release",
+            "prompt_id": "prompt-release-form",
+            "action": "accept",
+            "target_session": {
+              "id": "session-release",
+              "name": "Release Setup",
+              "status": "waiting"
+            },
+            "focused_session": {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running"
+            },
+            "pending_decisions": [],
+            "recent_actions": [
+              {
+                "action_id": 73,
+                "type": "prompt_answered",
+                "session_id": "session-release",
+                "name": "Release Setup",
+                "summary": "Accepted the deployment settings in Release Setup."
+              }
+            ]
+          },
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running"
+            },
+            "focused_session": {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running"
+            },
+            "pending_decisions": [],
+            "recent_actions": [
+              {
+                "action_id": 73,
+                "type": "prompt_answered",
+                "session_id": "session-release",
+                "name": "Release Setup",
+                "summary": "Accepted the deployment settings in Release Setup."
+              },
+              {
+                "action_id": 74,
+                "type": "message_sent",
+                "session_id": "session-primary",
+                "name": "Primary Work",
+                "delivery": "immediate",
+                "message": "Research Worker found that the reconnect bug was caused by a stale DNS cache.",
+                "summary": "Sent immediately to Primary Work: Research Worker found that the reconnect bug was caused by a stale DNS cache."
+              }
+            ]
+          }
+        },
+        "checkUpdatesAfter": 72,
+        "expected": {
+          "toolSequence": ["answer_prompt", "send_message"],
+          "alternativeToolSequences": [
+            ["send_message", "answer_prompt"]
+          ],
+          "forbiddenTools": ["focus_session", "get_output"],
+          "unorderedCallExpectations": [
+            {
+              "name": "answer_prompt",
+              "sessionId": "session-release",
+              "argumentEquals": {
+                "prompt_id": "prompt-release-form",
+                "action": "accept",
+                "answers": {
+                  "environment": "staging",
+                  "replicas": 3
+                }
+              }
+            },
+            {
+              "name": "send_message",
+              "messageTerms": ["research", "stale dns cache"],
+              "delivery": "not_queued"
+            }
+          ],
+          "speechTerms": ["release setup", "primary work"],
+          "speechAnyTerms": [
+            ["approved", "accepted"],
+            ["sent", "message"]
+          ],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait did both of those really happen and where am i now",
+        "coordinatorState": {
+          "focused_session": {
+            "id": "session-primary",
+            "name": "Primary Work",
+            "status": "running"
+          },
+          "known_sessions": [
+            {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running",
+              "focused": true
+            },
+            {
+              "id": "session-release",
+              "name": "Release Setup",
+              "status": "running",
+              "focused": false
+            }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 73,
+              "type": "prompt_answered",
+              "session_id": "session-release",
+              "name": "Release Setup",
+              "summary": "Accepted the deployment settings in Release Setup."
+            },
+            {
+              "action_id": 74,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "Research Worker found that the reconnect bug was caused by a stale DNS cache.",
+              "summary": "Sent immediately to Primary Work: Research Worker found that the reconnect bug was caused by a stale DNS cache."
+            }
+          ],
+          "output_delta": {
+            "changed": false,
+            "output": ""
+          },
+          "updates": [],
+          "update_cursor": 72
+        },
+        "checkUpdatesAfter": 72,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["answer_prompt", "send_message", "focus_session"],
+          "speechTerms": ["release setup", "primary work"],
+          "speechAnyTerms": [
+            ["approved", "accepted"],
+            ["sent", "message"]
+          ],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

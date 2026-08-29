@@ -121,6 +121,7 @@ If the human states that a requested message was missing, not sent, or not recei
 No coordinator action has happened in this human turn yet. If the human asks for an action, or if answering requires current coordinator data, your next output must be the appropriate tool call, not prose. Only a successful tool result later in this turn proves the action happened. The recent_actions ledger describes prior turns and never satisfies a new request. “Another,” “again,” “retry,” “now,” and corrections that an action was missed require a new tool call. Execute tools before speaking. Never say that you will need to pull or check data, offer to check it, ask permission for a read-only check, or promise to perform a tool action after the response; call the tool now.
 An explicit request to switch, focus, or open another session requires focus_session before any speech. Never narrate a focus change from the request alone; only the tool result proves the active session changed.
 voice_message_routing is computed deterministically from this human transcript and known_sessions. When its mode is named, call send_message normally; the harness supplies that exact target without changing focus. When its mode is ambiguous, do not claim to send anything and ask the human to name one target.
+voice_read_routing also resolves a deictic read against authoritative notification history. When its mode is named, call the read tool normally and the harness supplies that exact session. When its mode is ambiguous, do not read or guess; ask the human which named session they mean.
 When the requested message content depends on a missing fact about what a different session found, said, or is doing, first call get_output for that source session. Only after receiving the source result may you call send_message with the grounded finding; never send a placeholder telling the destination merely to inspect or review the source session. If the human already states the complete finding to relay in the current request, send that supplied content directly without rereading the source.
 The coordinator snapshot immediately above is already current data for this turn. output_delta is the chronological stable output newly available since the prior human snapshot. When output_delta.changed is true and its content answers “latest,” “current,” “what's new,” or “since then,” answer directly from it and do not call get_output. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.
 A short output_delta is already a voice-sized update. When it directly answers the human, preserve every concrete condition, count, outcome, and still-running or blocked clause instead of shortening away one of its facts.
@@ -314,8 +315,9 @@ interface VoiceFocusRouting {
 }
 
 interface VoiceReadRouting {
-  mode: "model" | "named";
+  mode: "model" | "named" | "ambiguous";
   target?: { id: string; name: string } | undefined;
+  candidates?: string[] | undefined;
 }
 
 interface VoiceSessionTarget {
@@ -534,6 +536,7 @@ export const voiceReadRouting = (
   input: string,
   knownSessions: unknown,
   messageTarget?: VoiceSessionTarget | undefined,
+  notificationTargets: readonly VoiceSessionTarget[] = [],
 ): VoiceReadRouting => {
   if (
     !/\b(?:what|latest|status|progress|output|said|found|doing|read|show|check|inspect)\b/i.test(
@@ -559,7 +562,29 @@ export const voiceReadRouting = (
     const sources = [...matches.values()].filter(({ id }) => id !== messageTarget.id);
     if (sources.length === 1) return { mode: "named", target: sources[0] };
   }
-  return { mode: "model" };
+  const deictic =
+    /\b(?:that|the)\s+(?:one|session|agent)\b/i.test(input) ||
+    /\b(?:first|second|third|last|other)\s+(?:one|session|agent)\b/i.test(input) ||
+    /\b(?:it|its)\b/i.test(input);
+  if (!deictic || notificationTargets.length === 0) return { mode: "model" };
+  const ordinal =
+    /\b(first|second|third|last|other)\s+(?:one|session|agent)\b/i.exec(input)?.[1]
+      ?.toLocaleLowerCase();
+  let target: VoiceSessionTarget | undefined;
+  if (ordinal === "first") target = notificationTargets[0];
+  else if (ordinal === "second") target = notificationTargets[1];
+  else if (ordinal === "third") target = notificationTargets[2];
+  else if (ordinal === "last") target = notificationTargets.at(-1);
+  else if (ordinal === "other" && notificationTargets.length === 2) {
+    target = notificationTargets[0];
+  } else if (!ordinal && notificationTargets.length === 1) {
+    target = notificationTargets[0];
+  }
+  if (target) return { mode: "named", target };
+  return {
+    mode: "ambiguous",
+    candidates: notificationTargets.map(({ name }) => name),
+  };
 };
 
 export const voiceStartInstruction = (input: string): string | undefined => {
@@ -1180,7 +1205,23 @@ export class CelerisConversation {
       input,
       updates.known_sessions,
       messageRouting.target,
+      notificationTargets,
     );
+    if (readRouting.mode === "ambiguous") {
+      const candidates = readRouting.candidates ?? [];
+      const names = candidates.length > 1
+        ? `${candidates.slice(0, -1).join(", ")} or ${candidates.at(-1)}`
+        : candidates[0];
+      const speech = sanitizeForSpeech(
+        names
+          ? `Which session do you mean, ${names}?`
+          : "Which session do you mean?",
+        300,
+      );
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech);
+      return speech;
+    }
     const startInstruction = voiceStartInstruction(input);
     const previousAssistantSpeech = [...this.history]
       .reverse()
@@ -1220,7 +1261,9 @@ export class CelerisConversation {
             (name !== "focus_session" ||
               (allowsFocusChange(input) && !targetsFocusedSession(input, focusedName))) &&
             (name !== "archive_session" || allowsArchive(input)) &&
-            (name !== "rename_session" || allowsRename(input))
+            (name !== "rename_session" || allowsRename(input)) &&
+            (readRouting.mode !== "ambiguous" ||
+              (name !== "get_output" && name !== "poll_output"))
           );
         },
       )
