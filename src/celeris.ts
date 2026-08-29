@@ -373,11 +373,11 @@ export const immediateNotificationTargets = (
 };
 
 const hasDeicticMessageTarget = (input: string): boolean =>
-  /\b(?:tell|ask|message|steer|have)\s+(?:the\s+)?(?:first|second|third|last|other)\s+(?:one|session|agent)\b/i.test(
+  /\b(?:tell|ask|message|steer|have|queue)\s+(?:the\s+)?(?:first|second|third|last|other)\s+(?:one|session|agent)\b/i.test(
     input,
   ) ||
-  /\b(?:tell|ask|message|steer|have)\s+(?:that|the)\s+(?:one|session|agent)\b/i.test(input) ||
-  /\b(?:tell|ask|message|steer|have)\s+it\b/i.test(input) ||
+  /\b(?:tell|ask|message|steer|have|queue)\s+(?:that|the)\s+(?:one|session|agent)\b/i.test(input) ||
+  /\b(?:tell|ask|message|steer|have|queue)\s+it\b/i.test(input) ||
   /\bsend\b.+\bto\s+(?:it|that|that\s+one|the\s+one)\b/i.test(input) ||
   /\blet\s+(?:it|that\s+one|the\s+one)\s+know\b/i.test(input);
 
@@ -387,7 +387,7 @@ const notificationMessageRouting = (
 ): VoiceMessageRouting | undefined => {
   if (!hasDeicticMessageTarget(input) || targets.length === 0) return undefined;
   const ordinal =
-    /\b(?:tell|ask|message|steer|have)\s+(?:the\s+)?(first|second|third|last|other)\s+(?:one|session|agent)\b/i.exec(
+    /\b(?:tell|ask|message|steer|have|queue)\s+(?:the\s+)?(first|second|third|last|other)\s+(?:one|session|agent)\b/i.exec(
       input,
     )?.[1]?.toLocaleLowerCase();
   let target: VoiceSessionTarget | undefined;
@@ -443,7 +443,7 @@ export const voiceMessageRouting = (
   notificationTargets: readonly VoiceSessionTarget[] = [],
 ): VoiceMessageRouting => {
   if (
-    !/\b(?:tell|message|send|ask|steer|have)\b/i.test(input) &&
+    !/\b(?:tell|message|send|ask|steer|have|queue)\b/i.test(input) &&
     !/\blet\b.+\bknow\b/i.test(input)
   ) {
     return { mode: "focused" };
@@ -469,7 +469,7 @@ export const voiceMessageRouting = (
   const directlyAddressed = [...matches.values()].filter(({ name }) => {
     const phrase = words(name).join(" ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return (
-      new RegExp(`\\b(?:tell|ask|message|steer|have|send)(?: the)? ${phrase}\\b`).test(
+      new RegExp(`\\b(?:tell|ask|message|steer|have|send|queue)(?: the)? ${phrase}\\b`).test(
         normalized,
       ) ||
       new RegExp(`\\bsend\\b.*\\bto(?: the)? ${phrase}\\b`).test(normalized) ||
@@ -778,13 +778,16 @@ export const verifiedActionFollowupSpeech = (
   input: string,
   lastVerifiedActionOutcome: string | undefined,
   focusedSession: unknown,
+  verifiedActionCount = lastVerifiedActionOutcome
+    ? (lastVerifiedActionOutcome.match(/[.!?](?:\s|$)/g)?.length ?? 1)
+    : 0,
 ): string | undefined => {
   if (!lastVerifiedActionOutcome) return undefined;
   const asksDidOutcome =
     /\bdid\s+(?:(?:both|all)\s+(?:of\s+)?)?(?:that|those|them|it|they)?\s*(?:actually\s+)?(?:happen|work|go\s+through|succeed)\b/i.test(
       input,
     ) ||
-    /\bdid\s+(?:that|those|the)\s+(?:approval|decline|cancellation|action|change|send|message)\s+(?:actually\s+)?(?:happen|work|go\s+through|succeed)\b/i.test(
+    /\bdid\s+(?:that|those|the)\s+(?:[a-z0-9'-]+\s+){0,3}(?:approval|decline|cancellation|action|change|send|message)\s+(?:actually\s+)?(?:happen|work|go\s+through|succeed)\b/i.test(
       input,
     );
   const asksOutcome =
@@ -792,6 +795,9 @@ export const verifiedActionFollowupSpeech = (
     /\bwhat\s+(?:actually\s+)?happened\b/i.test(input) ||
     asksDidOutcome;
   if (!asksOutcome) return undefined;
+  if (/\b(?:both|all|those)\b/i.test(input) && verifiedActionCount < 2) {
+    return undefined;
+  }
   if (
     /\b(?:visible|visibility|output|showing|see|check|verify|read)\b/i.test(input) ||
     /\b(?:queue|archive|rename|start|create|switch|focus|open|approve|decline|cancel|interrupt)\b/i.test(
@@ -881,6 +887,32 @@ export const verifiedDeliveryVisibilitySpeech = (
   return `It was ${delivery}, but the message isn't visible on the returned output page yet.`;
 };
 
+const directGetOutputResultSpeech = (
+  input: string,
+  result: JsonObject,
+): string | undefined => {
+  if (Array.isArray(result.updates) && result.updates.length > 0) return undefined;
+  const visibility = verifiedDeliveryVisibilitySpeech(input, result);
+  if (visibility) return visibility;
+  const target = resultSessionName(result.target_session);
+  const latest = objectValue(result.latest_message);
+  const text = typeof latest?.text === "string"
+    ? latest.text.trim().replace(/^assistant:\s*/i, "")
+    : "";
+  if (
+    !target ||
+    latest?.role !== "assistant" ||
+    !text ||
+    text.length > 240 ||
+    text.includes("```") ||
+    /https?:\/\//i.test(text) ||
+    text.split("\n").length > 3
+  ) {
+    return undefined;
+  }
+  return `${target} update: ${text}`;
+};
+
 export const directSessionOutputSpeech = (
   updates: readonly CoordinatorUpdate[],
 ): string | undefined => {
@@ -939,6 +971,40 @@ export const directFocusedOutputSpeech = (
   return `${focused} update: ${output}`;
 };
 
+const directDecisionUpdatesSpeech = (
+  updates: readonly CoordinatorUpdate[],
+): string | undefined => {
+  if (
+    updates.length === 0 ||
+    updates.length > 3 ||
+    !updates.every((update) => update.type === "decision_needed")
+  ) {
+    return undefined;
+  }
+  const decisions: string[] = [];
+  for (const update of updates) {
+    const prompts = Array.isArray(update.prompts) ? update.prompts : [];
+    if (prompts.length === 0 || prompts.length > 2) return undefined;
+    for (const value of prompts) {
+      const prompt = objectValue(value);
+      const message = typeof prompt?.message === "string" ? prompt.message.trim() : "";
+      if (
+        !message ||
+        message.length > 180 ||
+        message.includes("```") ||
+        /https?:\/\//i.test(message) ||
+        message.includes("\n")
+      ) {
+        return undefined;
+      }
+      const need = prompt?.mode === "confirmation" ? "approval" : "input";
+      decisions.push(`${update.name} needs your ${need}: ${message}`);
+    }
+  }
+  const speech = decisions.join(" ");
+  return speech.length <= 300 ? speech : undefined;
+};
+
 export const directCoordinatorUpdateSpeech = (
   updates: readonly CoordinatorUpdate[],
 ): string | undefined => {
@@ -946,9 +1012,10 @@ export const directCoordinatorUpdateSpeech = (
   if (outputSpeech) return outputSpeech;
   const delivered = updates.filter((update) => update.type === "message_delivered");
   const completed = updates.filter((update) => update.type === "session_completed");
+  const decisions = updates.filter((update) => update.type === "decision_needed");
   if (
     delivered.length === 1 &&
-    updates.length === delivered.length + completed.length &&
+    updates.length === delivered.length + completed.length + decisions.length &&
     completed.length <= 1 &&
     completed.every((update) => update.session_id === delivered[0]!.session_id)
   ) {
@@ -976,37 +1043,14 @@ export const directCoordinatorUpdateSpeech = (
       phrases.push(completion);
     }
     phrases.push(`I sent the queued message to ${delivery.name}.`);
+    const decisionSpeech = directDecisionUpdatesSpeech(decisions);
+    if (decisions.length > 0 && !decisionSpeech) return undefined;
+    if (decisionSpeech) phrases.push(decisionSpeech);
     const speech = phrases.join(" ");
     return speech.length <= 300 ? speech : undefined;
   }
-  if (
-    updates.length > 0 &&
-    updates.length <= 3 &&
-    updates.every((update) => update.type === "decision_needed")
-  ) {
-    const decisions: string[] = [];
-    for (const update of updates) {
-      const prompts = Array.isArray(update.prompts) ? update.prompts : [];
-      if (prompts.length === 0 || prompts.length > 2) return undefined;
-      for (const value of prompts) {
-        const prompt = objectValue(value);
-        const message = typeof prompt?.message === "string" ? prompt.message.trim() : "";
-        if (
-          !message ||
-          message.length > 180 ||
-          message.includes("```") ||
-          /https?:\/\//i.test(message) ||
-          message.includes("\n")
-        ) {
-          return undefined;
-        }
-        const need = prompt?.mode === "confirmation" ? "approval" : "input";
-        decisions.push(`${update.name} needs your ${need}: ${message}`);
-      }
-    }
-    const speech = decisions.join(" ");
-    return speech.length <= 480 ? speech : undefined;
-  }
+  const decisionSpeech = directDecisionUpdatesSpeech(updates);
+  if (decisionSpeech) return decisionSpeech;
   if (updates.length !== 1 || updates[0]?.type !== "session_completed") {
     return undefined;
   }
@@ -1032,6 +1076,7 @@ export class CelerisConversation {
   private toolDefinitions?: OpenAiTool[];
   private updateCursor = 0;
   private lastVerifiedActionOutcome?: string;
+  private lastVerifiedActionCount = 0;
   private compactionTimer: ReturnType<typeof setTimeout> | undefined;
   private compactionController: AbortController | undefined;
   private compactionPromise: Promise<void> | undefined;
@@ -1077,6 +1122,7 @@ export class CelerisConversation {
       input,
       this.lastVerifiedActionOutcome,
       updates.focused_session,
+      this.lastVerifiedActionCount,
     );
     if (verifiedFollowup) {
       const speech = sanitizeForSpeech(verifiedFollowup, 300);
@@ -1200,6 +1246,16 @@ export class CelerisConversation {
         ? "list_sessions"
         : undefined;
       const executedAcrossRounds: Array<{ name: string; result: JsonObject }> = [];
+      const verifiedActionReceipts = (): string[] =>
+        executedAcrossRounds
+          .filter(({ result }) => typeof result.error !== "string")
+          .map(({ name, result }) => successfulActionSpeech(name, result))
+          .filter((receipt): receipt is string => Boolean(receipt));
+      const verifiedActionReceipt = (): string | undefined => {
+        const receipts = verifiedActionReceipts();
+        if (receipts.length === 0) return undefined;
+        return sanitizeForSpeech([...new Set(receipts)].join(" "), 300);
+      };
       for (let round = 0; round < 5; round += 1) {
         const forcedThisRound =
           forcedToolName ??
@@ -1229,6 +1285,11 @@ export class CelerisConversation {
           }
           if (!content) throw new Error("Celeris returned neither speech nor a tool call twice");
           const speech = sanitizeForSpeech(content, 300);
+          const verifiedOutcome = verifiedActionReceipt();
+          if (verifiedOutcome) {
+            this.lastVerifiedActionOutcome = verifiedOutcome;
+            this.lastVerifiedActionCount = verifiedActionReceipts().length;
+          }
           this.updateCursor = turnUpdateCursor;
           this.remember(input, speech);
           return speech;
@@ -1358,9 +1419,39 @@ export class CelerisConversation {
             300,
           );
           this.lastVerifiedActionOutcome = speech;
+          this.lastVerifiedActionCount = successfulReceipts.length + failedTools.length;
           this.updateCursor = turnUpdateCursor;
           this.remember(input, speech);
           return speech;
+        }
+        const actionReceipts = executedAcrossRounds
+          .map(({ name, result }) => successfulActionSpeech(name, result))
+          .filter((receipt): receipt is string => Boolean(receipt));
+        const readReceipts = executedAcrossRounds
+          .filter(({ name }) => name === "get_output")
+          .map(({ result }) => directGetOutputResultSpeech(input, result))
+          .filter((receipt): receipt is string => Boolean(receipt));
+        const compositeReceipts = executedAcrossRounds.map(({ name, result }) =>
+          successfulActionSpeech(name, result) ??
+          (name === "get_output" ? directGetOutputResultSpeech(input, result) : undefined),
+        );
+        if (
+          actionReceipts.length > 0 &&
+          readReceipts.length > 0 &&
+          compositeReceipts.every((receipt): receipt is string => Boolean(receipt))
+        ) {
+          const rawSpeech = [...new Set(compositeReceipts)].join(" ");
+          if (rawSpeech.length <= 300) {
+            const speech = sanitizeForSpeech(rawSpeech, 300);
+            this.lastVerifiedActionOutcome = sanitizeForSpeech(
+              [...new Set(actionReceipts)].join(" "),
+              300,
+            );
+            this.lastVerifiedActionCount = actionReceipts.length;
+            this.updateCursor = turnUpdateCursor;
+            this.remember(input, speech);
+            return speech;
+          }
         }
         if (
           executedThisRound.length === 1 &&
@@ -1389,6 +1480,7 @@ export class CelerisConversation {
             300,
           );
           this.lastVerifiedActionOutcome = speech;
+          this.lastVerifiedActionCount = successfulReceipts.length;
           this.updateCursor = turnUpdateCursor;
           this.remember(input, speech);
           return speech;

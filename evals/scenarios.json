@@ -2247,5 +2247,265 @@
         }
       }
     ]
+  },
+  {
+    "id": "mixed_delivery_decision_and_compound_followup",
+    "description": "Preserve a queued-message dispatch and an unrelated decision in one notification, then approve the decision and read the dispatched work without changing sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-side", "name": "Side Worker", "status": "running", "focused": false },
+        { "id": "session-release", "name": "Release Deploy", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "uh when side worker wraps this one queue it to rerun the websocket thing with dropped packet logs and keep me here",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side", "name": "Side Worker", "status": "running", "focused": false },
+            { "id": "session-release", "name": "Release Deploy", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "queued",
+            "target_session": { "id": "session-side", "name": "Side Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              {
+                "action_id": 501,
+                "type": "message_queued",
+                "session_id": "session-side",
+                "name": "Side Worker",
+                "delivery": "queued",
+                "message": "Rerun the websocket test with dropped packet logs.",
+                "summary": "Queued for Side Worker after its current turn: rerun the websocket test with dropped packet logs."
+              }
+            ],
+            "updates": [],
+            "update_cursor": 0
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-side",
+          "messageTerms": ["rerun", "websocket", "dropped packet logs"],
+          "delivery": "queued",
+          "speechTerms": ["queued", "side worker"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 502,
+            "type": "session_completed",
+            "session_id": "session-side",
+            "name": "Side Worker",
+            "summary": "Side Worker finished its prior turn. The baseline websocket replay passed."
+          },
+          {
+            "event_id": 503,
+            "type": "message_delivered",
+            "session_id": "session-side",
+            "name": "Side Worker",
+            "delivery": "queued_after_turn",
+            "summary": "The queued message was sent to Side Worker after its prior turn."
+          },
+          {
+            "event_id": 504,
+            "type": "decision_needed",
+            "session_id": "session-release",
+            "name": "Release Deploy",
+            "summary": "Release Deploy needs approval for the staging migration.",
+            "prompts": [
+              {
+                "prompt_id": "prompt-staging-migration",
+                "message": "Apply the database migration to staging?",
+                "mode": "confirmation",
+                "schema": null
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side worker", "websocket", "queued", "sent", "release deploy", "migration", "approval"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "yeah approve the release migration one and uh what's side worker doing with that rerun now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side", "name": "Side Worker", "status": "running", "focused": false },
+            { "id": "session-release", "name": "Release Deploy", "status": "waiting", "focused": false }
+          ],
+          "pending_decisions": [
+            {
+              "session_id": "session-release",
+              "name": "Release Deploy",
+              "prompts": [
+                {
+                  "prompt_id": "prompt-staging-migration",
+                  "message": "Apply the database migration to staging?",
+                  "mode": "confirmation",
+                  "schema": null
+                }
+              ]
+            }
+          ],
+          "recent_actions": [
+            {
+              "action_id": 505,
+              "type": "message_sent",
+              "session_id": "session-side",
+              "name": "Side Worker",
+              "delivery": "queued_after_turn",
+              "message": "Rerun the websocket test with dropped packet logs.",
+              "summary": "Sent queued message to Side Worker: rerun the websocket test with dropped packet logs."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 504
+        },
+        "toolResults": {
+          "answer_prompt": {
+            "resolved": true,
+            "session_id": "session-release",
+            "prompt_id": "prompt-staging-migration",
+            "action": "accept",
+            "target_session": { "id": "session-release", "name": "Release Deploy", "status": "waiting" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "pending_decisions": [],
+            "recent_actions": [
+              {
+                "action_id": 505,
+                "type": "message_sent",
+                "session_id": "session-side",
+                "name": "Side Worker",
+                "delivery": "queued_after_turn",
+                "message": "Rerun the websocket test with dropped packet logs.",
+                "summary": "Sent queued message to Side Worker: rerun the websocket test with dropped packet logs."
+              },
+              {
+                "action_id": 506,
+                "type": "prompt_answered",
+                "session_id": "session-release",
+                "name": "Release Deploy",
+                "summary": "Approved the staging migration prompt in Release Deploy."
+              }
+            ]
+          },
+          "get_output": {
+            "session_id": "session-side",
+            "target_session": { "id": "session-side", "name": "Side Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "focus_changed": false,
+            "page": 1,
+            "order": "oldest_to_newest",
+            "latest_message": {
+              "position": 2,
+              "kind": "message",
+              "role": "assistant",
+              "text": "The websocket rerun is reproducing the dropped packet sequence and has reached stream three."
+            },
+            "items": [
+              { "position": 1, "kind": "message", "role": "user", "text": "Rerun the websocket test with dropped packet logs." },
+              { "position": 2, "kind": "message", "role": "assistant", "text": "The websocket rerun is reproducing the dropped packet sequence and has reached stream three." }
+            ],
+            "has_more": false,
+            "recent_delivery_visibility": {
+              "action_id": 505,
+              "delivery": "queued_after_turn",
+              "status": "visible_on_page",
+              "matching_position": 1,
+              "page": 1
+            }
+          }
+        },
+        "expected": {
+          "toolSequence": ["answer_prompt", "get_output"],
+          "alternativeToolSequences": [["get_output", "answer_prompt"]],
+          "forbiddenTools": ["focus_session", "send_message"],
+          "unorderedCallExpectations": [
+            {
+              "name": "answer_prompt",
+              "sessionId": "session-release",
+              "argumentEquals": { "prompt_id": "prompt-staging-migration", "action": "accept" }
+            },
+            { "name": "get_output", "sessionId": "session-side" }
+          ],
+          "speechTerms": ["release deploy", "side worker", "stream three"],
+          "speechAnyTerms": [["approved", "accepted"], ["websocket", "rerun", "dropped packet"]],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay did that migration approval actually go through and where am i still in primary right",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side", "name": "Side Worker", "status": "running", "focused": false },
+            { "id": "session-release", "name": "Release Deploy", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 505,
+              "type": "message_sent",
+              "session_id": "session-side",
+              "name": "Side Worker",
+              "delivery": "queued_after_turn",
+              "message": "Rerun the websocket test with dropped packet logs.",
+              "summary": "Sent queued message to Side Worker: rerun the websocket test with dropped packet logs."
+            },
+            {
+              "action_id": 506,
+              "type": "prompt_answered",
+              "session_id": "session-release",
+              "name": "Release Deploy",
+              "summary": "Approved the staging migration prompt in Release Deploy."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 504
+        },
+        "checkUpdatesAfter": 504,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["answer_prompt", "focus_session", "send_message", "get_output"],
+          "speechTerms": ["release deploy", "primary work"],
+          "speechAnyTerms": [["approved", "accepted"]],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

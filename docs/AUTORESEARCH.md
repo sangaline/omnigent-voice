@@ -737,3 +737,43 @@ are now zero-round, while the named read remained two rounds at 220-419 ms and
 was correctly targeted in every run. The promotion gate is 63 conventional
 tests with clean typecheck, 27 of 27 isolated cases, and all 65 turns across 16
 linked scenarios with no invalid trials.
+
+### 2026-08-29 — Mixed lifecycle events and current-action memory
+
+Hypothesis H27: individually safe delivery, decision, read, and action-receipt
+paths would compose when several sessions changed at once. A new four-turn
+held-out scenario used ASR-style language to queue work for a background
+session, delivered that queue beside an unrelated approval prompt, approved the
+prompt while reading the resumed work, and immediately audited the approval and
+sticky focus. The unchanged production harness completed zero of five runs
+across 20 turns. `queue` was absent from named message-action grammar, so all
+five tool calls omitted the background session ID and would have defaulted to
+focus against the real coordinator. Model-adapted mixed notifications
+occasionally omitted the typed send fact. Most importantly, the compound
+approval-plus-read did not replace `last_verified_action_outcome`; all five
+zero-round audits confidently repeated the older queue acknowledgement as if it
+were the action just audited.
+
+The harness now treats `queue` as named message language, including deictic
+notification forms, and still injects the server-owned target outside the model.
+A safe same-session completion and queued dispatch may be combined with a
+bounded unrelated decision in one deterministic notification. A successful
+typed action plus one safe short assistant `latest_message` is also composed
+directly, while the action-only receipt becomes authoritative memory for the
+next audit. If output is long, unsafe, non-assistant, or accompanied by unread
+updates, the existing model path remains in control. Descriptor-bearing audit
+phrases such as “did that migration approval go through” now resolve against
+the current typed receipt.
+
+Result: accepted as a candidate. The held-out scenario moved from zero of five
+to five of five runs. Mixed notifications and immediate audits moved from one
+model round or a wrong zero-round answer to correct zero-round speech. The
+approval-plus-read turn fell from two rounds at 327-356 ms to one round at
+131-205 ms in the final repeated run. The named queue target was injected in
+every run. The conventional suite is 65 tests and the isolated corpus remains
+27 of 27. Two preliminary full sweeps each had one isolated Celeris message
+paraphrase omit the literal word “rerun,” while preserving the other requested
+test and log terms. Those flows then passed five of five and ten of ten targeted
+runs respectively. The final promotion sweep passed all 69 turns across 17
+linked scenarios with no invalid trials. Keep treating exact outbound content
+as a held-out fidelity dimension despite the clean final gate.

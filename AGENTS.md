@@ -121,7 +121,11 @@ When a coordinator-managed queued message leaves the queue, the coordinator
 emits `message_delivered` only after the backend accepts the send. A lone event,
 or a bounded pair with the same session's prior-turn completion, is rendered
 directly in zero model rounds so speech preserves both the prior outcome and the
-fact that the queued message was actually sent. The action ledger records the
+fact that the queued message was actually sent. The same direct path may append
+a bounded unrelated `decision_needed` prompt, preserving the dispatch and the
+new approval request without trusting a lossy model paraphrase. The complete
+speech must fit 300 characters; unsafe or longer batches fall back to Celeris.
+The action ledger records the
 same dispatch as `message_sent` with `delivery: queued_after_turn`; an immediate
 delivery audit and current-focus question is answered from that typed evidence.
 `waiting_for_input` is a
@@ -137,9 +141,15 @@ harness renders deterministic natural receipts from typed fields and skips the
 second Celeris request. This includes a compound model response when every tool
 call has a verified renderable action result. If one call fails, verified
 receipts for the other completed actions are spoken before the deterministic
-failure. Do not weaken the success predicates or drop the updates-empty guard:
-reads, uncertain results, and composites containing a non-renderable result
-still need model synthesis.
+failure. A compound turn that combines those action results with one safe,
+short assistant `latest_message` from `get_output` is also rendered directly:
+the typed action receipt is followed by a named session update, reducing the
+turn from two model rounds to one. The current turn's typed action receipt
+becomes `last_verified_action_outcome` even when another read still needs model
+synthesis, so a follow-up audit cannot repeat a stale older action. Do not
+weaken the success predicates or drop the updates-empty guard: unsafe reads,
+uncertain results, and composites containing a non-renderable result still need
+model synthesis.
 Immediately before every human message, the harness inserts a current-turn
 action invariant: no coordinator action has happened yet, requested actions and
 required reads must use a tool before speech, prior ledger entries do not satisfy
@@ -181,7 +191,10 @@ The voice harness removes `send_message.session_id` from the model-visible
 schema. Messages default to the focused session; when one known destination is
 explicitly named, deterministic grammar resolves its server-owned ID and the
 harness injects that target without changing focus. Multiple direct
-destinations fail closed. When a message depends on another session's output,
+destinations fail closed. `queue` is message-action language too: ASR phrasing
+such as “when Side Worker wraps this one, queue it to …” receives the same named
+ID injection instead of silently defaulting to sticky focus. When a message
+depends on another session's output,
 Celeris must read that source before sending unless the human already supplied
 the finding in the current request. A read-only question that names exactly one
 known session receives the same protection: the model-visible `get_output` or

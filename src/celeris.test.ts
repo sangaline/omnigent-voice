@@ -249,6 +249,14 @@ describe("Celeris coordinator conversation", () => {
     );
     expect(
       verifiedActionFollowupSpeech(
+        "wait did both of those actually happen",
+        "I approved the prompt for Release Deploy.",
+        { id: "session-primary", name: "Primary Work" },
+        1,
+      ),
+    ).toBeUndefined();
+    expect(
+      verifiedActionFollowupSpeech(
         "and did that approval actually go through",
         "I approved the prompt for Side Beta.",
         { id: "session-primary", name: "Primary Work" },
@@ -326,6 +334,18 @@ describe("Celeris coordinator conversation", () => {
         { id: "session-primary", name: "Primary Work" },
         { id: "session-beta", name: "Side Beta" },
       ]),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-beta", name: "Side Beta" },
+    });
+    expect(
+      voiceMessageRouting(
+        "when side beta wraps this one queue it to rerun the packet test",
+        [
+          { id: "session-primary", name: "Primary Work" },
+          { id: "session-beta", name: "Side Beta" },
+        ],
+      ),
     ).toEqual({
       mode: "named",
       target: { id: "session-beta", name: "Side Beta" },
@@ -994,6 +1014,88 @@ describe("Celeris coordinator conversation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("combines a verified action with safe named output and audits the current action", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-approve",
+            type: "function",
+            function: {
+              name: "answer_prompt",
+              arguments: JSON.stringify({
+                session_id: "session-release",
+                prompt_id: "prompt-staging-migration",
+                action: "accept",
+              }),
+            },
+          },
+          {
+            id: "call-read",
+            type: "function",
+            function: {
+              name: "get_output",
+              arguments: JSON.stringify({ page: 1, session_id: "session-side" }),
+            },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    let resolved = false;
+    vi.mocked(tools.callTool).mockImplementation((name: string) => {
+      if (name === "check_updates") {
+        return Promise.resolve({
+          focused_session: { id: "session-primary", name: "Primary Work" },
+          known_sessions: [
+            { id: "session-primary", name: "Primary Work" },
+            { id: "session-side", name: "Side Worker" },
+            { id: "session-release", name: "Release Deploy" },
+          ],
+          pending_decisions: resolved
+            ? []
+            : [{ session_id: "session-release", name: "Release Deploy" }],
+          updates: [],
+        });
+      }
+      if (name === "answer_prompt") {
+        resolved = true;
+        return Promise.resolve({
+          resolved: true,
+          action: "accept",
+          target_session: { id: "session-release", name: "Release Deploy" },
+          updates: [],
+        });
+      }
+      return Promise.resolve({
+        target_session: { id: "session-side", name: "Side Worker" },
+        latest_message: {
+          role: "assistant",
+          text: "The websocket rerun reached stream three.",
+        },
+        updates: [],
+      });
+    });
+    const subject = conversation("test-key", tools);
+    const actionReceipt = "I approved the prompt for Release Deploy.";
+
+    await expect(
+      subject.respond(
+        "yeah approve the release migration one and what's side worker doing now",
+      ),
+    ).resolves.toBe(
+      `${actionReceipt} Side Worker update: The websocket rerun reached stream three.`,
+    );
+    await expect(
+      subject.respond(
+        "did that migration approval actually go through and where am i",
+      ),
+    ).resolves.toBe(`${actionReceipt} That outcome is recorded. You're in Primary Work.`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("renders multiple verified prompt resolutions and answers the immediate audit without retrying", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       response({
@@ -1404,6 +1506,44 @@ describe("Celeris coordinator conversation", () => {
     const expected =
       "Side Worker finished its prior turn. The reconnect checks passed. " +
       "I sent the queued message to Side Worker.";
+
+    expect(directCoordinatorUpdateSpeech(updates)).toBe(expected);
+    await expect(
+      conversation("test-key").announceUpdate(updates, new AbortController().signal),
+    ).resolves.toBe(expected);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("voices a queued dispatch and an unrelated decision without model paraphrasing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const updates = [
+      {
+        event_id: 8,
+        type: "session_completed" as const,
+        session_id: "session-side",
+        name: "Side Worker",
+        summary: "Side Worker finished its prior turn. The websocket replay passed.",
+      },
+      {
+        event_id: 9,
+        type: "message_delivered" as const,
+        session_id: "session-side",
+        name: "Side Worker",
+        delivery: "queued_after_turn",
+      },
+      {
+        event_id: 10,
+        type: "decision_needed" as const,
+        session_id: "session-release",
+        name: "Release Deploy",
+        prompts: [{ message: "Apply the database migration to staging?", mode: "confirmation" }],
+      },
+    ];
+    const expected =
+      "Side Worker finished its prior turn. The websocket replay passed. " +
+      "I sent the queued message to Side Worker. " +
+      "Release Deploy needs your approval: Apply the database migration to staging?";
 
     expect(directCoordinatorUpdateSpeech(updates)).toBe(expected);
     await expect(
