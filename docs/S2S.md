@@ -75,9 +75,9 @@ emits tab-delimited events: `R` readiness metadata, `G` accepted token count,
 
 The bridge reports p95, p99, and maximum over rolling 125-frame windows. A mean
 under 80 ms is insufficient by itself: recurrent p95 deadline misses will
-create gaps or an ever-growing input/output backlog. Do not make KAME the
-deployment default until a real Discord run shows stable tails and the oracle
-speech follows Celeris closely enough for tool-action claims.
+create gaps or an ever-growing input/output backlog. KAME should be enabled only
+after a real Discord run shows stable tails and the oracle speech follows
+Celeris closely enough for tool-action claims.
 
 On the target Radeon 8060S, a 20-frame warmup followed by 250 full
 Mimi-encode/KAME/Mimi-decode frames measured 63.445 ms mean, 64.335 ms p95,
@@ -94,3 +94,10 @@ Discord connects. With the longer idle lead-in, both the known public-speech
 fixture and a hidden local-TTS trigger produced 34-37 active output frames, and
 independent local ASR recovered the guided sentence exactly. The hidden trigger
 keeps KAME as the only voice audible to the caller.
+
+The first live Discord rollout preserved those results. Two proactive Celeris
+updates triggered verified KAME speech, completed cleanly, and produced no
+post-warmup frame above 71.92 ms; rolling p95 stayed at or below 65.38 ms. A
+live phone conversation remains the final subjective check for voice quality,
+barge-in feel, and background-noise behavior, but it is no longer a runtime or
+guidance-correctness gate.

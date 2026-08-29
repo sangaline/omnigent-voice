@@ -363,6 +363,13 @@ produce eight silent frames before the event cursor advances. Normal guided
 replies are tracked with the same detector for durable playback logs. Merely
 accepting oracle tokens is not evidence that Discord received speech.
 
+The first live Discord deployment verified two proactive turns end to end.
+Hidden-trigger synthesis took 90-97 ms, KAME speech began 1.17-1.82 seconds
+after guidance, and detected output lasted 6.32-10.72 seconds. Rolling
+steady-state means were 63.96-64.42 ms with p95 no higher than 65.38 ms and no
+post-warmup frame above 71.92 ms. A real phone conversation is still required
+for subjective voice, barge-in, and noise evaluation.
+
 ## Commands
 
 ```bash

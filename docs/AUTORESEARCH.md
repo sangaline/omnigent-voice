@@ -475,3 +475,20 @@ logging without blocking the conversation loop. Unguided native text fragments
 are retained only as counts outside a bounded post-guidance window. The code
 gate is 52 conventional tests plus a clean typecheck and build; live Discord
 and proactive-event verification remain required after image rollout.
+
+The live rollout completed that verification. Startup model load was 1.57
+seconds and 64-frame priming was 4.56 seconds. The first retained proactive
+event generated its hidden 1.34-second trigger in 97 ms, began KAME speech 1.17
+seconds after guidance, and completed after 10.72 seconds of audible output.
+The isolated completion probe used a 1.40-second trigger, began speech after
+1.82 seconds, and completed after 6.32 seconds. Its generated transcript kept
+the full completion meaning. In steady state, rolling 125-frame means were
+63.96-64.42 ms with p95 at or below 65.38 ms and no post-warmup deadline miss
+above 71.92 ms. Both proactive events advanced only after speech completion.
+
+The immutable public-image payload contains no credentials or deployment
+metadata and is imported into the single-node k3s cache. Registry publication
+remains external to this candidate: the existing Docker Hub credential can
+push blobs but lacks repository-creation scope, and the requested public
+repository does not yet exist. GitOps uses the exact node-local tag until that
+one account-level setup action is completed.
