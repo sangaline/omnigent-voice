@@ -9,9 +9,11 @@ import {
   CoordinatorToolClient,
   directCoordinatorUpdateSpeech,
   directFocusedOutputSpeech,
+  directGetOutputResultSpeech,
   directSessionOutputSpeech,
   immediateNotificationTargets,
   isDeclarativeMissedSend,
+  missingMultiSourceNames,
   requestsPositiveFocusAction,
   serializeToolResult,
   successfulActionSpeech,
@@ -19,7 +21,9 @@ import {
   verifiedActionFollowupSpeech,
   verifiedDeliveryVisibilitySpeech,
   verifiedQueuedDeliverySpeech,
+  verifiedToolWorkflowOutcome,
   voiceFocusRouting,
+  voiceMessageInstruction,
   voiceMessageRouting,
   voiceReadRouting,
   voiceStartInstruction,
@@ -172,6 +176,23 @@ describe("Celeris coordinator conversation", () => {
         updates: [{ event_id: 9, type: "decision_needed" }],
       }),
     ).toBeUndefined();
+    expect(
+      directGetOutputResultSpeech("do you see a message from me more recently", {
+        target_session: { id: "session-primary", name: "Primary Work" },
+        latest_message: {
+          role: "user",
+          text: "There is a newer follow-up message.",
+        },
+        updates: [],
+      }),
+    ).toBe("Primary Work latest user message: There is a newer follow-up message.");
+    expect(
+      directGetOutputResultSpeech("what did the agent say", {
+        target_session: { id: "session-primary", name: "Primary Work" },
+        latest_message: { role: "user", text: "Do not attribute this to the agent." },
+        updates: [],
+      }),
+    ).toBeUndefined();
   });
 
   it("renders verified action receipts directly unless an update also needs speech", () => {
@@ -249,6 +270,16 @@ describe("Celeris coordinator conversation", () => {
     );
     expect(
       verifiedActionFollowupSpeech(
+        "wait did both of those really happen and where am i now",
+        "I approved the prompt for Release Setup. I sent that to Primary Work.",
+        { id: "session-primary", name: "Primary Work" },
+        2,
+      ),
+    ).toBe(
+      "I approved the prompt for Release Setup. I sent that to Primary Work. Those outcomes are recorded. You're in Primary Work.",
+    );
+    expect(
+      verifiedActionFollowupSpeech(
         "wait did both of those actually happen",
         "I approved the prompt for Release Deploy.",
         { id: "session-primary", name: "Primary Work" },
@@ -294,6 +325,74 @@ describe("Celeris coordinator conversation", () => {
         { id: "session-primary", name: "Primary Work" },
       ),
     ).toBe("The queued message was sent to Side Worker. You're in Primary Work.");
+    expect(
+      verifiedToolWorkflowOutcome([
+        {
+          name: "get_output",
+          result: {
+            target_session: { id: "session-a", name: "Socket Probe" },
+            updates: [],
+          },
+        },
+        {
+          name: "get_output",
+          result: {
+            target_session: { id: "session-b", name: "Poll Probe" },
+            updates: [],
+          },
+        },
+        {
+          name: "send_message",
+          result: {
+            accepted: true,
+            delivery: "immediate",
+            target_session: { id: "session-primary", name: "Primary Work" },
+            updates: [],
+          },
+        },
+      ]),
+    ).toEqual({
+      ordered_steps: [
+        { operation: "read", tool: "get_output", session: "Socket Probe" },
+        { operation: "read", tool: "get_output", session: "Poll Probe" },
+        {
+          operation: "action",
+          tool: "send_message",
+          receipt: "I sent that to Primary Work.",
+        },
+      ],
+    });
+    const readExecutions = [
+      {
+        name: "get_output",
+        result: { target_session: { id: "session-a", name: "Socket Probe" } },
+      },
+      {
+        name: "get_output",
+        result: { target_session: { id: "session-b", name: "Poll Probe" } },
+      },
+    ];
+    expect(
+      missingMultiSourceNames(
+        "compare socket probe and poll probe",
+        "Socket Probe passed, but the other result failed.",
+        readExecutions,
+      ),
+    ).toEqual(["Poll Probe"]);
+    expect(
+      missingMultiSourceNames(
+        "which one held up better",
+        "Socket Probe passed while Poll Probe failed.",
+        readExecutions,
+      ),
+    ).toEqual([]);
+    expect(
+      missingMultiSourceNames(
+        "read both but only tell primary what socket probe said",
+        "Socket Probe passed.",
+        readExecutions,
+      ),
+    ).toEqual([]);
   });
 
   it("only allows focus mutation for an explicit session switch", () => {
@@ -319,6 +418,24 @@ describe("Celeris coordinator conversation", () => {
       false,
     );
     expect(requestsPositiveFocusAction("tell it to switch branches first")).toBe(false);
+    expect(
+      voiceMessageInstruction(
+        "when side worker finishes queue it a message to rerun the reconnect test with packet logs and don't switch me",
+        "Side Worker",
+      ),
+    ).toBe("rerun the reconnect test with packet logs");
+    expect(
+      voiceMessageInstruction(
+        "tell side worker to rerun all 48 probes but don't switch me there",
+        "Side Worker",
+      ),
+    ).toBe("rerun all 48 probes");
+    expect(
+      voiceMessageInstruction(
+        "tell primary work what side worker found",
+        "Primary Work",
+      ),
+    ).toBeUndefined();
     expect(targetsFocusedSession("Switch back to Primary Work.", "Primary Work")).toBe(true);
     expect(
       targetsFocusedSession(
@@ -787,7 +904,7 @@ describe("Celeris coordinator conversation", () => {
               type: "function",
               function: {
                 name: "send_message",
-                arguments: JSON.stringify({ message: "Rerun the worker" }),
+                arguments: JSON.stringify({ message: "Rer worker" }),
               },
             },
           ],
@@ -817,7 +934,7 @@ describe("Celeris coordinator conversation", () => {
       ),
     ).resolves.toBe("I sent that to Side Beta.");
     expect(tools.callTool).toHaveBeenNthCalledWith(2, "send_message", {
-      message: "Rerun the worker",
+      message: "rerun the worker",
       session_id: "session-beta",
     });
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
@@ -879,7 +996,7 @@ describe("Celeris coordinator conversation", () => {
 
     await expect(
       conversation("test-key", tools).respond("okay what's side worker doing now"),
-    ).resolves.toBe("Side Worker is collecting packet logs now.");
+    ).resolves.toBe("Side Worker update: Collecting packet logs now.");
     expect(tools.callTool).toHaveBeenNthCalledWith(2, "get_output", {
       session_id: "session-side",
     });
@@ -895,6 +1012,51 @@ describe("Celeris coordinator conversation", () => {
     const read = request.tools?.find((tool) => tool.function?.name === "get_output");
     expect(read?.function?.description).toContain("Side Worker");
     expect(read?.function?.parameters?.properties).not.toHaveProperty("session_id");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("speaks an explicitly requested latest user message without another model round", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-latest-user",
+            type: "function",
+            function: { name: "get_output", arguments: "{}" },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) =>
+      Promise.resolve(
+        name === "check_updates"
+          ? {
+              focused_session: { id: "session-primary", name: "Primary Work" },
+              known_sessions: [{ id: "session-primary", name: "Primary Work" }],
+              updates: [],
+            }
+          : {
+              target_session: { id: "session-primary", name: "Primary Work" },
+              latest_message: {
+                role: "user",
+                text: "There is a newer follow-up message.",
+              },
+              updates: [],
+            },
+      ),
+    );
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "do you see a message from me more recently",
+      ),
+    ).resolves.toBe(
+      "Primary Work latest user message: There is a newer follow-up message.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("injects the authoritative ID for a read following a spoken notification", async () => {
@@ -949,10 +1111,11 @@ describe("Celeris coordinator conversation", () => {
 
     await expect(
       subject.respond("yeah okay what's the last thing that one actually said"),
-    ).resolves.toBe("The route audit passed all checks.");
+    ).resolves.toBe("Side Audit update: The route audit passed all checks.");
     expect(tools.callTool).toHaveBeenNthCalledWith(2, "get_output", {
       session_id: "session-side",
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
       tools?: Array<{
         function?: {
@@ -1090,7 +1253,7 @@ describe("Celeris coordinator conversation", () => {
       ),
     ).resolves.toBe("I sent that to Side Beta. I couldn't switch sessions.");
     expect(tools.callTool).toHaveBeenNthCalledWith(2, "send_message", {
-      message: "Rerun the voice worker",
+      message: "rerun the voice worker",
       session_id: "session-beta",
     });
     expect(tools.callTool).toHaveBeenNthCalledWith(3, "focus_session", {
@@ -1323,6 +1486,356 @@ describe("Celeris coordinator conversation", () => {
     expect(tools.callTool).toHaveBeenCalledTimes(4);
   });
 
+  it("carries an ordered verified read-before-send workflow into the next model turn", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-socket",
+              type: "function",
+              function: {
+                name: "get_output",
+                arguments: JSON.stringify({ session_id: "session-socket" }),
+              },
+            },
+            {
+              id: "call-poll",
+              type: "function",
+              function: {
+                name: "get_output",
+                arguments: JSON.stringify({ session_id: "session-poll" }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-send",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({
+                  message:
+                    "Socket Probe passed all runs while Poll Probe reset its cursor.",
+                }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content:
+            "I checked both Socket Probe and Poll Probe before sending that to Primary Work. You're in Primary Work.",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    let sent = false;
+    vi.mocked(tools.callTool).mockImplementation(
+      (name: string, args: Record<string, unknown>) => {
+        if (name === "check_updates") {
+          return Promise.resolve({
+            focused_session: { id: "session-primary", name: "Primary Work" },
+            known_sessions: [
+              { id: "session-primary", name: "Primary Work" },
+              { id: "session-socket", name: "Socket Probe" },
+              { id: "session-poll", name: "Poll Probe" },
+            ],
+            recent_actions: sent
+              ? [
+                  {
+                    type: "message_sent",
+                    name: "Primary Work",
+                    message:
+                      "Socket Probe passed all runs while Poll Probe reset its cursor.",
+                  },
+                ]
+              : [],
+            updates: [],
+          });
+        }
+        if (name === "get_output") {
+          const socket = args.session_id === "session-socket";
+          return Promise.resolve({
+            target_session: {
+              id: String(args.session_id),
+              name: socket ? "Socket Probe" : "Poll Probe",
+            },
+            latest_message: {
+              role: "assistant",
+              text: socket ? "Socket passed all runs." : "Poll reset its cursor.",
+            },
+            updates: [],
+          });
+        }
+        sent = true;
+        return Promise.resolve({
+          accepted: true,
+          delivery: "immediate",
+          target_session: { id: "session-primary", name: "Primary Work" },
+          updates: [],
+        });
+      },
+    );
+    const subject = conversation("test-key", tools);
+
+    await expect(
+      subject.respond(
+        "check socket probe and poll probe then tell primary work which held up",
+      ),
+    ).resolves.toContain("I sent that to Primary Work.");
+    await expect(
+      subject.respond("did you really check both before telling it and where am i"),
+    ).resolves.toContain("You're in Primary Work.");
+
+    const auditRequest = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as {
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    const coordinatorState = auditRequest.messages?.find(
+      (message) =>
+        message.role === "system" &&
+        message.content?.startsWith("Current coordinator state."),
+    )?.content;
+    expect(coordinatorState).toContain(
+      '"last_verified_tool_workflow":{"ordered_steps":[{"operation":"read","tool":"get_output","session":"Socket Probe"},{"operation":"read","tool":"get_output","session":"Poll Probe"},{"operation":"action","tool":"send_message","receipt":"I sent that to Primary Work."}]}',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("defers a send composed in the same completion as its source read", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-read",
+              type: "function",
+              function: { name: "get_output", arguments: "{}" },
+            },
+            {
+              id: "call-early-send",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({ message: "Use the result from Source Probe." }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-grounded-send",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({
+                  message: "Source Probe found that the cursor reset after reconnect.",
+                }),
+              },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) => {
+      if (name === "check_updates") {
+        return Promise.resolve({
+          focused_session: { id: "session-primary", name: "Primary Work" },
+          known_sessions: [
+            { id: "session-primary", name: "Primary Work" },
+            { id: "session-source", name: "Source Probe" },
+          ],
+          updates: [],
+        });
+      }
+      if (name === "get_output") {
+        return Promise.resolve({
+          target_session: { id: "session-source", name: "Source Probe" },
+          latest_message: {
+            role: "assistant",
+            text: "The cursor reset after reconnect.",
+          },
+          updates: [],
+        });
+      }
+      return Promise.resolve({
+        accepted: true,
+        delivery: "immediate",
+        target_session: { id: "session-primary", name: "Primary Work" },
+        updates: [],
+      });
+    });
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "check source probe and tell primary work what it found",
+      ),
+    ).resolves.toBe(
+      "Source Probe update: The cursor reset after reconnect. I sent that to Primary Work.",
+    );
+    expect(tools.callTool).toHaveBeenCalledTimes(3);
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "get_output", {
+      session_id: "session-source",
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(3, "send_message", {
+      message: "Source Probe found that the cursor reset after reconnect.",
+      session_id: "session-primary",
+    });
+    const groundedRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      tool_choice?: unknown;
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    expect(groundedRequest.tool_choice).toEqual({
+      type: "function",
+      function: { name: "send_message" },
+    });
+    expect(groundedRequest.messages).toContainEqual({
+      role: "tool",
+      tool_call_id: "call-early-send",
+      content: expect.stringContaining("No message was sent"),
+    });
+    expect(groundedRequest.messages).toContainEqual({
+      role: "system",
+      content: expect.stringContaining("Do not repeat the reads"),
+    });
+  });
+
+  it("does not send a multi-source comparison until every source is named", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-alpha",
+              type: "function",
+              function: {
+                name: "get_output",
+                arguments: JSON.stringify({ session_id: "session-alpha" }),
+              },
+            },
+            {
+              id: "call-beta",
+              type: "function",
+              function: {
+                name: "get_output",
+                arguments: JSON.stringify({ session_id: "session-beta" }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-incomplete-send",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({ message: "Alpha Probe passed all runs." }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-complete-send",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({
+                  message: "Alpha Probe passed all runs while Beta Probe reset its cursor.",
+                }),
+              },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation(
+      (name: string, args: Record<string, unknown>) => {
+        if (name === "check_updates") {
+          return Promise.resolve({
+            focused_session: { id: "session-primary", name: "Primary Work" },
+            known_sessions: [
+              { id: "session-primary", name: "Primary Work" },
+              { id: "session-alpha", name: "Alpha Probe" },
+              { id: "session-beta", name: "Beta Probe" },
+            ],
+            updates: [],
+          });
+        }
+        if (name === "get_output") {
+          const alpha = args.session_id === "session-alpha";
+          return Promise.resolve({
+            target_session: {
+              id: String(args.session_id),
+              name: alpha ? "Alpha Probe" : "Beta Probe",
+            },
+            latest_message: {
+              role: "assistant",
+              text: alpha ? "Passed all runs." : "Reset its cursor.",
+            },
+            updates: [],
+          });
+        }
+        return Promise.resolve({
+          accepted: true,
+          delivery: "immediate",
+          target_session: { id: "session-primary", name: "Primary Work" },
+          updates: [],
+        });
+      },
+    );
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "check alpha probe and beta probe and tell primary work which one passed",
+      ),
+    ).resolves.toContain("I sent that to Primary Work.");
+    expect(tools.callTool).toHaveBeenCalledTimes(4);
+    expect(tools.callTool).toHaveBeenLastCalledWith("send_message", {
+      message: "Alpha Probe passed all runs while Beta Probe reset its cursor.",
+      session_id: "session-primary",
+    });
+    const retriedRequest = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as {
+      tool_choice?: unknown;
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    expect(retriedRequest.tool_choice).toEqual({
+      type: "function",
+      function: { name: "send_message" },
+    });
+    expect(retriedRequest.messages).toContainEqual({
+      role: "tool",
+      tool_call_id: "call-incomplete-send",
+      content: expect.stringContaining("Beta Probe"),
+    });
+  });
+
   it("forces the missing half of an explicit compound action before speaking", async () => {
     const fetchMock = vi
       .fn()
@@ -1390,7 +1903,7 @@ describe("Celeris coordinator conversation", () => {
       session_id: "session-beta",
     });
     expect(tools.callTool).toHaveBeenNthCalledWith(3, "send_message", {
-      message: "Rerun the voice worker",
+      message: "rerun the voice worker",
       session_id: "session-beta",
     });
     const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
@@ -1625,6 +2138,45 @@ describe("Celeris coordinator conversation", () => {
     expect(directCoordinatorUpdateSpeech(updates)).toBe(expected);
     await expect(
       conversation("test-key").announceUpdate(updates, new AbortController().signal),
+    ).resolves.toBe(expected);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("voices one safe completion beside structured decisions without paraphrasing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const updates = [
+      {
+        event_id: 6,
+        type: "decision_needed" as const,
+        session_id: "session-release",
+        name: "Release Setup",
+        prompts: [
+          {
+            message: "Choose the target environment and replica count.",
+            mode: "form",
+          },
+        ],
+      },
+      {
+        event_id: 7,
+        type: "session_completed" as const,
+        session_id: "session-research",
+        name: "Research Worker",
+        summary:
+          "Research Worker finished. The reconnect failure came from a stale DNS cache.",
+      },
+    ];
+    const expected =
+      "Research Worker finished. The reconnect failure came from a stale DNS cache. " +
+      "Release Setup needs your input: Choose the target environment and replica count.";
+
+    expect(directCoordinatorUpdateSpeech(updates)).toBe(expected);
+    await expect(
+      conversation("test-key").announceUpdate(
+        updates,
+        new AbortController().signal,
+      ),
     ).resolves.toBe(expected);
     expect(fetchMock).not.toHaveBeenCalled();
   });

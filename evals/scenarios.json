@@ -2821,5 +2821,500 @@
         }
       }
     ]
+  },
+  {
+    "id": "compare_two_sources_then_grounded_send",
+    "description": "Read two explicitly named background sessions before comparing their latest evidence, relay the grounded recommendation to sticky focus, and preserve an auditable account of the compound workflow.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": {
+        "id": "session-primary",
+        "name": "Primary Work",
+        "status": "running"
+      },
+      "known_sessions": [
+        {
+          "id": "session-primary",
+          "name": "Primary Work",
+          "status": "running",
+          "focused": true
+        },
+        {
+          "id": "session-socket",
+          "name": "Socket Probe",
+          "status": "idle",
+          "focused": false
+        },
+        {
+          "id": "session-poll",
+          "name": "Poll Probe",
+          "status": "idle",
+          "focused": false
+        }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": {
+        "changed": false,
+        "output": ""
+      },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "okay pull the last result from socket probe and poll probe and tell primary work which one actually held up and why like don't just guess from the names check both first",
+        "coordinatorState": {
+          "focused_session": {
+            "id": "session-primary",
+            "name": "Primary Work",
+            "status": "running"
+          },
+          "known_sessions": [
+            {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running",
+              "focused": true
+            },
+            {
+              "id": "session-socket",
+              "name": "Socket Probe",
+              "status": "idle",
+              "focused": false
+            },
+            {
+              "id": "session-poll",
+              "name": "Poll Probe",
+              "status": "idle",
+              "focused": false
+            }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": {
+            "changed": false,
+            "output": ""
+          },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "get_output": [
+            {
+              "session_id": "session-socket",
+              "target_session": {
+                "id": "session-socket",
+                "name": "Socket Probe",
+                "status": "idle"
+              },
+              "focus_changed": false,
+              "page": 1,
+              "order": "oldest_to_newest",
+              "latest_message": {
+                "position": 2,
+                "kind": "message",
+                "role": "assistant",
+                "text": "The WebSocket reconnect probe passed all 48 repetitions with a 112 millisecond median resume."
+              },
+              "items": [
+                {
+                  "position": 1,
+                  "kind": "message",
+                  "role": "user",
+                  "text": "Run the reconnect probe 48 times."
+                },
+                {
+                  "position": 2,
+                  "kind": "message",
+                  "role": "assistant",
+                  "text": "The WebSocket reconnect probe passed all 48 repetitions with a 112 millisecond median resume."
+                }
+              ],
+              "has_more": false
+            },
+            {
+              "session_id": "session-poll",
+              "target_session": {
+                "id": "session-poll",
+                "name": "Poll Probe",
+                "status": "idle"
+              },
+              "focus_changed": false,
+              "page": 1,
+              "order": "oldest_to_newest",
+              "latest_message": {
+                "position": 2,
+                "kind": "message",
+                "role": "assistant",
+                "text": "The long-poll fallback failed 3 of 48 repetitions because its cursor reset during reconnect."
+              },
+              "items": [
+                {
+                  "position": 1,
+                  "kind": "message",
+                  "role": "user",
+                  "text": "Run the reconnect probe 48 times."
+                },
+                {
+                  "position": 2,
+                  "kind": "message",
+                  "role": "assistant",
+                  "text": "The long-poll fallback failed 3 of 48 repetitions because its cursor reset during reconnect."
+                }
+              ],
+              "has_more": false
+            }
+          ],
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running"
+            },
+            "focused_session": {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running"
+            },
+            "recent_actions": [
+              {
+                "action_id": 301,
+                "type": "message_sent",
+                "session_id": "session-primary",
+                "name": "Primary Work",
+                "delivery": "immediate",
+                "message": "Socket Probe held up: WebSocket reconnect passed all 48 repetitions, while Poll Probe failed 3 of 48 because its cursor reset.",
+                "summary": "Sent immediately to Primary Work: Socket Probe held up; WebSocket reconnect passed all 48 repetitions while Poll Probe failed 3 of 48 because its cursor reset."
+              }
+            ],
+            "summary": "Sent immediately to Primary Work."
+          }
+        },
+        "expected": {
+          "toolSequence": ["get_output", "get_output", "send_message"],
+          "forbiddenTools": ["focus_session"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "get_output",
+              "sessionId": "session-socket"
+            },
+            {
+              "index": 1,
+              "name": "get_output",
+              "sessionId": "session-poll"
+            },
+            {
+              "index": 2,
+              "name": "send_message",
+              "sessionId": "session-primary",
+              "messageTerms": ["socket", "48", "poll", "cursor reset"],
+              "delivery": "not_queued"
+            }
+          ],
+          "speechTerms": ["primary work"],
+          "speechAnyTerms": [
+            ["sent", "told"]
+          ],
+          "maxRounds": 4
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait did you really check both before telling it and where am i now",
+        "coordinatorState": {
+          "focused_session": {
+            "id": "session-primary",
+            "name": "Primary Work",
+            "status": "running"
+          },
+          "known_sessions": [
+            {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running",
+              "focused": true
+            },
+            {
+              "id": "session-socket",
+              "name": "Socket Probe",
+              "status": "idle",
+              "focused": false
+            },
+            {
+              "id": "session-poll",
+              "name": "Poll Probe",
+              "status": "idle",
+              "focused": false
+            }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 301,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "Socket Probe held up: WebSocket reconnect passed all 48 repetitions, while Poll Probe failed 3 of 48 because its cursor reset.",
+              "summary": "Sent immediately to Primary Work: Socket Probe held up; WebSocket reconnect passed all 48 repetitions while Poll Probe failed 3 of 48 because its cursor reset."
+            }
+          ],
+          "output_delta": {
+            "changed": false,
+            "output": ""
+          },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+          "speechTerms": ["both", "primary work"],
+          "speechAnyTerms": [
+            ["checked", "read", "verified"]
+          ],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay what exactly did you send it",
+        "coordinatorState": {
+          "focused_session": {
+            "id": "session-primary",
+            "name": "Primary Work",
+            "status": "running"
+          },
+          "known_sessions": [
+            {
+              "id": "session-primary",
+              "name": "Primary Work",
+              "status": "running",
+              "focused": true
+            },
+            {
+              "id": "session-socket",
+              "name": "Socket Probe",
+              "status": "idle",
+              "focused": false
+            },
+            {
+              "id": "session-poll",
+              "name": "Poll Probe",
+              "status": "idle",
+              "focused": false
+            }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 301,
+              "type": "message_sent",
+              "session_id": "session-primary",
+              "name": "Primary Work",
+              "delivery": "immediate",
+              "message": "Socket Probe held up: WebSocket reconnect passed all 48 repetitions, while Poll Probe failed 3 of 48 because its cursor reset.",
+              "summary": "Sent immediately to Primary Work: Socket Probe held up; WebSocket reconnect passed all 48 repetitions while Poll Probe failed 3 of 48 because its cursor reset."
+            }
+          ],
+          "output_delta": {
+            "changed": false,
+            "output": ""
+          },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+          "speechTerms": ["websocket", "48", "poll", "cursor"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "compare_two_sources_reverse_order",
+    "description": "Exercise the same two-read grounded relay with reversed evidence quality and different ASR phrasing, then audit the exact read order and outbound content.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+        { "id": "session-fallback", "name": "Fallback Trial", "status": "idle", "focused": false },
+        { "id": "session-stream", "name": "Stream Trial", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "uh check fallback trial then stream trial i mean pull both and send release work the one we should keep with the actual numbers",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+            { "id": "session-fallback", "name": "Fallback Trial", "status": "idle", "focused": false },
+            { "id": "session-stream", "name": "Stream Trial", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "get_output": [
+            {
+              "session_id": "session-fallback",
+              "target_session": { "id": "session-fallback", "name": "Fallback Trial", "status": "idle" },
+              "focus_changed": false,
+              "page": 1,
+              "order": "oldest_to_newest",
+              "latest_message": {
+                "position": 2,
+                "kind": "message",
+                "role": "assistant",
+                "text": "Fallback Trial failed 4 of 40 reconnects because it duplicated the resume cursor."
+              },
+              "items": [
+                { "position": 1, "kind": "message", "role": "user", "text": "Run 40 reconnects." },
+                { "position": 2, "kind": "message", "role": "assistant", "text": "Fallback Trial failed 4 of 40 reconnects because it duplicated the resume cursor." }
+              ],
+              "has_more": false
+            },
+            {
+              "session_id": "session-stream",
+              "target_session": { "id": "session-stream", "name": "Stream Trial", "status": "idle" },
+              "focus_changed": false,
+              "page": 1,
+              "order": "oldest_to_newest",
+              "latest_message": {
+                "position": 2,
+                "kind": "message",
+                "role": "assistant",
+                "text": "Stream Trial passed all 40 reconnects and preserved the resume cursor every time."
+              },
+              "items": [
+                { "position": 1, "kind": "message", "role": "user", "text": "Run 40 reconnects." },
+                { "position": 2, "kind": "message", "role": "assistant", "text": "Stream Trial passed all 40 reconnects and preserved the resume cursor every time." }
+              ],
+              "has_more": false
+            }
+          ],
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+            "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+            "recent_actions": [
+              {
+                "action_id": 311,
+                "type": "message_sent",
+                "session_id": "session-release",
+                "name": "Release Work",
+                "delivery": "immediate",
+                "message": "Keep Stream Trial: it passed all 40 reconnects, while Fallback Trial failed 4 of 40 by duplicating the resume cursor.",
+                "summary": "Sent immediately to Release Work: Keep Stream Trial; it passed all 40 reconnects while Fallback Trial failed 4 of 40 by duplicating the resume cursor."
+              }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["get_output", "get_output", "send_message"],
+          "forbiddenTools": ["focus_session"],
+          "callExpectations": [
+            { "index": 0, "name": "get_output", "sessionId": "session-fallback" },
+            { "index": 1, "name": "get_output", "sessionId": "session-stream" },
+            {
+              "index": 2,
+              "name": "send_message",
+              "sessionId": "session-release",
+              "messageTerms": ["stream", "40", "fallback", "4", "cursor"],
+              "delivery": "not_queued"
+            }
+          ],
+          "speechTerms": ["release work"],
+          "speechAnyTerms": [["sent", "told"]],
+          "maxRounds": 4
+        }
+      },
+      {
+        "type": "user",
+        "input": "did you read those in that order before the send or are you assuming stuff and what chat am i in",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+            { "id": "session-fallback", "name": "Fallback Trial", "status": "idle", "focused": false },
+            { "id": "session-stream", "name": "Stream Trial", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 311,
+              "type": "message_sent",
+              "session_id": "session-release",
+              "name": "Release Work",
+              "delivery": "immediate",
+              "message": "Keep Stream Trial: it passed all 40 reconnects, while Fallback Trial failed 4 of 40 by duplicating the resume cursor.",
+              "summary": "Sent immediately to Release Work: Keep Stream Trial; it passed all 40 reconnects while Fallback Trial failed 4 of 40 by duplicating the resume cursor."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+          "speechTerms": ["fallback trial", "stream trial", "release work"],
+          "speechAnyTerms": [["read", "checked", "verified"]],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "repeat what was actually sent",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+            { "id": "session-fallback", "name": "Fallback Trial", "status": "idle", "focused": false },
+            { "id": "session-stream", "name": "Stream Trial", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            {
+              "action_id": 311,
+              "type": "message_sent",
+              "session_id": "session-release",
+              "name": "Release Work",
+              "delivery": "immediate",
+              "message": "Keep Stream Trial: it passed all 40 reconnects, while Fallback Trial failed 4 of 40 by duplicating the resume cursor.",
+              "summary": "Sent immediately to Release Work: Keep Stream Trial; it passed all 40 reconnects while Fallback Trial failed 4 of 40 by duplicating the resume cursor."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+          "speechTerms": ["stream", "40", "fallback", "4", "cursor"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

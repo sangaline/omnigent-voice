@@ -901,3 +901,73 @@ model rounds. The final gates are 74 conventional tests with clean typecheck,
 invalid trials. On the live staged pod, two naturally occurring long proactive
 updates measured 800-882 ms for Celeris, 53-55 ms to first Pocket audio, and
 continuous 10.08-11.60 second playback without underruns.
+
+### 2026-08-29 — Multi-source grounding and verified tool provenance
+
+Hypothesis H33: the one-source grounded-relay contract would generalize to a
+spoken request that reads two background sessions, compares their latest
+results, and sends the recommendation to sticky focus. Two held-out linked
+scenarios reverse source order and which result wins, then ask whether both
+sources were really read before the send and what exact message was delivered.
+The first unchanged baseline completed zero of five scenarios. One literal
+“WebSocket” requirement was evaluator overreach because the sent message named
+Socket Probe and preserved the complete result; that rubric was corrected
+rather than changing production. The remaining failures were real: an exact
+message audit sometimes read unrelated session output, and read-before-send
+claims depended only on lossy spoken history.
+
+Each tool-using turn now carries a process-local `last_verified_tool_workflow`
+containing the ordered successful named reads and typed actions, without opaque
+IDs. The action ledger remains authoritative for exact outbound content. A
+prompt-only exact-message reminder passed ten of ten trials but did not make the
+workflow audit stable, while the typed workflow moved the first scenario to ten
+of ten repeated runs. The reversed held-out scenario then exposed a higher-cost
+failure: Celeris occasionally emitted both reads and `send_message` in one
+completion, so the send could not have used results that had not returned yet.
+The harness now declines that premature call without touching the coordinator,
+injects the read results, and forces the grounded send on the next round.
+
+Multi-source comparisons also occasionally named only the winner and discarded
+the losing source's count and failure cause. The harness now withholds a
+comparison until its message names every successfully read source, returning
+the missing names as typed retry feedback. This guard is limited to explicit
+comparison/recommendation language; unrelated reads in a compound turn do not
+silently become outbound content. The reversed scenario passed twenty of twenty
+runs across 60 turns after this guard, and the original passed another ten of
+ten across 30 turns. Both still use two normal model rounds—reads, then send—and
+sticky focus never changes.
+
+### 2026-08-29 — Typed read rendering and dictated-send fidelity
+
+Hypothesis H34: the remaining low-frequency speech misses were model variance
+rather than missing typed fast paths. Repeated full gates falsified this twice.
+One of three runs of `verify_recent_never_send` ignored a returned typed user
+message and instead discussed older delivery visibility. An explicit “message
+from me” read now speaks a safe `role: user` latest message directly after tool
+selection. It passed ten of ten trials and removes the second model round.
+Likewise, a plain non-mutating latest/status/progress read may speak one safe
+short assistant latest message directly; action-bearing turns cannot take this
+path. The queued-delivery scenario's final progress read then retained both
+“reconnect” and “packet logs” in ten of ten targeted runs.
+
+The same queued scenario still corrupted its initial human-supplied instruction
+in one of ten runs, and a stronger prompt produced the malformed verb “rer” in
+two of twenty. Prompt-only fidelity was rejected. For conservative explicit
+forms such as “queue it a message to …” and “tell Side Worker to …”, the harness
+now copies the dictated task clause into `send_message` when no output read
+participated. Separate voice controls such as “then switch me there” and “don't
+switch me” are removed from the agent instruction. Evidence-dependent sends are
+never overwritten. The exact queued lifecycle then passed twenty of twenty runs
+across 80 turns. A safe completion plus one bounded structured-decision batch
+is now spoken directly too; this preserved the reconnect/DNS completion and the
+exact form question in ten of ten announcements with zero model rounds. The
+compound audit phrase “did both of those really happen” also joins “actually”
+on the typed receipt path instead of risking a lossy model paraphrase.
+Result: accepted as a deployment candidate. Conventional coverage is 79 tests
+with clean typecheck and build, and the isolated corpus passed 29 of 29 with no
+invalid trials. The final linked sweep passed all 18 valid scenarios; two more
+were invalidated only by HTTP 429 and then each passed three of three individual
+replays across 21 turns. The mixed form/completion flow separately passed five
+of five after its zero-round paths were added. Every one of the 20 linked
+scenarios therefore has clean post-change evidence without counting transport
+failures as quality results.

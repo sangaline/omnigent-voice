@@ -95,12 +95,20 @@ interface OpenAiTool {
   };
 }
 
+export interface VerifiedToolWorkflowOutcome {
+  ordered_steps: Array<
+    | { operation: "read"; tool: "get_output" | "poll_output"; session: string }
+    | { operation: "action"; tool: string; receipt: string }
+  >;
+}
+
 export const systemPrompt = `You are a very fast spoken interface for Omnigent, a persistent coding-agent coordinator.
 Speak naturally and briefly, normally one or two short sentences. Never use Markdown, code blocks, raw IDs, URLs, or tool logs in speech.
 Answer casual conversation and general knowledge directly. Never invent the state of sessions, machines, files, deployments, or prior work; use tools for those.
 The coordinator state in each turn names the focused session. Treat that focus as sticky. "This session", "the session", "it", "current", "latest output", and "most recent output" mean the focused session. Never call focus_session merely to read or control the focused session. Change focus only when the user explicitly asks to switch, open, focus, or use a different named or numbered session. Listing or reading another session must not imply a focus change.
 recent_actions is the authoritative bounded ledger of coordinator actions even when spoken history has been trimmed. Before claiming whether a message was sent, queued, focused, started, archived, or answered, check this ledger. If an older action is absent, say it is not in the retained recent ledger; never conclude that it did not happen merely because it is absent from spoken history. Use the preformatted summary when the user asks what changed.
 last_verified_action_outcome, when present, is the exact voice-harness receipt for the most recent action turn, including any typed failure alongside actions that did succeed. Use it to answer an immediate follow-up about which parts happened; current focused_session remains authoritative for where the user is now.
+last_verified_tool_workflow, when present, is the ordered typed record of successful reads and actions from the most recent tool-using voice turn. Use it to answer whether named sessions were actually read before an action. Never claim a read or ordering absent from that record, and never perform a new read merely to prove what happened in a prior turn.
 pending_decisions is the authoritative list of unresolved structured prompts across sessions. For approval, decline, or cancellation, copy the exact prompt_id and session_id from that list into answer_prompt. Never invent either identifier from a spoken name. A prompt can belong to a session other than the sticky focus; resolving it does not change focus.
 known_sessions is the bounded current name-to-ID map used by the voice harness. A message request that clearly names exactly one known session is routed to that session without changing sticky focus, even though the model-visible send_message schema has no session_id. Use the actual target returned by the tool in your acknowledgement. Never call focus_session merely to deliver a message to an explicitly named session.
 Use list_sessions only when the user asks for a list or explicitly wants a different session that has not been resolved. The coordinator state is a fresh atomic snapshot taken after the human finished speaking. Use its output_delta when it answers a latest/current-state question; call poll_output for stable output that arrived after the previous snapshot, or get_output when older context is needed. get_output page 1 is the most recent page, with typed timestamped items ordered oldest-to-newest like incremental output. Distinguish conversation messages from internal tool or terminal activity. latest_message is the generic newest message and its role says whether it came from the user or assistant. Never claim that state is fresh without coordinator data from this turn.
@@ -122,10 +130,11 @@ No coordinator action has happened in this human turn yet. If the human asks for
 An explicit request to switch, focus, or open another session requires focus_session before any speech. Never narrate a focus change from the request alone; only the tool result proves the active session changed.
 voice_message_routing is computed deterministically from this human transcript and known_sessions. When its mode is named, call send_message normally; the harness supplies that exact target without changing focus. When its mode is ambiguous, do not claim to send anything and ask the human to name one target.
 voice_read_routing also resolves a deictic read against authoritative notification history. When its mode is named, call the read tool normally and the harness supplies that exact session. When its mode is ambiguous, do not read or guess; ask the human which named session they mean.
-When the requested message content depends on a missing fact about what a different session found, said, or is doing, first call get_output for that source session. Only after receiving the source result may you call send_message with the grounded finding; never send a placeholder telling the destination merely to inspect or review the source session. If the human already states the complete finding to relay in the current request, send that supplied content directly without rereading the source.
+When the requested message content depends on a missing fact about what a different session found, said, or is doing, first call get_output for that source session. Only after receiving the source result may you call send_message with the grounded finding; never send a placeholder telling the destination merely to inspect or review the source session. If more than one source must be compared, complete every requested read before the send, name each source in the outbound comparison, and preserve the decisive counts, outcomes, and causes. If the human already states the complete finding to relay in the current request, send that supplied content directly without rereading the source.
 The coordinator snapshot immediately above is already current data for this turn. output_delta is the chronological stable output newly available since the prior human snapshot. When output_delta.changed is true and its content answers “latest,” “current,” “what's new,” or “since then,” answer directly from it and do not call get_output. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.
 A short output_delta is already a voice-sized update. When it directly answers the human, preserve every concrete condition, count, outcome, and still-running or blocked clause instead of shortening away one of its facts.
 A question about whether any prior coordinator action succeeded, including prompt approval, is answered directly from recent_actions. Do not repeat the action and do not read session output merely to verify a ledger entry.
+When the human asks what exact message was sent, answer from the newest matching message_sent entry in recent_actions. Its typed message and summary are authoritative. Do not call get_output because session output cannot establish the exact outbound message. When the human asks whether reads preceded a send, answer from last_verified_tool_workflow; a new read cannot prove prior ordering.
 Renaming is a coordinator action. Only call rename_session for an explicit rename request, copy the requested new title into title, and describe the old-to-new transition only after its successful tool result. It never changes sticky focus.
 send_message delivery is immediate unless the human clearly requests queueing until the current agent turn finishes. ASR discourse such as “wait,” “no wait,” “hold on,” or a mid-sentence correction does not request queued delivery. Use queued only for explicit timing such as “queue this,” “send after the current turn,” or “when it finishes.”
 Only after an actual visibility question has selected get_output, answer whether the sent user message itself appears, not whether the agent has responded. If recent_actions confirms the send but get_output does not contain that user message, say it was sent or accepted but is not visible in output yet. If the user message is present, clearly confirm that it is visible. Mention a response only if the human asked about one, and never promise future monitoring.
@@ -230,6 +239,7 @@ const coordinatorContext = (
   messageRouting: VoiceMessageRouting,
   readRouting: VoiceReadRouting,
   lastVerifiedActionOutcome: string | undefined,
+  lastVerifiedToolWorkflow: VerifiedToolWorkflowOutcome | undefined,
 ): ChatMessage => {
   const updates = Array.isArray(result.updates) ? result.updates : [];
   return {
@@ -241,6 +251,7 @@ const coordinatorContext = (
       pending_decisions: result.pending_decisions ?? [],
       recent_actions: result.recent_actions ?? [],
       last_verified_action_outcome: lastVerifiedActionOutcome ?? null,
+      last_verified_tool_workflow: lastVerifiedToolWorkflow ?? null,
       output_delta: result.output_delta ?? null,
       updates,
       voice_message_routing: messageRouting,
@@ -596,6 +607,41 @@ export const voiceStartInstruction = (input: string): string | undefined => {
   return instruction || undefined;
 };
 
+export const voiceMessageInstruction = (
+  input: string,
+  targetName?: string | undefined,
+): string | undefined => {
+  const targetPattern = targetName
+    ? words(targetName).join("\\s+")
+    : undefined;
+  const patterns = [
+    /\bqueue\s+(?:it|that|them)\s+(?:a\s+message\s+)?to\s+(.+)$/i,
+    ...(targetPattern
+      ? [
+          new RegExp(
+            `\\b(?:tell|ask)\\s+(?:the\\s+)?${targetPattern}\\s+to\\s+(.+)$`,
+            "i",
+          ),
+          new RegExp(
+            `\\bqueue\\s+(?:the\\s+)?${targetPattern}\\s+(?:a\\s+message\\s+)?to\\s+(.+)$`,
+            "i",
+          ),
+        ]
+      : []),
+  ];
+  const captured = patterns
+    .map((pattern) => pattern.exec(input)?.[1]?.trim())
+    .find((value): value is string => Boolean(value));
+  if (!captured) return undefined;
+  const instruction = captured
+    .replace(
+      /\s*,?\s+(?:and|but|then)\s+(?:(?:do\s+not|don't|dont|never)\s+)?(?:switch|focus|move)\s+(?:me|us)(?:\s+(?:over\s+)?there)?[.!?]*$/i,
+      "",
+    )
+    .trim();
+  return instruction || undefined;
+};
+
 const voiceSafeTool = (
   tool: OpenAiTool,
   routing: VoiceMessageRouting,
@@ -799,6 +845,60 @@ export const successfulActionSpeech = (
   }
 };
 
+export const verifiedToolWorkflowOutcome = (
+  executions: readonly { name: string; result: JsonObject }[],
+): VerifiedToolWorkflowOutcome | undefined => {
+  const orderedSteps: VerifiedToolWorkflowOutcome["ordered_steps"] = [];
+  for (const { name, result } of executions) {
+    if (typeof result.error === "string") continue;
+    if (name === "get_output" || name === "poll_output") {
+      const session = resultSessionName(result.target_session);
+      if (session) {
+        orderedSteps.push({ operation: "read", tool: name, session });
+      }
+      continue;
+    }
+    const receipt = successfulActionSpeech(name, result);
+    if (receipt) {
+      orderedSteps.push({ operation: "action", tool: name, receipt });
+    }
+  }
+  return orderedSteps.length > 0 ? { ordered_steps: orderedSteps } : undefined;
+};
+
+export const missingMultiSourceNames = (
+  input: string,
+  message: unknown,
+  executions: readonly { name: string; result: JsonObject }[],
+): string[] => {
+  if (
+    typeof message !== "string" ||
+    !/\b(?:compare|versus|vs|better|best|winner|held\s+up|which\s+one|one\s+(?:we|i)\s+should|should\s+(?:we|i)\s+(?:keep|choose|use)|recommend)\b/i.test(
+      input,
+    )
+  ) {
+    return [];
+  }
+  const sourceNames = [
+    ...new Set(
+      executions
+        .filter(
+          ({ name, result }) =>
+            (name === "get_output" || name === "poll_output") &&
+            typeof result.error !== "string",
+        )
+        .map(({ result }) => resultSessionName(result.target_session))
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ];
+  if (sourceNames.length < 2) return [];
+  const normalizedMessage = ` ${words(message).join(" ")} `;
+  return sourceNames.filter((name) => {
+    const normalizedName = words(name).join(" ");
+    return normalizedName && !normalizedMessage.includes(` ${normalizedName} `);
+  });
+};
+
 export const verifiedActionFollowupSpeech = (
   input: string,
   lastVerifiedActionOutcome: string | undefined,
@@ -809,10 +909,10 @@ export const verifiedActionFollowupSpeech = (
 ): string | undefined => {
   if (!lastVerifiedActionOutcome) return undefined;
   const asksDidOutcome =
-    /\bdid\s+(?:(?:both|all)\s+(?:of\s+)?)?(?:that|those|them|it|they)?\s*(?:actually\s+)?(?:happen|work|go\s+through|succeed)\b/i.test(
+    /\bdid\s+(?:(?:both|all)\s+(?:of\s+)?)?(?:that|those|them|it|they)?\s*(?:(?:actually|really)\s+)?(?:happen|work|go\s+through|succeed)\b/i.test(
       input,
     ) ||
-    /\bdid\s+(?:that|those|the)\s+(?:[a-z0-9'-]+\s+){0,3}(?:approval|decline|cancellation|action|change|send|message)\s+(?:actually\s+)?(?:happen|work|go\s+through|succeed)\b/i.test(
+    /\bdid\s+(?:that|those|the)\s+(?:[a-z0-9'-]+\s+){0,3}(?:approval|decline|cancellation|action|change|send|message)\s+(?:(?:actually|really)\s+)?(?:happen|work|go\s+through|succeed)\b/i.test(
       input,
     );
   const asksOutcome =
@@ -912,7 +1012,7 @@ export const verifiedDeliveryVisibilitySpeech = (
   return `It was ${delivery}, but the message isn't visible on the returned output page yet.`;
 };
 
-const directGetOutputResultSpeech = (
+export const directGetOutputResultSpeech = (
   input: string,
   result: JsonObject,
 ): string | undefined => {
@@ -926,7 +1026,6 @@ const directGetOutputResultSpeech = (
     : "";
   if (
     !target ||
-    latest?.role !== "assistant" ||
     !text ||
     text.length > 240 ||
     text.includes("```") ||
@@ -935,6 +1034,17 @@ const directGetOutputResultSpeech = (
   ) {
     return undefined;
   }
+  if (latest?.role === "user") {
+    const asksForUserMessage =
+      /\b(?:message|note|thing)\s+from\s+me\b/i.test(input) ||
+      /\bmy\s+(?:latest|newest|newer|recent|most\s+recent)\s+(?:message|note|thing)\b/i.test(
+        input,
+      );
+    return asksForUserMessage
+      ? `${target} latest user message: ${text}`
+      : undefined;
+  }
+  if (latest?.role !== "assistant") return undefined;
   return `${target} update: ${text}`;
 };
 
@@ -1074,6 +1184,28 @@ export const directCoordinatorUpdateSpeech = (
     const speech = phrases.join(" ");
     return speech.length <= 300 ? speech : undefined;
   }
+  if (
+    delivered.length === 0 &&
+    completed.length === 1 &&
+    decisions.length > 0 &&
+    updates.length === completed.length + decisions.length
+  ) {
+    const summary = typeof completed[0]!.summary === "string"
+      ? completed[0]!.summary.trim()
+      : "";
+    const decisionSpeech = directDecisionUpdatesSpeech(decisions);
+    if (
+      summary &&
+      summary.length <= 200 &&
+      !summary.includes("```") &&
+      !/https?:\/\//i.test(summary) &&
+      !summary.includes("\n") &&
+      decisionSpeech
+    ) {
+      const speech = `${summary} ${decisionSpeech}`;
+      return speech.length <= 300 ? speech : undefined;
+    }
+  }
   const decisionSpeech = directDecisionUpdatesSpeech(updates);
   if (decisionSpeech) return decisionSpeech;
   if (updates.length !== 1 || updates[0]?.type !== "session_completed") {
@@ -1102,6 +1234,7 @@ export class CelerisConversation {
   private updateCursor = 0;
   private lastVerifiedActionOutcome?: string;
   private lastVerifiedActionCount = 0;
+  private lastVerifiedToolWorkflow: VerifiedToolWorkflowOutcome | undefined;
   private compactionTimer: ReturnType<typeof setTimeout> | undefined;
   private compactionController: AbortController | undefined;
   private compactionPromise: Promise<void> | undefined;
@@ -1223,6 +1356,10 @@ export class CelerisConversation {
       return speech;
     }
     const startInstruction = voiceStartInstruction(input);
+    const messageInstruction = voiceMessageInstruction(
+      input,
+      messageRouting.target?.name,
+    );
     const previousAssistantSpeech = [...this.history]
       .reverse()
       .find((message) => message.role === "assistant")?.content;
@@ -1246,6 +1383,7 @@ export class CelerisConversation {
         messageRouting,
         readRouting,
         this.lastVerifiedActionOutcome,
+        this.lastVerifiedToolWorkflow,
       ),
       ...(actionInvariant
         ? [{ role: "system" as const, content: actionInvariant }]
@@ -1340,6 +1478,13 @@ export class CelerisConversation {
 
         messages.push({ role: "assistant", content: null, tool_calls: calls });
         const executedThisRound: Array<{ name: string; result: JsonObject }> = [];
+        const readsInSameCompletion = calls.some(
+          (call) =>
+            call.function.name === "get_output" ||
+            call.function.name === "poll_output",
+        );
+        let deferredSendForReadEvidence = false;
+        const deferredMissingSourceNames = new Set<string>();
         for (const call of calls) {
           let args: Record<string, unknown> = {};
           try {
@@ -1358,6 +1503,16 @@ export class CelerisConversation {
             args = { ...args, session_id: messageRouting.target.id };
           }
           if (
+            call.function.name === "send_message" &&
+            messageInstruction &&
+            !readsInSameCompletion &&
+            !executedAcrossRounds.some(
+              ({ name }) => name === "get_output" || name === "poll_output",
+            )
+          ) {
+            args = { ...args, message: messageInstruction };
+          }
+          if (
             call.function.name === "focus_session" &&
             resolvedFocusTarget
           ) {
@@ -1372,6 +1527,54 @@ export class CelerisConversation {
           }
           if (call.function.name === "start_session" && startInstruction) {
             args = { ...args, instruction: startInstruction };
+          }
+          if (
+            call.function.name === "send_message" &&
+            readsInSameCompletion
+          ) {
+            deferredSendForReadEvidence = true;
+            this.options.logger.info("celeris.tool.deferred", {
+              name: call.function.name,
+              reason: "same_completion_as_read",
+            });
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: JSON.stringify({
+                deferred: true,
+                reason:
+                  "Read results were not available when this send was composed. No message was sent.",
+              }),
+            });
+            continue;
+          }
+          if (call.function.name === "send_message") {
+            const missingSources = missingMultiSourceNames(
+              input,
+              args.message,
+              executedAcrossRounds,
+            );
+            if (missingSources.length > 0) {
+              for (const name of missingSources) {
+                deferredMissingSourceNames.add(name);
+              }
+              this.options.logger.info("celeris.tool.deferred", {
+                name: call.function.name,
+                reason: "missing_multi_source_names",
+                missingCount: missingSources.length,
+              });
+              messages.push({
+                role: "tool",
+                tool_call_id: call.id,
+                content: JSON.stringify({
+                  deferred: true,
+                  reason:
+                    "The comparison omitted one or more source-session names. No message was sent.",
+                  missing_sources: missingSources,
+                }),
+              });
+              continue;
+            }
           }
           this.options.logger.info("celeris.tool.called", { name: call.function.name });
           let result: JsonObject;
@@ -1421,6 +1624,27 @@ export class CelerisConversation {
             content: serializeToolResult(result),
           });
         }
+        if (deferredSendForReadEvidence) {
+          forcedToolName = "send_message";
+          messages.push({
+            role: "system",
+            content:
+              "The send_message call from the prior completion was not executed because its read calls had not returned yet. Use the read results now, then call send_message with the grounded message. Do not repeat the reads.",
+          });
+        }
+        if (deferredMissingSourceNames.size > 0) {
+          forcedToolName = "send_message";
+          messages.push({
+            role: "system",
+            content:
+              `The proposed comparison was not sent because it omitted ${[
+                ...deferredMissingSourceNames,
+              ].join(" and ")}. Reissue send_message now, naming every source and preserving the decisive evidence from each returned result. Do not repeat the reads.`,
+          });
+        }
+        this.lastVerifiedToolWorkflow = verifiedToolWorkflowOutcome(
+          executedAcrossRounds,
+        );
         const attemptedActions = new Set(
           executedAcrossRounds.map(({ name }) => name),
         );
@@ -1500,6 +1724,28 @@ export class CelerisConversation {
           executedThisRound.length === 1 &&
           executedThisRound[0]!.name === "get_output"
         ) {
+          const latest = objectValue(
+            executedThisRound[0]!.result.latest_message,
+          );
+          const plainAssistantRead =
+            latest?.role === "assistant" &&
+            messageRouting.mode === "focused" &&
+            /\b(?:latest|status|progress|doing|found|said|last\s+thing|up\s+to)\b/i.test(
+              input,
+            ) &&
+            !/\b(?:send|message|steer|queue|switch|focus|archive|rename|start|make|create|approve|accept|decline|deny|reject|cancel|interrupt|stop|rerun|retry)\b/i.test(
+              input,
+            );
+          const directReadSpeech =
+            latest?.role === "user" || plainAssistantRead
+              ? directGetOutputResultSpeech(input, executedThisRound[0]!.result)
+              : undefined;
+          if (directReadSpeech) {
+            const speech = sanitizeForSpeech(directReadSpeech, 300);
+            this.updateCursor = turnUpdateCursor;
+            this.remember(input, speech);
+            return speech;
+          }
           const visibilitySpeech = verifiedDeliveryVisibilitySpeech(
             input,
             executedThisRound[0]!.result,

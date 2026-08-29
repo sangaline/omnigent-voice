@@ -126,6 +126,9 @@ of up to three structured `decision_needed` events are also rendered directly
 from their prompt messages: confirmation mode says “needs your approval,” while
 other modes say “needs your input.” URLs, code fences, longer output, and other
 multi-event batches still use Celeris adaptation.
+One safe short `session_completed` summary may be combined directly with that
+bounded decision batch, preserving both the completed session's exact outcome
+and every structured prompt field without a model round.
 When a coordinator-managed queued message leaves the queue, the coordinator
 emits `message_delivered` only after the backend accepts the send. A lone event,
 or a bounded pair with the same session's prior-turn completion, is rendered
@@ -159,6 +162,11 @@ synthesis, so a follow-up audit cannot repeat a stale older action. Do not
 weaken the success predicates or drop the updates-empty guard: unsafe reads,
 uncertain results, and composites containing a non-renderable result still need
 model synthesis.
+Every tool-using turn also records `last_verified_tool_workflow`, an ordered,
+process-local list of successful named reads and typed actions. It contains no
+opaque IDs. The next model turn uses it to answer whether two sources were
+actually read before a send; a new read is never evidence about prior ordering.
+The action ledger remains the durable authority for what exact message was sent.
 Immediately before every human message, the harness inserts a current-turn
 action invariant: no coordinator action has happened yet, requested actions and
 required reads must use a tool before speech, prior ledger entries do not satisfy
@@ -190,6 +198,12 @@ decision, or action language, the harness voices a short safe focused-session
 `output_delta` directly in zero model rounds. An explicit switch to the session
 that is already focused is likewise a typed zero-round receipt. These paths must
 remain narrow: compound or ambiguous turns still go to Celeris.
+A model-selected `get_output` for a plain non-mutating latest/status/progress
+question similarly voices one safe short assistant `latest_message` directly
+after the read, skipping the second Celeris round. An explicit question about a
+newer message from the human may copy a safe typed `role: user` latest message.
+This direct path is disabled for send, queue, focus, archive, approval, retry,
+and other compound action language.
 Imperative pronoun follow-ups after a spoken notification burst are also
 resolved by the harness. It preserves notification order since the last human
 turn, maps “first,” “second,” “third,” and “last” to the corresponding
@@ -210,8 +224,18 @@ such as “when Side Worker wraps this one, queue it to …” receives the same
 ID injection instead of silently defaulting to sticky focus. When a message
 depends on another session's output,
 Celeris must read that source before sending unless the human already supplied
-the finding in the current request. A read-only question that names exactly one
-known session receives the same protection: the model-visible `get_output` or
+the finding in the current request. A `send_message` emitted in the same model
+completion as any output read is never executed because those results could not
+have informed it; the harness returns a typed deferral and forces a grounded send
+on the next round without repeating the reads. For an explicit multi-source
+comparison, an outbound message that omits any successfully read source name is
+also withheld and retried with the missing names. Clear dictated forms such as
+“queue it a message to …” and “tell Side Worker to …” copy the exact task clause
+into `send_message` when no read participated, stripping only separate voice
+navigation controls such as “then switch me there” or “don't switch me.” This
+prevents the fast model from corrupting or shortening user-supplied work while
+leaving evidence-dependent messages model-composed. A read-only question that
+names exactly one known session receives the same protection: the model-visible `get_output` or
 `poll_output` schema omits `session_id`, and the harness injects the authoritative
 ID while focus remains sticky. This prevents malformed or invented read IDs.
 The harness also withholds and rejects
