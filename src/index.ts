@@ -41,6 +41,12 @@ const celeris = new CelerisConversation({
   model: config.celerisModel,
   logger,
   tools,
+  memoryPolicy: {
+    compactAfterMessages: config.celerisHistoryCompactMessages,
+    compactAfterCharacters: config.celerisHistoryCompactCharacters,
+    keepRecentMessages: config.celerisHistoryKeepMessages,
+    compactionIdleMs: config.celerisHistoryCompactionIdleMs,
+  },
 });
 const bot = new DiscordVoiceBot({
   token: config.discordBotToken,

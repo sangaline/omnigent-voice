@@ -34,9 +34,16 @@ event cursor. Clients without server notifications can safely poll
 them for other clients.
 Every result also repeats a bounded recent-action ledger with preformatted
 summaries. This lets a small model accurately recall message delivery targets
-and focus transitions after its short conversational history has been trimmed.
+and focus transitions after conversational history has been compacted.
 The same server can run over stdio with `npm run mcp`; the voice process uses an
 in-memory MCP transport to avoid network latency.
+
+The voice model keeps a large raw dialogue tail. After the configurable working
+set reaches 80 messages or 48,000 characters, an idle background request
+compresses the oldest dialogue into working memory while retaining at least 24
+recent messages verbatim. New speech preempts compaction, so maintenance does
+not sit in the conversational response path. Exact transcripts remain in the
+private JSONL audit log; model working memory itself resets with the process.
 
 A native poll loop keeps collecting focused-session output while audio is
 playing and while the human is speaking. When recognition finalizes, the model

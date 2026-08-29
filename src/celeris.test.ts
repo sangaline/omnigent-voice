@@ -3,6 +3,7 @@ import {
   allowsArchive,
   allowsFocusChange,
   CelerisConversation,
+  CelerisMemoryPolicy,
   CoordinatorToolClient,
 } from "./celeris.js";
 import { Logger } from "./log.js";
@@ -58,6 +59,7 @@ const toolClient = (): CoordinatorToolClient => ({
 const conversation = (
   apiKey: string | undefined,
   tools: CoordinatorToolClient = toolClient(),
+  memoryPolicy?: Partial<CelerisMemoryPolicy>,
 ): CelerisConversation =>
   new CelerisConversation({
     apiKey,
@@ -65,6 +67,7 @@ const conversation = (
     model: "test-model",
     logger: new Logger("error"),
     tools,
+    memoryPolicy,
   });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -101,7 +104,7 @@ describe("Celeris coordinator conversation", () => {
     ).toBe(true);
     expect(
       request.messages?.some((message) =>
-        message.content?.includes("At most ten recent user/assistant exchanges and 8000 characters"),
+        message.content?.includes("retained verbatim until 80 messages or 48000 characters"),
       ),
     ).toBe(true);
     expect(
@@ -233,5 +236,38 @@ describe("Celeris coordinator conversation", () => {
 
     await subject.respond("Hello");
     expect(tools.callTool).toHaveBeenCalledWith("check_updates", { after_event_id: 7 });
+  });
+
+  it("compacts old dialogue after an idle delay and keeps a raw recent tail", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response({ content: "Answer one." }))
+      .mockResolvedValueOnce(response({ content: "Answer two." }))
+      .mockResolvedValueOnce(response({ content: "Answer three." }))
+      .mockResolvedValueOnce(response({ content: "Decisions: the user prefers durable memory." }))
+      .mockResolvedValueOnce(response({ content: "Answer four." }));
+    vi.stubGlobal("fetch", fetchMock);
+    const subject = conversation("test-key", toolClient(), {
+      compactAfterMessages: 4,
+      compactAfterCharacters: 10_000,
+      keepRecentMessages: 2,
+      compactionIdleMs: 0,
+    });
+
+    await subject.respond("Question one.");
+    await subject.respond("Question two.");
+    await subject.respond("Question three.");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    await new Promise((resolve) => setImmediate(resolve));
+    await subject.respond("Question four.");
+
+    const request = JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body)) as {
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    const content = request.messages?.map((message) => message.content ?? "") ?? [];
+    expect(content.some((text) => text.includes("durable memory"))).toBe(true);
+    expect(content).not.toContain("Question one.");
+    expect(content).not.toContain("Question two.");
+    expect(content).toContain("Question three.");
   });
 });

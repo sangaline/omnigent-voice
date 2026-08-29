@@ -14,6 +14,10 @@ export interface Config {
   celerisApiKey?: string | undefined;
   celerisBaseUrl: string;
   celerisModel: string;
+  celerisHistoryCompactMessages: number;
+  celerisHistoryCompactCharacters: number;
+  celerisHistoryKeepMessages: number;
+  celerisHistoryCompactionIdleMs: number;
   sherpaAsrModelDir: string;
   sherpaTtsModelDir: string;
   sherpaAsrThreads: number;
@@ -83,6 +87,22 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     throw new Error("LOG_LEVEL must be debug, info, warn, or error");
   }
 
+  const celerisHistoryCompactMessages = positiveInteger(
+    env,
+    "CELERIS_HISTORY_COMPACT_MESSAGES",
+    80,
+  );
+  const celerisHistoryKeepMessages = positiveInteger(
+    env,
+    "CELERIS_HISTORY_KEEP_MESSAGES",
+    24,
+  );
+  if (celerisHistoryKeepMessages >= celerisHistoryCompactMessages) {
+    throw new Error(
+      "CELERIS_HISTORY_KEEP_MESSAGES must be less than CELERIS_HISTORY_COMPACT_MESSAGES",
+    );
+  }
+
   return {
     discordBotToken: required(env, "DISCORD_BOT_TOKEN"),
     discordGuildId: optional(env, "DISCORD_GUILD_ID"),
@@ -105,6 +125,18 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
       optional(env, "CELERIS_BASE_URL") ??
       "https://inference.celeris.ai/celeris-1/v1",
     celerisModel: optional(env, "CELERIS_MODEL") ?? "celeris-1",
+    celerisHistoryCompactMessages,
+    celerisHistoryCompactCharacters: positiveInteger(
+      env,
+      "CELERIS_HISTORY_COMPACT_CHARACTERS",
+      48_000,
+    ),
+    celerisHistoryKeepMessages,
+    celerisHistoryCompactionIdleMs: nonnegativeInteger(
+      env,
+      "CELERIS_HISTORY_COMPACTION_IDLE_MS",
+      5_000,
+    ),
     sherpaAsrModelDir: required(env, "SHERPA_ASR_MODEL_DIR"),
     sherpaTtsModelDir: required(env, "SHERPA_TTS_MODEL_DIR"),
     sherpaAsrThreads: positiveInteger(env, "SHERPA_ASR_THREADS", 4),

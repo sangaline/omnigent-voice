@@ -118,13 +118,30 @@ wait until the current session turn becomes idle.
 `get_output` reads `/v1/sessions/{id}/items`; arbitrary tmux scrollback is not
 available through the Omnigent HTTP API and must not be implied. Structured MCP
 elicitations resolve through their dedicated endpoint and may target a child
-session. Direct turns keep a small in-memory history. A stdio MCP entry point is
+session. A stdio MCP entry point is
 available with `npm run mcp`; authenticated remote HTTP transport is deliberately
 deferred.
 
-Every Celeris turn also receives an explicit context contract: the bounded
-spoken history retains at most ten exchanges / 8,000 characters rather than a
-full transcript, focused-session state is authoritative,
+Every Celeris turn also receives an explicit context contract. Spoken dialogue
+is append-only in the hot path. By default, the harness retains raw dialogue
+until 80 messages or 48,000 characters, then uses a tool-free Celeris request
+after five idle seconds to compact the oldest prefix. At least 24 recent
+messages remain verbatim and the compressed memory is placed before that raw
+tail. A new human turn preempts maintenance rather than waiting for it; the
+uncompacted history remains usable and compaction is retried after the turn.
+The exact thresholds are runtime configurable with the
+`CELERIS_HISTORY_*` variables. This gives appended turns a stable prompt prefix
+between infrequent compactions, although Celeris does not publicly document a
+prompt-cache guarantee. Celeris's live endpoint accepted a measured 12,015-token
+probe in August 2026; current primary documentation advertises 131,072 tokens,
+while older cookbook pages still show a stale 8,192-token value. Keep the
+defaults conservative until long-context latency is measured from real calls.
+Working memory is process-local; the full transcript remains durable in the
+private JSONL audit log but is not automatically replayed into the model after a
+restart. Focused-session state, recent actions, output cursors, and prompts stay
+authoritative regardless of conversational compaction.
+
+The context contract also says that
 `output_delta` is only new stable output through speech finalization, and older
 output is absent until a tool returns it. Celeris has no page/token introspection
 and must never estimate how much context it has or invent an explanation for a
