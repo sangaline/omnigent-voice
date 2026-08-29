@@ -2,6 +2,9 @@
 
 ## Authenticated MCP integration
 
+- Treat `docs/MCP-SECURITY.md` as a release gate. Do not add a remotely
+  reachable transport until its identity, authorization, isolation, revocation,
+  audit, and abuse tests pass.
 - Keep the in-process voice transport and stdio server as the canonical,
   non-networked coordinator implementation. Design any remote adapter as a thin
   transport layer rather than duplicating tool behavior.

@@ -17,6 +17,11 @@ Minimal, speech-only Discord interface for an existing Omnigent deployment.
   transport. Any future network transport requires an explicit security review,
   private reachability, strong user authentication, narrow authorization, and
   auditable caller identity before it is enabled.
+- `docs/MCP-SECURITY.md` is the release gate for any remote coordinator
+  transport. GitHub/OIDC authentication alone is insufficient: exact stable
+  principal admission, per-tool scopes, Omnigent session ACLs, explicit remote
+  write targets, event isolation, revocation, audit attribution, and abuse tests
+  must all pass before a Service or Ingress is added.
 - Keep the interaction voice-first: no web UI, buttons, menus, or required slash
   commands.
 
