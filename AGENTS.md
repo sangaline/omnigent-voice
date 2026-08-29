@@ -182,17 +182,24 @@ preformatted summary. This is authoritative after Celeris history compaction;
 absence from short spoken history is never evidence that an action did not
 happen. Action summaries are retained in the private JSONL audit log.
 
-The coordinator polls recent session summaries and stable conversation items
-every two seconds, including while the human is speaking. At ASR finalization,
-`check_updates` atomically drains the focused session's cursor-backed output
-delta into the model context. Output arriving later remains buffered for the
-next turn. Persisted conversation items exclude transient terminal animations.
-Completion, failure, new-decision, and stable assistant-progress events remain
-in a bounded replay log. A running monitored session emits `session_output`
-only when a newly persisted assistant message appears; tool-only terminal
-activity does not interrupt the user. If the same poll also detects completion,
-failure, or a decision, that lifecycle event owns the accumulated output so it
-is not announced twice.
+The coordinator keeps an authenticated Omnigent SSE live tail for the focused
+session, every recent running/waiting session, and every session the voice layer
+touches. It also polls recent summaries and stable conversation items every two
+seconds as the reconnect and persistence fallback. Native message IDs, chunk
+indexes, and final markers reconstruct one assistant message across stream
+reconnects. A reconnect snapshot replaces an already-seen prefix instead of
+appending it, and the later persisted item reconciles by ID/text without a
+second spoken copy. No credentials or session identifiers enter stream logs.
+At ASR finalization, `check_updates` atomically adds any new partial live text
+from the focused session to the model context, including text received while
+the human was still speaking. Partial text is not proactively spoken; a final
+message produces one `session_output` event immediately rather than waiting for
+item persistence. Output arriving later remains buffered for the next turn.
+An idle transition within five seconds of that final live message does not emit
+an empty second completion announcement; a later completion still does.
+Persisted conversation items exclude transient terminal animations.
+Completion, failure, new-decision, and assistant-progress events remain in a
+bounded replay log; tool-only terminal activity does not interrupt the user.
 Every tool result includes only this MCP connection's unread `updates` plus an
 `update_cursor`; `check_updates(after_event_id)` can replay from an explicit
 cursor for clients without notifications. A cursor beyond the current process
@@ -218,8 +225,9 @@ This prevents Celeris from denying a reply already present in its retained
 history. A newer send resets the baseline, and the harness does not infer a
 positive response from an older notification.
 The coordinator can read persisted Omnigent conversation messages plus stable
-tool or terminal items. It does not have arbitrary live terminal scrollback,
-and a file diff is visible only when Omnigent persists it in an item. Direct
+tool or terminal items, and it can receive authenticated live assistant text
+from the session SSE stream. It does not have arbitrary live terminal
+scrollback, and a file diff is visible only when Omnigent persists it in an item. Direct
 capability questions about raw output are answered from this harness contract,
 not from model self-assessment. An explicit “stop repeating” correction is
 likewise handled before the model: acknowledge the repetition, reconsider the

@@ -42,12 +42,10 @@
 - Live-test the new content-free send-preamble continuation window using a short
   phone pause, then verify the merged correction reaches the intended session
   exactly once and retains its attribution, numbers, and conditions.
-- Investigate an authenticated Omnigent live-event source for assistant text
-  already visible in its UI but not yet persisted in session items. In the ETA
-  trace, the coordinator announced the stable item within roughly two seconds,
-  but the answer itself was not persisted until about seven minutes after the
-  user had seen its streamed form. Preserve stable cursor polling as fallback;
-  never expose terminal or event access outside the existing private trust
-  boundary.
+- Live-test authenticated Omnigent SSE delivery from the phone: confirm a
+  current-session reply is available while the caller is speaking, a finalized
+  reply is announced once, and the later stable item or a reconnect snapshot
+  does not repeat it. Stable cursor polling remains the fallback; live event
+  access stays inside the existing private voice trust boundary.
 - Continue the isolated multi-session autoresearch loop without accessing or
   mutating excluded user sessions.

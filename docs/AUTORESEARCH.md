@@ -1754,3 +1754,43 @@ isolated trials, and all 34 stateful scenarios across 115 linked turns. The
 model evaluations used frozen coordinator state. Investigating persistence used
 one read of the explicitly in-scope voice-development session; no message was
 sent, no session was mutated, and the excluded ESPN session remained untouched.
+
+### 2026-08-29 — Authenticated live assistant tail
+
+Hypothesis H60: the multi-minute ETA visibility failure is removable without a
+new Omnigent endpoint because the installed server already publishes the UI's
+assistant text on its authenticated session SSE stream. Keeping that stream
+alongside the existing stable-item poll should make in-flight output available
+to the frozen human turn while preserving cursor-backed recovery and durable
+deduplication.
+
+Source inspection of the installed v0.11.0 server confirmed
+`GET /v1/sessions/{id}/stream` is a live-only authenticated SSE tail. Native
+assistant chunks carry a stable message ID, monotonic index, and optional final
+marker. On reconnect, the server replays the current aggregate after registering
+the new subscriber; completed text is eventually published as an authoritative
+`response.output_item.done` and appears through `/items`. This directly matches
+the ETA trace: the web UI could show the estimate before the durable item did.
+
+The coordinator now opens that stream for focused, active, and explicitly
+touched sessions. `check_updates` can consume only the new partial suffix while
+the caller is still speaking; proactive notification waits for a final message.
+Connection epochs merge replayed aggregates instead of duplicating their
+prefix. Final live text enters the ordinary output/event cursor once, and the
+later stable item is consumed as reconciliation rather than emitted again.
+An otherwise empty idle-transition event is suppressed for five seconds after
+the live final so the caller does not hear the answer and then an immediate
+redundant completion notice.
+Disconnects use bounded backoff and immediately reconcile stable items; the
+original two-second poll remains the correctness fallback.
+
+The focused transport suite passes 15 of 15 tests, including SSE framing,
+partial-then-final context, final-to-stable reconciliation, and a reconnect
+snapshot followed by new chunks. A real isolated session smoke test connected
+the SSE tail in 25 ms, accepted the test message in 38 ms, received first text
+2,195 ms after send, and received the complete guided reply at 2,400 ms. The
+single returned delta contained the expected marker. The new session was
+archived after the test; no existing session was read or mutated, and the
+excluded ESPN session remained untouched. Promotion evidence is 138 passing
+unit tests, clean typecheck and build, all 46 isolated Celeris trials, and all
+34 stateful scenarios across 115 linked turns.

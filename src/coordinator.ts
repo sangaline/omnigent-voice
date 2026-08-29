@@ -1,5 +1,5 @@
 import { Logger } from "./log.js";
-import { JsonObject, OmnigentClient } from "./omnigent.js";
+import { JsonObject, OmnigentClient, SessionStreamEvent } from "./omnigent.js";
 
 export type SessionFilter =
   | "any"
@@ -54,6 +54,15 @@ interface CoordinatorActionInput extends JsonObject {
 interface OutputEntry {
   id: string;
   text: string;
+  contextText?: string;
+}
+
+interface LiveOutput {
+  key: string;
+  text: string;
+  contextOffset: number;
+  lastIndex: number;
+  connectionEpoch: number;
 }
 
 interface ConversationOutputItemData extends JsonObject {
@@ -73,6 +82,9 @@ interface OutputState {
   entries: OutputEntry[];
   contextIndex: number;
   notificationIndex: number;
+  activeResponseId?: string;
+  live: Map<string, LiveOutput>;
+  reconciledLiveTexts: string[];
 }
 
 export interface CoordinatorOptions {
@@ -322,6 +334,29 @@ const isAssistantMessage = (raw: JsonObject): boolean => {
   return stringValue(item.role) === "assistant" && Boolean(contentText(item.content).trim());
 };
 
+const assistantMessageText = (raw: JsonObject): string => {
+  const item = isObject(raw.data) ? raw.data : raw;
+  return stringValue(item.role) === "assistant" ? contentText(item.content).trim() : "";
+};
+
+const abortableDelay = (milliseconds: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, milliseconds);
+    timer.unref();
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+
 export class OmnigentCoordinator {
   private focusedSessionId: string | undefined;
   private focusedSession: JsonObject | undefined;
@@ -342,14 +377,21 @@ export class OmnigentCoordinator {
   private actionSequence = 0;
   private readonly recentActions: CoordinatorAction[] = [];
   private readonly pendingDecisions = new Map<string, JsonObject>();
+  private readonly lastLiveOutputAt = new Map<string, number>();
   private readonly projectNames = new Map<string, string>();
   private projectsRefreshedAt = 0;
   private timer: NodeJS.Timeout | undefined;
   private polling: Promise<void> | undefined;
+  private readonly liveStreams = new Map<
+    string,
+    { controller: AbortController; task: Promise<void> }
+  >();
+  private stopping = false;
 
   public constructor(private readonly options: CoordinatorOptions) {}
 
   public async start(): Promise<void> {
+    this.stopping = false;
     await this.refreshProjects(true);
     const sessions = await this.options.omnigent.listSessions(30);
     this.seed(sessions);
@@ -359,7 +401,16 @@ export class OmnigentCoordinator {
     this.focusedSession = this.focusedSessionId
       ? this.sessionSummaries.get(this.focusedSessionId)
       : undefined;
-    if (this.focusedSessionId) await this.ensureOutputMonitor(this.focusedSessionId);
+    const initiallyMonitored = sessions
+      .filter(
+        (session) =>
+          sessionId(session) === this.focusedSessionId ||
+          session.status === "running" ||
+          session.status === "waiting",
+      )
+      .map(sessionId)
+      .filter((id): id is string => Boolean(id));
+    await Promise.all(initiallyMonitored.map((id) => this.ensureOutputMonitor(id)));
     this.timer = setInterval(() => {
       void this.refreshUpdates().catch((error) =>
         this.options.logger.error("coordinator.poll.failed", error),
@@ -373,8 +424,11 @@ export class OmnigentCoordinator {
   }
 
   public stop(): void {
+    this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    for (const stream of this.liveStreams.values()) stream.controller.abort();
+    this.liveStreams.clear();
   }
 
   public subscribeUpdates(listener: (update: CoordinatorUpdate) => void): () => void {
@@ -632,7 +686,9 @@ export class OmnigentCoordinator {
     const snapshot = await this.options.omnigent.getSession(id);
     await this.options.omnigent.archiveSession(id);
     const archived = this.summarize(snapshot);
+    this.stopLiveMonitor(id);
     this.outputStates.delete(id);
+    this.lastLiveOutputAt.delete(id);
     const wasFocused = id === this.focusedSessionId;
     let focusReason = "unchanged";
     if (wasFocused) {
@@ -916,6 +972,13 @@ export class OmnigentCoordinator {
     this.rememberSessions(sessions);
     await this.refreshPendingDecisions(sessions);
     await this.dispatchDeferredMessages(sessions);
+    await Promise.all(
+      sessions
+        .filter((session) => session.status === "running" || session.status === "waiting")
+        .map(sessionId)
+        .filter((id): id is string => Boolean(id))
+        .map((id) => this.ensureOutputMonitor(id)),
+    );
     const monitoredIds = [...this.outputStates.keys()];
     const assistantOutputIds = new Set(
       (
@@ -969,13 +1032,17 @@ export class OmnigentCoordinator {
         (previous.status === "running" || previous.status === "waiting")
       ) {
         lifecycleUpdate = true;
-        this.pushUpdate({
-          type: "session_completed",
-          session_id: id,
-          name,
-          status,
-          output_delta: this.readOutput(id, "notificationIndex"),
-        });
+        const outputDelta = this.readOutput(id, "notificationIndex");
+        const liveOutputAge = Date.now() - (this.lastLiveOutputAt.get(id) ?? 0);
+        if (outputDelta.changed === true || liveOutputAge > 5_000) {
+          this.pushUpdate({
+            type: "session_completed",
+            session_id: id,
+            name,
+            status,
+            output_delta: outputDelta,
+          });
+        }
       }
       if (
         lifecycleChanged &&
@@ -1054,11 +1121,238 @@ export class OmnigentCoordinator {
           entries: [],
           contextIndex: 0,
           notificationIndex: 0,
+          live: new Map(),
+          reconciledLiveTexts: [],
         });
+        this.ensureLiveMonitor(id);
       })
       .finally(() => this.outputInitializations.delete(id));
     this.outputInitializations.set(id, initialization);
     return initialization;
+  }
+
+  private ensureLiveMonitor(id: string): void {
+    if (this.stopping || this.liveStreams.has(id)) return;
+    const streamSession = (
+      this.options.omnigent as OmnigentClient & {
+        streamSession?: OmnigentClient["streamSession"];
+      }
+    ).streamSession;
+    if (typeof streamSession !== "function") return;
+    const controller = new AbortController();
+    const task = this.runLiveMonitor(id, controller.signal, streamSession)
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        this.options.logger.error("coordinator.stream.failed", error);
+      })
+      .finally(() => {
+        if (this.liveStreams.get(id)?.controller === controller) {
+          this.liveStreams.delete(id);
+        }
+      });
+    this.liveStreams.set(id, { controller, task });
+  }
+
+  private stopLiveMonitor(id: string): void {
+    const stream = this.liveStreams.get(id);
+    if (!stream) return;
+    stream.controller.abort();
+    this.liveStreams.delete(id);
+  }
+
+  private async runLiveMonitor(
+    id: string,
+    signal: AbortSignal,
+    streamSession: OmnigentClient["streamSession"],
+  ): Promise<void> {
+    let reconnectDelayMs = 250;
+    let connectionEpoch = 0;
+    while (!signal.aborted && !this.stopping) {
+      connectionEpoch += 1;
+      try {
+        await streamSession.call(
+          this.options.omnigent,
+          id,
+          signal,
+          (event) => this.handleLiveEvent(id, event, connectionEpoch),
+        );
+        reconnectDelayMs = 250;
+      } catch (error) {
+        if (signal.aborted || this.stopping) return;
+        this.options.logger.warn("coordinator.stream.reconnecting", {
+          reason: error instanceof Error ? error.message : String(error),
+          delayMs: reconnectDelayMs,
+        });
+      }
+      if (signal.aborted || this.stopping) return;
+      try {
+        await this.captureOutput(id);
+      } catch (error) {
+        this.options.logger.warn("coordinator.stream.reconcile_failed", {
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+      await abortableDelay(reconnectDelayMs, signal);
+      reconnectDelayMs = Math.min(5_000, reconnectDelayMs * 2);
+    }
+  }
+
+  private handleLiveEvent(
+    id: string,
+    event: SessionStreamEvent,
+    connectionEpoch: number,
+  ): void {
+    const state = this.outputStates.get(id);
+    if (!state) return;
+    if (event.type === "response.created" || event.type === "response.in_progress") {
+      const response = isObject(event.response) ? event.response : undefined;
+      const responseId = response ? stringValue(response.id) : undefined;
+      if (responseId) state.activeResponseId = responseId;
+      return;
+    }
+    if (event.type === "response.output_text.delta") {
+      const delta = typeof event.delta === "string" ? event.delta : "";
+      const messageId = stringValue(event.message_id);
+      const key = messageId
+        ? `message:${messageId}`
+        : `response:${state.activeResponseId ?? "current"}`;
+      let live = state.live.get(key);
+      if (!live) {
+        live = {
+          key,
+          text: "",
+          contextOffset: 0,
+          lastIndex: -1,
+          connectionEpoch,
+        };
+        state.live.set(key, live);
+      }
+      const index = numberValue(event.index);
+      if (index !== undefined && index <= live.lastIndex) return;
+      const firstChunkAfterReconnect = live.connectionEpoch !== connectionEpoch;
+      if (firstChunkAfterReconnect && delta.startsWith(live.text)) {
+        live.text = delta;
+      } else if (firstChunkAfterReconnect && live.text.startsWith(delta)) {
+        // The reconnect snapshot is an already-consumed prefix.
+      } else {
+        live.text += delta;
+      }
+      live.connectionEpoch = connectionEpoch;
+      if (index !== undefined) live.lastIndex = index;
+      if (event.final === true) {
+        const changed = this.finalizeLiveOutput(state, key, `live:${key}`);
+        if (changed) this.publishLiveOutput(id);
+      }
+      return;
+    }
+    if (event.type === "response.output_item.done" && isObject(event.item)) {
+      const item = event.item;
+      const rawText = assistantMessageText(item);
+      if (!rawText) return;
+      const stableId = itemId(item) ?? `stream-item:${Date.now()}`;
+      this.rememberSeenItem(state, stableId);
+      const formatted = `assistant: ${rawText}`;
+      if (this.consumeReconciledLiveText(state, formatted)) return;
+      const matching = [...state.live.values()].find(
+        (live) => live.text === rawText || rawText.startsWith(live.text),
+      );
+      const changed = matching
+        ? this.finalizeLiveOutput(state, matching.key, stableId, rawText)
+        : this.appendOutputEntry(state, { id: stableId, text: formatted });
+      if (changed) this.publishLiveOutput(id);
+      return;
+    }
+    if (event.type === "response.completed") {
+      let changed = false;
+      for (const key of [...state.live.keys()]) {
+        changed = this.finalizeLiveOutput(state, key, `live:${key}`) || changed;
+      }
+      delete state.activeResponseId;
+      if (changed) this.publishLiveOutput(id);
+      return;
+    }
+    if (
+      event.type === "response.failed" ||
+      event.type === "response.incomplete" ||
+      event.type === "response.cancelled"
+    ) {
+      state.live.clear();
+      delete state.activeResponseId;
+      return;
+    }
+    if (event.type === "session.status" && event.status === "idle") {
+      const key = state.activeResponseId
+        ? `response:${state.activeResponseId}`
+        : "response:current";
+      const changed = this.finalizeLiveOutput(state, key, `live:${key}`);
+      delete state.activeResponseId;
+      if (changed) this.publishLiveOutput(id);
+    }
+  }
+
+  private finalizeLiveOutput(
+    state: OutputState,
+    key: string,
+    id: string,
+    authoritativeText?: string,
+  ): boolean {
+    const live = state.live.get(key);
+    const rawText = (authoritativeText ?? live?.text ?? "").trim();
+    state.live.delete(key);
+    if (!rawText) return false;
+    const formatted = `assistant: ${rawText}`;
+    const consumed = Math.min(live?.contextOffset ?? 0, rawText.length);
+    const suffix = rawText.slice(consumed);
+    const entry: OutputEntry = {
+      id,
+      text: formatted,
+      ...(consumed > 0
+        ? { contextText: suffix ? `assistant (continued): ${suffix}` : "" }
+        : {}),
+    };
+    const changed = this.appendOutputEntry(state, entry);
+    if (changed && id.startsWith("live:")) {
+      state.reconciledLiveTexts.push(formatted);
+      if (state.reconciledLiveTexts.length > 20) state.reconciledLiveTexts.shift();
+    }
+    return changed;
+  }
+
+  private appendOutputEntry(state: OutputState, entry: OutputEntry): boolean {
+    if (state.entries.some((existing) => existing.id === entry.id)) return false;
+    state.entries.push(entry);
+    return true;
+  }
+
+  private consumeReconciledLiveText(state: OutputState, text: string): boolean {
+    const index = state.reconciledLiveTexts.indexOf(text);
+    if (index < 0) return false;
+    state.reconciledLiveTexts.splice(index, 1);
+    return true;
+  }
+
+  private rememberSeenItem(state: OutputState, id: string): void {
+    if (state.seenIds.has(id)) return;
+    state.seenIds.add(id);
+    state.seenOrder.push(id);
+    while (state.seenOrder.length > 300) {
+      const removed = state.seenOrder.shift();
+      if (removed) state.seenIds.delete(removed);
+    }
+  }
+
+  private publishLiveOutput(id: string): void {
+    const outputDelta = this.readOutput(id, "notificationIndex");
+    if (outputDelta.changed !== true) return;
+    const summary = this.sessionSummaries.get(id);
+    this.pushUpdate({
+      type: "session_output",
+      session_id: id,
+      name: stringValue(summary?.name) ?? "Untitled session",
+      status: stringValue(summary?.status) ?? "unknown",
+      output_delta: outputDelta,
+    });
+    this.lastLiveOutputAt.set(id, Date.now());
   }
 
   private async captureOutput(id: string): Promise<boolean> {
@@ -1074,11 +1368,14 @@ export class OmnigentCoordinator {
     let assistantMessageChanged = false;
     for (const raw of unseen) {
       const id = itemId(raw);
-      if (!id) continue;
+      if (!id || state.seenIds.has(id)) continue;
       state.seenIds.add(id);
       state.seenOrder.push(id);
-      if (isAssistantMessage(raw)) assistantMessageChanged = true;
       const text = meaningfulOutput(raw);
+      if (isAssistantMessage(raw) && text && this.consumeReconciledLiveText(state, text)) {
+        continue;
+      }
+      if (isAssistantMessage(raw)) assistantMessageChanged = true;
       if (text) state.entries.push({ id, text });
     }
     while (state.seenOrder.length > 300) {
@@ -1102,11 +1399,26 @@ export class OmnigentCoordinator {
     if (!state) return { changed: false, output: "" };
     const entries = state.entries.slice(state[cursor]);
     state[cursor] = state.entries.length;
-    const text = entries.map((entry) => entry.text).join("\n\n");
+    const rendered = entries
+      .map((entry) =>
+        cursor === "contextIndex" ? (entry.contextText ?? entry.text) : entry.text,
+      )
+      .filter(Boolean);
+    let liveCursor: string | undefined;
+    if (cursor === "contextIndex") {
+      for (const live of state.live.values()) {
+        const suffix = live.text.slice(live.contextOffset);
+        live.contextOffset = live.text.length;
+        if (!suffix) continue;
+        rendered.push(`assistant (still streaming): ${suffix}`);
+        liveCursor = `live:${live.key}:${live.text.length}`;
+      }
+    }
+    const text = rendered.join("\n\n");
     return {
-      changed: entries.length > 0,
+      changed: rendered.length > 0,
       output: text.length > 8_000 ? `${text.slice(-8_000)}\n[older output omitted]` : text,
-      cursor: entries.at(-1)?.id ?? null,
+      cursor: liveCursor ?? entries.at(-1)?.id ?? null,
     };
   }
 

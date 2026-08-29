@@ -13,6 +13,10 @@ export interface JsonObject {
   [key: string]: unknown;
 }
 
+export interface SessionStreamEvent extends JsonObject {
+  type: string;
+}
+
 interface StreamResult {
   text: string;
   terminal: string | null;
@@ -141,6 +145,56 @@ export class OmnigentClient {
       hasMore: listing.has_more === true,
       ...(lastId ? { lastId } : {}),
     };
+  }
+
+  public async streamSession(
+    sessionId: string,
+    signal: AbortSignal,
+    onEvent: (event: SessionStreamEvent) => void | Promise<void>,
+    onConnected?: () => void,
+  ): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/stream`,
+      {
+        signal,
+        headers: { accept: "text/event-stream" },
+      },
+    );
+    if (!response.ok || !response.body) {
+      throw new Error(`Omnigent stream returned HTTP ${response.status}`);
+    }
+    onConnected?.();
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (!signal.aborted) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() ?? "";
+        for (const block of blocks) {
+          const data = block
+            .split(/\r?\n/)
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trimStart())
+            .join("\n");
+          if (!data) continue;
+          if (data === "[DONE]") return;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            continue;
+          }
+          if (!isObject(parsed) || typeof parsed.type !== "string") continue;
+          await onEvent(parsed as SessionStreamEvent);
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
   }
 
   public async sendMessage(sessionId: string, message: string): Promise<JsonObject> {

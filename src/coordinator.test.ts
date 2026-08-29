@@ -558,6 +558,213 @@ describe("Omnigent coordinator", () => {
     }
   });
 
+  it("captures live SSE text during speech and reconciles the later stable item", async () => {
+    const now = new Date().toISOString();
+    const session = {
+      id: "session-live-sse",
+      title: "Live SSE Work",
+      status: "running",
+      updated_at: now,
+    };
+    const listItems = vi.fn().mockResolvedValue({ data: [], hasMore: false });
+    const listSessions = vi.fn().mockResolvedValue([session]);
+    let emit:
+      | ((event: Record<string, unknown>) => void | Promise<void>)
+      | undefined;
+    let streamSignal: AbortSignal | undefined;
+    const streamSession = vi.fn(
+      async (
+        _id: string,
+        signal: AbortSignal,
+        onEvent: (event: Record<string, unknown>) => void | Promise<void>,
+      ): Promise<void> => {
+        emit = onEvent;
+        streamSignal = signal;
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      },
+    );
+    const omnigent = {
+      listSessions,
+      getSession: vi.fn().mockResolvedValue(session),
+      listItems,
+      streamSession,
+      sendMessage: vi.fn(),
+      resolveElicitation: vi.fn(),
+      createSession: vi.fn(),
+      archiveSession: vi.fn(),
+      renameSession: vi.fn(),
+      interruptSession: vi.fn(),
+    } as unknown as OmnigentClient;
+    const coordinator = new OmnigentCoordinator({
+      omnigent,
+      logger: new Logger("error"),
+      pollIntervalMs: 60_000,
+    });
+    await coordinator.start();
+    const client = await CoordinatorMcpClient.create(coordinator);
+    try {
+      expect(streamSession).toHaveBeenCalledWith(
+        "session-live-sse",
+        expect.any(AbortSignal),
+        expect.any(Function),
+      );
+      await emit?.({
+        type: "response.output_text.delta",
+        delta: "The estimate is ",
+        message_id: "answer-1",
+        index: 0,
+      });
+      await expect(client.callTool("check_updates", { after_event_id: 0 })).resolves.toMatchObject({
+        output_delta: {
+          changed: true,
+          output: "assistant (still streaming): The estimate is ",
+        },
+        updates: [],
+      });
+
+      await emit?.({
+        type: "response.output_text.delta",
+        delta: "45 to 60 minutes.",
+        message_id: "answer-1",
+        index: 1,
+        final: true,
+      });
+      const completed = await client.callTool("check_updates", { after_event_id: 0 });
+      expect(completed).toMatchObject({
+        output_delta: {
+          changed: true,
+          output: "assistant (continued): 45 to 60 minutes.",
+        },
+        updates: [
+          {
+            event_id: 1,
+            type: "session_output",
+            session_id: "session-live-sse",
+            output_delta: {
+              changed: true,
+              output: "assistant: The estimate is 45 to 60 minutes.",
+            },
+          },
+        ],
+      });
+
+      listItems.mockResolvedValue({
+        data: [
+          {
+            id: "stable-answer-1",
+            type: "message",
+            role: "assistant",
+            content: "The estimate is 45 to 60 minutes.",
+          },
+        ],
+        hasMore: false,
+      });
+      listSessions.mockResolvedValue([{ ...session, status: "idle" }]);
+      await expect(client.callTool("check_updates", { after_event_id: 1 })).resolves.toMatchObject({
+        output_delta: { changed: false, output: "" },
+        updates: [],
+        update_cursor: 1,
+      });
+    } finally {
+      coordinator.stop();
+      expect(streamSignal?.aborted).toBe(true);
+      await client.close();
+    }
+  });
+
+  it("merges an in-flight reconnect snapshot without repeating its prefix", async () => {
+    const session = {
+      id: "session-reconnect",
+      title: "Reconnect Work",
+      status: "running",
+      updated_at: new Date().toISOString(),
+    };
+    const callbacks: Array<
+      (event: Record<string, unknown>) => void | Promise<void>
+    > = [];
+    let finishFirst: (() => void) | undefined;
+    const streamSession = vi.fn(
+      async (
+        _id: string,
+        signal: AbortSignal,
+        onEvent: (event: Record<string, unknown>) => void | Promise<void>,
+      ): Promise<void> => {
+        callbacks.push(onEvent);
+        if (callbacks.length === 1) {
+          await new Promise<void>((resolve) => {
+            finishFirst = resolve;
+          });
+          return;
+        }
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      },
+    );
+    const omnigent = {
+      listSessions: vi.fn().mockResolvedValue([session]),
+      getSession: vi.fn().mockResolvedValue(session),
+      listItems: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
+      streamSession,
+      sendMessage: vi.fn(),
+      resolveElicitation: vi.fn(),
+      createSession: vi.fn(),
+      archiveSession: vi.fn(),
+      renameSession: vi.fn(),
+      interruptSession: vi.fn(),
+    } as unknown as OmnigentClient;
+    const coordinator = new OmnigentCoordinator({
+      omnigent,
+      logger: new Logger("error"),
+      pollIntervalMs: 60_000,
+    });
+    await coordinator.start();
+    const client = await CoordinatorMcpClient.create(coordinator);
+    try {
+      await callbacks[0]?.({
+        type: "response.output_text.delta",
+        delta: "The estimate is ",
+        message_id: "answer-reconnect",
+        index: 0,
+      });
+      finishFirst?.();
+      await vi.waitFor(() => expect(callbacks).toHaveLength(2), { timeout: 1_500 });
+      await callbacks[1]?.({
+        type: "response.output_text.delta",
+        delta: "The estimate is 45 ",
+        message_id: "answer-reconnect",
+        index: 1,
+      });
+      await callbacks[1]?.({
+        type: "response.output_text.delta",
+        delta: "to 60 minutes.",
+        message_id: "answer-reconnect",
+        index: 2,
+        final: true,
+      });
+
+      await expect(client.callTool("check_updates", { after_event_id: 0 })).resolves.toMatchObject({
+        output_delta: {
+          changed: true,
+          output: "assistant: The estimate is 45 to 60 minutes.",
+        },
+        updates: [
+          {
+            type: "session_output",
+            output_delta: {
+              output: "assistant: The estimate is 45 to 60 minutes.",
+            },
+          },
+        ],
+      });
+    } finally {
+      coordinator.stop();
+      await client.close();
+    }
+  });
+
   it("supports replayable event cursors without globally draining updates", async () => {
     const now = new Date().toISOString();
     const running = {

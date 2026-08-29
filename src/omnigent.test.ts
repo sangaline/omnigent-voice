@@ -5,6 +5,69 @@ import { OmnigentClient } from "./omnigent.js";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Omnigent API client", () => {
+  it("parses the authenticated live session SSE stream", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: "opaque", expires_in: 3600 }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          [
+            "event: session.heartbeat",
+            'data: {"type":"session.heartbeat"}',
+            "",
+            "event: response.output_text.delta",
+            'data: {"type":"response.output_text.delta","delta":"Ready.","message_id":"msg-1","index":0,"final":true}',
+            "",
+            "data: [DONE]",
+            "",
+          ].join("\n"),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OmnigentClient({
+      baseUrl: "https://omnigent.test",
+      refreshToken: "opaque-refresh",
+      agentName: "default-agent",
+      workspace: "/workspace",
+      logger: new Logger("error"),
+    });
+    const controller = new AbortController();
+    const events: Array<Record<string, unknown>> = [];
+    const connected = vi.fn();
+
+    await client.streamSession(
+      "session/voice",
+      controller.signal,
+      (event) => {
+        events.push(event);
+      },
+      connected,
+    );
+
+    expect(connected).toHaveBeenCalledOnce();
+    expect(events).toEqual([
+      { type: "session.heartbeat" },
+      {
+        type: "response.output_text.delta",
+        delta: "Ready.",
+        message_id: "msg-1",
+        index: 0,
+        final: true,
+      },
+    ]);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      "https://omnigent.test/v1/sessions/session%2Fvoice/stream",
+    );
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("accept")).toBe(
+      "text/event-stream",
+    );
+  });
+
   it("uses the installed server's top-level session kind", async () => {
     const fetchMock = vi
       .fn()
