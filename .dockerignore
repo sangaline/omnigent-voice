@@ -3,6 +3,6 @@
 !package-lock.json
 !tsconfig.json
 !src/**
+!native/**
 !scripts/**
 !models/checksums.txt
-

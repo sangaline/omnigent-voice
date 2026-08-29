@@ -242,3 +242,23 @@ index b1a2426..3314250 100644
      lmmodel->initial_token_id = (int) config->card;
      
      lmmodel->personaplex = config->model_type == "personaplex";
+diff --git a/src/moshi/modules/transformer.h b/src/moshi/modules/transformer.h
+index 4aa5df9..10d36b7 100644
+--- a/src/moshi/modules/transformer.h
++++ b/src/moshi/modules/transformer.h
+@@ -779,6 +779,15 @@ void get_weights( WeightLoader * loader, std::string path, moshi_smha_t * attn )
+     }
+     {
+         auto st = loader->find( path + "in_proj_weight" );
++        if ( !st ) {
++            for ( size_t i = 0; i < attn->in_projs.size(); i++ )
++                get_weights( loader, path + "in_projs." + std::to_string(i) + ".",
++                    attn->in_projs[i] );
++            for ( size_t i = 0; i < attn->out_projs.size(); i++ )
++                get_weights( loader, path + "out_projs." + std::to_string(i) + ".",
++                    attn->out_projs[i] );
++            return;
++        }
+         assert( st );
+         ggml_type dtype = safetensor_get_type( st->dtype );
+         ggml_type dst_dtype = loader->quantize? loader->qtype : dtype;

@@ -330,6 +330,17 @@ but a WAV voice prompt works. Build the guided S2S experiment on native Q4 and
 keep the existing staged voice pipeline selectable until the new Discord loop
 is verified end to end.
 
+Native KAME Q4 is faster than that control on the same device: after 20 warmup
+frames, 250 complete encode/model/decode frames measured 63.445 ms mean,
+64.335 ms p95, 64.597 ms p99, and 65.145 ms maximum (15.762 fps). The converted
+GGUF is 4,399,071,712 bytes and must remain an external private runtime mount.
+The official safetensors stores attention `in_projs`/`out_projs` separately;
+the native patch deliberately supports both that layout and Moshi's fused
+projection tensors. A paced public-audio smoke test injected oracle text after
+the caller stopped, and both KAME's generated token stream and independent
+local ASR recovered the intended guided sentence. Treat this as the native
+runtime gate, not as a substitute for a live Discord/phone test.
+
 The guided native experiment is implemented behind `VOICE_RUNTIME=kame`; the
 default remains `staged`. `native/moshi-kame.patch` adds KAME's oracle embedding
 and one-token-per-frame queue to pinned `Codes4Fun/moshi.cpp`, while

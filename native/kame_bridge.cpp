@@ -23,13 +23,17 @@ struct Options {
     const char * mimi = nullptr;
     const char * tokenizer = nullptr;
     const char * device = "Vulkan0";
+    const char * prompt = nullptr;
     int context = 3000;
+    int benchmark_frames = 0;
+    int warmup_frames = 20;
 };
 
 [[noreturn]] void usage(const char * program) {
     std::fprintf(stderr,
         "usage: %s --config PATH --model PATH --mimi PATH --tokenizer PATH "
-        "[--device NAME] [--context FRAMES]\n",
+        "[--device NAME] [--context FRAMES] [--prompt TEXT] "
+        "[--benchmark-frames N] [--warmup-frames N]\n",
         program);
     std::exit(2);
 }
@@ -45,11 +49,18 @@ Options parse_options(int argc, char ** argv) {
         else if (argument == "--mimi") options.mimi = value;
         else if (argument == "--tokenizer") options.tokenizer = value;
         else if (argument == "--device") options.device = value;
+        else if (argument == "--prompt") options.prompt = value;
         else if (argument == "--context") options.context = std::atoi(value);
+        else if (argument == "--benchmark-frames") {
+            options.benchmark_frames = std::atoi(value);
+        } else if (argument == "--warmup-frames") {
+            options.warmup_frames = std::atoi(value);
+        }
         else usage(argv[0]);
     }
     if (!options.config || !options.model || !options.mimi || !options.tokenizer ||
-        options.context <= 0) {
+        options.context <= 0 || options.benchmark_frames < 0 ||
+        options.warmup_frames < 0) {
         usage(argv[0]);
     }
     return options;
@@ -154,6 +165,19 @@ void report_metrics(std::vector<double> & frame_ms) {
     frame_ms.clear();
 }
 
+void report_benchmark(const std::vector<double> & frame_ms) {
+    double total = 0.0;
+    for (const double value : frame_ms) total += value;
+    const double mean = total / static_cast<double>(frame_ms.size());
+    std::fprintf(stderr,
+        "B\t{\"frames\":%zu,\"mean_ms\":%.3f,\"p50_ms\":%.3f,"
+        "\"p95_ms\":%.3f,\"p99_ms\":%.3f,\"max_ms\":%.3f,"
+        "\"fps\":%.3f}\n",
+        frame_ms.size(), mean, percentile(frame_ms, 0.50),
+        percentile(frame_ms, 0.95), percentile(frame_ms, 0.99),
+        percentile(frame_ms, 1.0), 1000.0 / mean);
+}
+
 }  // namespace
 
 int main(int argc, char ** argv) {
@@ -193,7 +217,11 @@ int main(int argc, char ** argv) {
     mimi_decode_context_t * decoder = mimi_decode_alloc_context(codec);
     tokenizer_t * tokenizer = tokenizer_alloc(options.tokenizer, false);
     moshi_lm_gen_t * generator = moshi_lm_generator(lm);
-    moshi_lm_kame_oracle_text(generator, tokenizer, "", true);
+    // SentencePiece can initialize lazily. Keep that one-time work out of the
+    // first live guidance update, then restore the intended initial queue.
+    moshi_lm_kame_oracle_text(generator, tokenizer, "warmup", true);
+    moshi_lm_kame_oracle_text(
+        generator, tokenizer, options.prompt ? options.prompt : "", true);
     moshi_lm_start(moshi, generator, 0.8f, 0.7f);
 
     const int control_flags = ::fcntl(kControlFd, F_GETFL);
@@ -213,9 +241,18 @@ int main(int argc, char ** argv) {
     std::vector<double> frame_ms;
     std::string controls;
     std::string transcript;
+    int transcript_padding_frames = 0;
     int text_token = 0;
+    int processed_frames = 0;
+    const int total_benchmark_frames =
+        options.benchmark_frames + options.warmup_frames;
 
-    while (read_full(STDIN_FILENO, input.data(), input.size() * sizeof(float))) {
+    while (options.benchmark_frames > 0
+        ? processed_frames < total_benchmark_frames
+        : read_full(STDIN_FILENO, input.data(), input.size() * sizeof(float))) {
+        if (options.benchmark_frames > 0) {
+            std::fill(input.begin(), input.end(), 0.0f);
+        }
         drain_controls(generator, tokenizer, controls);
         const auto started = std::chrono::steady_clock::now();
         mimi_encode_send(encoder, input.data());
@@ -227,21 +264,37 @@ int main(int argc, char ** argv) {
             mimi_decode_receive(decoder, output.data());
         }
         const auto finished = std::chrono::steady_clock::now();
-        frame_ms.push_back(std::chrono::duration<double, std::milli>(
-            finished - started).count());
-        report_metrics(frame_ms);
+        const double elapsed_ms = std::chrono::duration<double, std::milli>(
+            finished - started).count();
+        if (options.benchmark_frames == 0 ||
+            processed_frames >= options.warmup_frames) {
+            frame_ms.push_back(elapsed_ms);
+            if (options.benchmark_frames == 0) report_metrics(frame_ms);
+        }
+        if (options.benchmark_frames == 0 && elapsed_ms > 80.0) {
+            char line[160];
+            std::snprintf(line, sizeof(line),
+                "S\t{\"frame\":%d,\"ms\":%.3f}", processed_frames,
+                elapsed_ms);
+            event(line);
+        }
 
         if (text_token != 0 && text_token != 3) {
             transcript += spoken_piece(tokenizer, text_token);
-        } else if (!transcript.empty()) {
+            transcript_padding_frames = 0;
+        } else if (!transcript.empty() && ++transcript_padding_frames >= 8) {
             event("T\t" + transcript);
             transcript.clear();
+            transcript_padding_frames = 0;
         }
-        if (!write_full(STDOUT_FILENO, output.data(), output.size() * sizeof(float))) {
+        ++processed_frames;
+        if (options.benchmark_frames == 0 &&
+            !write_full(STDOUT_FILENO, output.data(), output.size() * sizeof(float))) {
             break;
         }
     }
 
+    if (options.benchmark_frames > 0) report_benchmark(frame_ms);
     if (!transcript.empty()) event("T\t" + transcript);
     unref(generator);
     unref(tokenizer);

@@ -39,6 +39,22 @@ The source integration is pinned to `Codes4Fun/moshi.cpp` commit
 `for_moshi` commit `8cf09e9cd3c227ecb42aefc544c820b6c63a28f3`. Apply
 `native/moshi-kame.patch`, build the shared Moshi library with dynamic CPU and
 Vulkan ggml backends, then compile `native/kame_bridge.cpp` against it.
+`native/kame_quantize.cpp` is the offline converter used to create the mounted
+Q4 GGUF from the official public safetensors checkpoint; it is not used in the
+live audio loop.
+
+The converter is available in the image so model material never has to enter
+the public build context. Bind-mount the accepted `SakanaAI/kame` checkpoint and
+a private output directory, then run:
+
+```text
+/opt/omnigent-voice/bin/kame-quantize CONFIG MODEL_SAFETENSORS OUTPUT_GGUF CPU
+```
+
+KAME's checkpoint stores attention projections as separate tensors, unlike the
+fused layout used by some Moshi checkpoints. The pinned native patch supports
+both layouts. The resulting Q4_K GGUF is about 4.1 GiB and remains a private
+runtime mount; it is never copied into the image.
 
 ## Control protocol
 
@@ -53,3 +69,12 @@ under 80 ms is insufficient by itself: recurrent p95 deadline misses will
 create gaps or an ever-growing input/output backlog. Do not make KAME the
 deployment default until a real Discord run shows stable tails and the oracle
 speech follows Celeris closely enough for tool-action claims.
+
+On the target Radeon 8060S, a 20-frame warmup followed by 250 full
+Mimi-encode/KAME/Mimi-decode frames measured 63.445 ms mean, 64.335 ms p95,
+64.597 ms p99, and 65.145 ms maximum (15.762 fps). A separate real-time smoke
+test injected guidance after public test speech; the native generated-text
+stream and an independent local ASR pass both recovered, “I hear you clearly.
+The guided real-time voice path is working.” The bridge logs every frame over
+the 80 ms deadline separately so cold-start and recurrent misses cannot hide in
+a rolling percentile.

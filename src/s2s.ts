@@ -19,6 +19,30 @@ export interface S2SReady {
   frameSize: number;
 }
 
+export const decodeS2SReady = (payload: string): S2SReady => {
+  const wire = JSON.parse(payload) as Partial<S2SReady> & {
+    sample_rate?: number;
+    frame_rate?: number;
+    frame_size?: number;
+  };
+  const parsed = {
+    sampleRate: wire.sampleRate ?? wire.sample_rate,
+    frameRate: wire.frameRate ?? wire.frame_rate,
+    frameSize: wire.frameSize ?? wire.frame_size,
+  };
+  if (
+    !Number.isFinite(parsed.sampleRate) ||
+    !Number.isFinite(parsed.frameRate) ||
+    !Number.isSafeInteger(parsed.frameSize) ||
+    parsed.sampleRate! <= 0 ||
+    parsed.frameRate! <= 0 ||
+    parsed.frameSize! <= 0
+  ) {
+    throw new Error("KAME S2S runtime returned invalid audio metadata");
+  }
+  return parsed as S2SReady;
+};
+
 export const encodeS2SGuidance = (text: string, reset = true): string => {
   const normalized = text.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
   return `${reset ? "R" : "A"}\t${normalized}\n`;
@@ -100,11 +124,19 @@ export class KameS2SRuntime {
         clearTimeout(timer);
         resolve(result);
       };
-      child.once("error", (error) => {
-        if (settled) return;
+      const fail = (error: unknown): void => {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        if (settled) {
+          this.options.logger.error("s2s.event.invalid", failure);
+          return;
+        }
         settled = true;
         clearTimeout(timer);
-        reject(error);
+        child.kill("SIGTERM");
+        reject(failure);
+      };
+      child.once("error", (error) => {
+        fail(error);
       });
       child.once("exit", (code, signal) => {
         if (!settled) {
@@ -120,34 +152,33 @@ export class KameS2SRuntime {
         }
       });
       lines(events, (line) => {
-        const kind = line.slice(0, 1);
-        const payload = line.slice(2);
-        if (kind === "R") {
-          const parsed = JSON.parse(payload) as S2SReady;
-          if (
-            !Number.isFinite(parsed.sampleRate) ||
-            !Number.isFinite(parsed.frameRate) ||
-            !Number.isSafeInteger(parsed.frameSize)
-          ) {
-            throw new Error("KAME S2S runtime returned invalid audio metadata");
+        try {
+          const kind = line.slice(0, 1);
+          const payload = line.slice(2);
+          if (kind === "R") {
+            const parsed = decodeS2SReady(payload);
+            this.readyState = parsed;
+            this.options.logger.info("s2s.ready", {
+              loadMs: Math.round(performance.now() - started),
+              sampleRate: parsed.sampleRate,
+              frameRate: parsed.frameRate,
+              frameSize: parsed.frameSize,
+            });
+            finish(parsed);
+          } else {
+            this.handleEvent(kind, payload);
           }
-          this.readyState = parsed;
-          this.options.logger.info("s2s.ready", {
-            loadMs: Math.round(performance.now() - started),
-            sampleRate: parsed.sampleRate,
-            frameRate: parsed.frameRate,
-            frameSize: parsed.frameSize,
-          });
-          finish(parsed);
-        } else {
-          this.handleEvent(kind, payload);
+        } catch (error) {
+          fail(error);
         }
       });
     });
 
     audio.on("data", (chunk: Buffer) => this.acceptOutput(chunk));
     audio.on("error", (error) => this.options.logger.error("s2s.audio.failed", error));
-    return ready;
+    const metadata = await ready;
+    await this.warmup(20);
+    return metadata;
   }
 
   public subscribeAudio(listener: (audio: Float32Array) => void): () => void {
@@ -218,6 +249,34 @@ export class KameS2SRuntime {
     }
   }
 
+  private async warmup(frames: number): Promise<void> {
+    if (!this.readyState || frames <= 0) return;
+    const started = performance.now();
+    const silence = new Float32Array(this.readyState.frameSize);
+    await new Promise<void>((resolve, reject) => {
+      let completed = 0;
+      const timer = setTimeout(() => {
+        unsubscribe();
+        reject(new Error("KAME S2S warmup did not complete within two minutes"));
+      }, 120_000);
+      const unsubscribe = this.subscribeAudio(() => {
+        completed += 1;
+        if (completed >= frames) {
+          clearTimeout(timer);
+          unsubscribe();
+          resolve();
+          return;
+        }
+        this.sendAudio(silence);
+      });
+      this.sendAudio(silence);
+    });
+    this.options.logger.info("s2s.warmup.complete", {
+      frames,
+      durationMs: Math.round(performance.now() - started),
+    });
+  }
+
   private handleEvent(kind: string, payload: string): void {
     if (kind === "G") {
       this.options.logger.info("s2s.guidance.accepted", { tokens: Number(payload) });
@@ -241,6 +300,18 @@ export class KameS2SRuntime {
         });
       } catch (error) {
         this.options.logger.error("s2s.metrics.invalid", error);
+      }
+      return;
+    }
+    if (kind === "S") {
+      try {
+        const spike = JSON.parse(payload) as Record<string, number>;
+        this.options.logger.warn("s2s.frame_deadline_missed", {
+          frame: spike.frame,
+          durationMs: spike.ms,
+        });
+      } catch (error) {
+        this.options.logger.error("s2s.spike.invalid", error);
       }
       return;
     }
