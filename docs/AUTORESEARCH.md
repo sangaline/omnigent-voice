@@ -210,3 +210,10 @@ production run passed 26 of 27 because one queued-delivery acknowledgement
 omitted the session name; that same case then passed five of five immediate
 reruns. Together with the earlier 27-of-27 candidate run, all isolated cases
 have clean confirmation without relaxing their action or grounding rubrics.
+
+Deployment checkpoint: image `2026-08-28-91c0310` contains production runtime
+JavaScript and pinned local speech models but excludes replay, evaluation,
+scenario, test, and research artifacts. The local cluster rollout reached
+speech-model, coordinator, and Discord-voice readiness in about 1.2 seconds,
+reported zero restarts, and retained the existing private JSONL audit log.
+Hermes remained inactive throughout the handoff of the shared Discord identity.
