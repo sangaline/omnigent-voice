@@ -4586,5 +4586,168 @@
         }
       }
     ]
+  },
+  {
+    "id": "focused_action_result_decision_retained",
+    "description": "Send a focused-session instruction while asking for concurrent updates, announce a third-session decision returned by that action, and resolve the exact prompt on the next deictic turn.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "waiting", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell it to rerun the endpoint checks and uh if anything came in while i was talking tell me too",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "waiting", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "pending_decisions": [
+              {
+                "session_id": "session-audit-sweep",
+                "name": "Audit Sweep",
+                "prompts": [
+                  {
+                    "prompt_id": "prompt-audit-deploy",
+                    "message": "Deploy the repaired watcher to staging?",
+                    "mode": "confirmation",
+                    "schema": null
+                  }
+                ]
+              }
+            ],
+            "recent_actions": [
+              {
+                "action_id": 711,
+                "type": "message_sent",
+                "message": "Rerun the endpoint checks.",
+                "summary": "Sent immediately to Primary Work: Rerun the endpoint checks."
+              }
+            ],
+            "updates": [
+              {
+                "event_id": 711,
+                "type": "decision_needed",
+                "session_id": "session-audit-sweep",
+                "name": "Audit Sweep",
+                "status": "waiting",
+                "prompts": [
+                  {
+                    "prompt_id": "prompt-audit-deploy",
+                    "message": "Deploy the repaired watcher to staging?",
+                    "mode": "confirmation",
+                    "schema": null
+                  }
+                ]
+              }
+            ],
+            "update_cursor": 711,
+            "summary": "Sent immediately to Primary Work."
+          }
+        },
+        "checkUpdatesAfter": 0,
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "send_message",
+              "argumentEquals": { "message": "rerun the endpoint checks" }
+            }
+          ],
+          "speechTerms": ["primary work", "audit sweep", "approval", "staging"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "yeah okay approve that one",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "waiting", "focused": false }
+          ],
+          "pending_decisions": [
+            {
+              "session_id": "session-audit-sweep",
+              "name": "Audit Sweep",
+              "prompts": [
+                {
+                  "prompt_id": "prompt-audit-deploy",
+                  "message": "Deploy the repaired watcher to staging?",
+                  "mode": "confirmation",
+                  "schema": null
+                }
+              ]
+            }
+          ],
+          "recent_actions": [
+            {
+              "action_id": 711,
+              "type": "message_sent",
+              "message": "Rerun the endpoint checks.",
+              "summary": "Sent immediately to Primary Work: Rerun the endpoint checks."
+            }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 711
+        },
+        "toolResults": {
+          "answer_prompt": {
+            "resolved": true,
+            "session_id": "session-audit-sweep",
+            "prompt_id": "prompt-audit-deploy",
+            "action": "accept",
+            "target_session": { "id": "session-audit-sweep", "name": "Audit Sweep", "status": "waiting" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "pending_decisions": [],
+            "recent_actions": [
+              {
+                "action_id": 712,
+                "type": "prompt_answered",
+                "summary": "Approved the staging deployment prompt in Audit Sweep."
+              }
+            ],
+            "updates": [],
+            "update_cursor": 711
+          }
+        },
+        "checkUpdatesAfter": 711,
+        "expected": {
+          "toolSequence": ["answer_prompt"],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+          "sessionId": "session-audit-sweep",
+          "argumentEquals": { "prompt_id": "prompt-audit-deploy", "action": "accept" },
+          "speechTerms": ["approved", "audit sweep"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

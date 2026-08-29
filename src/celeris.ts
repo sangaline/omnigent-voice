@@ -970,7 +970,9 @@ export const voiceMessageInstruction = (
             "i",
           ),
         ]
-      : []),
+      : [
+          /\b(?:tell|ask)\s+(?:it|the\s+(?:session|agent)|this\s+(?:session|agent))\s+to\s+(.+)$/i,
+        ]),
   ];
   const captured = patterns
     .map((pattern) => pattern.exec(input)?.[1]?.trim())
@@ -985,6 +987,8 @@ export const voiceMessageInstruction = (
       /\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:if\s+(?:anything|anything\s+new|any\s+updates?)\s+(?:came|comes|arrived|arrives)\s+in\b.*|(?:tell|let)\s+me\b.*\b(?:came|arrived|updates?)\b.*)$/i,
       "",
     )
+    .trim()
+    .replace(/[.!?]+$/, "")
     .trim();
   return instruction || undefined;
 };
@@ -2199,7 +2203,8 @@ export class CelerisConversation {
     const allowedTools = new Set(tools.map((tool) => tool.function.name));
     const sendBeforeIncomingUpdateReply =
       incomingUpdateQuestion &&
-      messageRouting.mode === "named" &&
+      (messageRouting.mode === "named" ||
+        (messageRouting.mode === "focused" && Boolean(messageInstruction))) &&
       allowedTools.has("send_message");
     const requiredCompoundActions =
       messageRouting.mode === "named" &&

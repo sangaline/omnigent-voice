@@ -230,13 +230,15 @@ uncertain results, and composites containing a non-renderable result still need
 model synthesis.
 The runtime's hidden `check_updates` call already answers a generic “did
 anything come in while I was speaking?” question at speech finalization. When
-that question accompanies an explicit named send, older-output tools are hidden
-and the send is forced before speech rather than letting Celeris replace it with
-a redundant read. The harness also removes the trailing update question from
-the outbound instruction, so it is answered by the voice layer rather than
-being delivered to the coding agent. Any safe event returned by the send itself
-is included in the one-round typed receipt above and retained for later deictic
-cursor continuation.
+that question accompanies an explicit named send or a clear focused-session
+pronoun instruction such as “tell it to …,” older-output tools are hidden and
+the send is forced before speech rather than letting Celeris replace it with a
+redundant read. Focused sends continue to use the coordinator's server-owned
+default and do not expose or inject a session ID. The harness also removes the
+trailing update question from the outbound instruction, so it is answered by
+the voice layer rather than being delivered to the coding agent. Any safe event
+returned by the send itself is included in the one-round typed receipt above
+and retained for later deictic cursor or decision resolution.
 Every tool-using turn also records `last_verified_tool_workflow`, an ordered,
 process-local list of successful named reads and typed actions. It contains no
 opaque IDs. The next model turn uses it to answer whether two sources were

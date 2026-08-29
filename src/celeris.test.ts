@@ -727,6 +727,11 @@ describe("Celeris coordinator conversation", () => {
     ).toBe("rerun the cutoff checks");
     expect(
       voiceMessageInstruction(
+        "tell it to rerun the endpoint checks and uh if anything came in while i was talking tell me too",
+      ),
+    ).toBe("rerun the endpoint checks");
+    expect(
+      voiceMessageInstruction(
         "tell primary work what side worker found",
         "Primary Work",
       ),

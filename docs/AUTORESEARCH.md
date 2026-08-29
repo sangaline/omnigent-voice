@@ -1320,3 +1320,39 @@ used one model round; after the first cold request, the compound action took
 unit tests, clean typecheck and build, 32 of 32 isolated trials, and all 30
 stateful scenarios across 100 linked turns. No live Omnigent session was read or
 mutated, and the excluded ESPN session remained untouched.
+
+### 2026-08-29 — Focused action plus concurrent decision
+
+The retained 5.619-second Celeris outlier came from the older
+model-summarized proactive-notification path. Its ordinary first-round human
+requests stayed below 719 ms in that run, and the later direct-notification
+release removes the slow background model round for safe events. No current
+evidence therefore justified adding a speculative shorter provider timeout.
+
+Hypothesis H46 instead tested the nearest held-out generalization of H45: “tell
+it to …” addresses sticky focus, a generic update question follows in the same
+ASR-style utterance, and the action result contains a third-session structured
+approval. The first fixture incorrectly expected a focused send to carry an
+explicit session ID; that assertion was removed because omission is the
+intentional server-owned focused default. The unchanged production harness then
+failed all ten valid runs for one consistent reason: every outbound message
+incorrectly included “let me know if anything came in while I was talking.”
+The send itself ran in all ten trials, and every following approval used the
+correct opaque Audit Sweep session and prompt identifiers.
+
+The focused instruction extractor now recognizes the narrow “tell/ask it to”
+grammar, removes a trailing voice-layer incoming-update clause and terminal
+punctuation, and forces the verified send before speech. It does not generalize
+from a bare “tell me,” so a pure incoming-update question cannot accidentally
+become a coordinator action. The action result's safe decision event uses the
+same one-round typed composition introduced by H45 and remains authoritative on
+the next deictic approval turn.
+
+The strengthened flow passed ten of ten runs and all 20 turns. Every first turn
+sent exactly “rerun the endpoint checks,” spoke the Primary Work receipt and
+Audit Sweep staging approval in one model round, and every second turn resolved
+the exact prompt without changing focus. After the first cold request, the
+compound turn measured 184–259 ms in this sample. Final evidence is 98 passing
+unit tests, clean typecheck and build, 32 of 32 isolated trials, and all 31
+stateful scenarios across 102 linked turns. No live Omnigent session was read or
+mutated, and the excluded ESPN session remained untouched.
