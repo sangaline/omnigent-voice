@@ -2,10 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
   FrozenCoordinatorExecutor,
   observationFromTrace,
+  parseReplayCoordinatorUpdates,
   scoreVoiceEval,
   VoiceEvalCase,
   VoiceEvalObservation,
 } from "./evaluation.js";
+
+describe("private replay coordinator evidence", () => {
+  it("restores exact serialized updates when the audit record has them", () => {
+    const updates = [{ event_id: 7, type: "session_output", output: "exact evidence" }];
+    expect(parseReplayCoordinatorUpdates(JSON.stringify(updates), [])).toEqual(updates);
+  });
+
+  it("falls back safely for old or malformed audit records", () => {
+    const fallback = [{ event_id: 1, type: "session_completed" }];
+    expect(parseReplayCoordinatorUpdates(undefined, fallback)).toEqual(fallback);
+    expect(parseReplayCoordinatorUpdates("not-json", fallback)).toEqual(fallback);
+    expect(parseReplayCoordinatorUpdates("{}", fallback)).toEqual(fallback);
+  });
+});
 
 const testCase: VoiceEvalCase = {
   id: "send_retry",

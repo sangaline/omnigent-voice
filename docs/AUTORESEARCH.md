@@ -1609,3 +1609,38 @@ This change does not alter the Celeris prompt, tool schemas, conversation state,
 or coordinator behavior, so the immediately preceding 41-of-41 isolated and
 33-of-33 linked scenario model gates remain the relevant model evidence rather
 than being needlessly rerun.
+
+### 2026-08-29 — Backend evidence outranks spoken interpretation
+
+Hypothesis H58: retaining a proactive update and its spoken adaptation in the
+same history was enough for Celeris to distinguish what the backend established
+from what the voice model had previously inferred. A live-derived exact replay
+disproved it: after an update said MCP supports notifications while this
+implementation uses polling, a later clarification confidently attributed an
+unsupported external-client claim to the agent. The current production replay
+reproduced that answer in 421 ms. A sanitized production-harness case failed all
+five baseline trials. A reverse held-out case, where the server emitted events
+but the client did not subscribe, was unstable at four of five.
+
+The adjacent current-turn invariant now says that exact background-update and
+typed tool evidence outrank prior assistant speech. It preserves the source's
+actor, positive and negative capability, and causal direction rather than
+turning a downstream consumer limitation into an upstream emission failure.
+The live-derived case and reverse held-out case each passed ten of ten targeted
+trials in one model round after refinement.
+
+The replay also exposed an audit-fidelity limitation rather than a live runtime
+limitation: old JSONL records retained the spoken notification but not its exact
+source payload, so historical replay could not reconstruct the evidence the
+live process had seen. Future background-generation records now retain the
+serialized coordinator update in the private audit log, and replay restores it
+exactly. Old or malformed records retain the prior bounded synthetic fallback;
+missing historical source data cannot be recovered. The payload is sensitive
+private conversation data and never enters public fixtures, images, or git.
+
+A sanitized new-format end-to-end replay restored the exact update, ignored an
+incorrect prior assistant claim, and answered the backend-versus-client
+distinction correctly in 503 ms and one model round. Promotion evidence is 121
+passing unit tests, clean typecheck and build, 43 of 43 isolated trials, and all
+33 stateful scenarios across 110 linked turns. No eval or replay invoked a live
+coordinator action, and the excluded ESPN session remained untouched.

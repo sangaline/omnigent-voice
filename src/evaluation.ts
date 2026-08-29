@@ -77,6 +77,21 @@ const isJsonObject = (value: unknown): value is JsonObject =>
 const lowerIncludes = (value: string, term: string): boolean =>
   value.toLocaleLowerCase().includes(term.toLocaleLowerCase());
 
+export const parseReplayCoordinatorUpdates = (
+  serialized: string | undefined,
+  fallback: unknown[],
+): unknown[] => {
+  if (serialized) {
+    try {
+      const parsed: unknown = JSON.parse(serialized);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Older or interrupted audit records use the bounded synthetic fallback.
+    }
+  }
+  return fallback;
+};
+
 const updatesAfter = (state: JsonObject, afterEventId = 0): unknown[] =>
   Array.isArray(state.updates)
     ? state.updates.filter((value) => {

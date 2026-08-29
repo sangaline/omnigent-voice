@@ -6,7 +6,10 @@ import {
   currentTurnActionInvariant,
   systemPrompt,
 } from "./celeris.js";
-import { FrozenCoordinatorExecutor } from "./evaluation.js";
+import {
+  FrozenCoordinatorExecutor,
+  parseReplayCoordinatorUpdates,
+} from "./evaluation.js";
 import { Logger } from "./log.js";
 import { CoordinatorMcpClient } from "./mcp.js";
 
@@ -18,6 +21,7 @@ interface AuditRecord {
   actionId?: number;
   type?: string;
   summary?: string;
+  coordinatorUpdates?: string;
 }
 
 const option = (name: string): string | undefined => {
@@ -73,19 +77,20 @@ for (const [recordOffset, record] of preceding.entries()) {
   if (record.event === "conversation.assistant.generated" && typeof record.text === "string") {
     if (record.source === "background_update") {
       const name = /["“]([^"”]+)["”]/.exec(record.text)?.[1] ?? "background session";
+      const replayUpdates = parseReplayCoordinatorUpdates(record.coordinatorUpdates, [
+        {
+          event_id: recordOffset + 1,
+          type: "session_completed",
+          session_id:
+            name === focusedName
+              ? focusedSessionId
+              : `replay-background-session-${recordOffset + 1}`,
+          name,
+        },
+      ]);
       restoredDialogue.push({
         role: "system",
-        content: `Omnigent background update: ${JSON.stringify([
-          {
-            event_id: recordOffset + 1,
-            type: "session_completed",
-            session_id:
-              name === focusedName
-                ? focusedSessionId
-                : `replay-background-session-${recordOffset + 1}`,
-            name,
-          },
-        ])}`,
+        content: `Omnigent background update: ${JSON.stringify(replayUpdates)}`,
       });
     }
     restoredDialogue.push({ role: "assistant", content: record.text });

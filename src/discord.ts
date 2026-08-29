@@ -1008,6 +1008,7 @@ export class DiscordVoiceBot {
         text: spoken,
         superseded: false,
         source: "background_update",
+        coordinatorUpdates: JSON.stringify(updates),
       });
       let delivered = await this.deliverProactiveSpeech(spoken, epoch, controller.signal);
       if (!delivered && !controller.signal.aborted && epoch === this.responseEpoch) {

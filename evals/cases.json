@@ -1532,5 +1532,94 @@
       "speechForbiddenTerms": ["up in everything", "up in the air", "being involved"],
       "maxRounds": 1
     }
+  },
+  {
+    "id": "source_update_outweighs_prior_assistant_interpretation",
+    "description": "Distinguish an authoritative backend update from the voice model's unsupported prior interpretation of an external client's capabilities.",
+    "history": [
+      {
+        "role": "system",
+        "content": "Omnigent background update: [{\"event_id\":31,\"type\":\"session_output\",\"session_id\":\"session-primary\",\"name\":\"Primary Work\",\"output\":\"MCP supports server-to-client notifications over persistent connections. This coordinator implementation currently uses polling and tool results.\"}]"
+      },
+      {
+        "role": "assistant",
+        "content": "The Primary Work update says MCP supports server-to-client notifications, while this coordinator currently uses polling and tool results."
+      },
+      {
+        "role": "user",
+        "content": "okay so very concisely does claude desktop support push notifications"
+      },
+      {
+        "role": "assistant",
+        "content": "Claude Desktop does not support push notifications from MCP servers."
+      }
+    ],
+    "input": "is the update saying claude doesn't support it or is it saying our backend doesn't support it",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 31
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+      "speechTerms": ["polling"],
+      "speechAnyTerms": [
+        ["backend", "coordinator", "implementation"]
+      ],
+      "speechForbiddenTerms": [
+        "claude desktop does not support",
+        "claude doesn't support",
+        "claude does not support"
+      ],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "source_update_preserves_client_side_limitation",
+    "description": "Preserve a source update's client-side limitation even when prior voice speech incorrectly blamed the backend.",
+    "history": [
+      {
+        "role": "system",
+        "content": "Omnigent background update: [{\"event_id\":44,\"type\":\"session_output\",\"session_id\":\"session-primary\",\"name\":\"Primary Work\",\"output\":\"The coordinator already emits notification events. The mobile client's connector does not subscribe to those events.\"}]"
+      },
+      {
+        "role": "assistant",
+        "content": "The coordinator currently cannot send push updates."
+      }
+    ],
+    "input": "wait is that saying our backend cannot push or that the mobile client doesn't subscribe",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 44
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+      "speechAnyTerms": [
+        ["mobile client", "client"],
+        ["doesn't subscribe", "does not subscribe", "not subscribe"]
+      ],
+      "speechForbiddenTerms": [
+        "backend cannot push",
+        "backend can't push",
+        "coordinator cannot send",
+        "coordinator can't send"
+      ],
+      "maxRounds": 1
+    }
   }
 ]

@@ -338,7 +338,13 @@ outside the model: a read-shaped follow-up after one spoken notification hides
 the opaque ID and injects the notification's recorded target even if Celeris
 emits sticky focus. Ordinals resolve against notification order. An unqualified
 read after multiple notifications returns an immediate zero-round clarification
-that names the candidates; it never guesses or offers a read tool. A changed `output_delta`
+that names the candidates; it never guesses or offers a read tool. The same
+source hierarchy applies to factual follow-ups:
+an exact background-update record or typed tool result outranks prior assistant
+speech, which is only a fallible interpretation. Preserve the source's actor,
+positive and negative capabilities, and causal direction; a client that does
+not consume an event is not evidence that the backend cannot emit it.
+A changed `output_delta`
 directly answers “what's new” and “since then” without an older-output read.
 For the narrower question “did anything new come in while I was talking,” an
 atomically empty `updates` array plus `output_delta.changed: false` and a valid
@@ -562,6 +568,10 @@ appended to that runtime file. `conversation.user.recognized` contains each ASR
 transcript. `conversation.assistant.generated` records the response and whether
 it was superseded before playback. `conversation.assistant.playback_started`
 records the exact text whose audio actually began and its retry number.
+For `source: "background_update"`, the generated record also stores the exact
+serialized coordinator update payload so private replay can distinguish backend
+evidence from the voice model's spoken interpretation. This field can contain
+session output and decision data and is therefore as sensitive as the transcript.
 `coordinator.action.recorded` records the exact action summary, including
 outbound message text, so delivery claims can be audited after model history is
 trimmed. This is
