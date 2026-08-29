@@ -80,8 +80,12 @@ describe("Omnigent coordinator", () => {
       status: "running",
       updated_at: now,
       pending_elicitations_count: 1,
+      project_id: "project-base",
     };
     const omnigent = {
+      listSessionProjects: vi.fn().mockResolvedValue([
+        { id: "project-base", name: "Base Project", icon: null },
+      ]),
       listSessions: vi.fn().mockResolvedValue([session]),
       getSession: vi.fn().mockResolvedValue(session),
       listItems: vi.fn().mockResolvedValue({
@@ -135,11 +139,26 @@ describe("Omnigent coordinator", () => {
         client.callTool("list_sessions", { status: "waiting_for_input" }),
       ).resolves.toMatchObject({
         sessions: [
-          { id: "session-1", name: "Voice MVP", pending_prompts: 1, focused: true },
+          {
+            id: "session-1",
+            name: "Voice MVP",
+            pending_prompts: 1,
+            focused: true,
+            project: { id: "project-base", name: "Base Project" },
+          },
         ],
-        focused_session: { id: "session-1", name: "Voice MVP" },
+        focused_session: {
+          id: "session-1",
+          name: "Voice MVP",
+          project: { id: "project-base", name: "Base Project" },
+        },
         known_sessions: [
-          { id: "session-1", name: "Voice MVP", focused: true },
+          {
+            id: "session-1",
+            name: "Voice MVP",
+            focused: true,
+            project: { id: "project-base", name: "Base Project" },
+          },
         ],
         updates: [],
       });

@@ -1530,3 +1530,59 @@ Promotion evidence is 110 passing unit tests, clean typecheck and build, 38 of
 38 isolated trials, and all 32 stateful scenarios across 106 linked turns. No
 live Omnigent session was read or mutated by these tests, and the excluded ESPN
 session remained untouched.
+
+### 2026-08-29 — Typed session organization
+
+Hypothesis H54: Celeris could accurately explain whether sessions are pinned or
+filed into projects from the existing session summaries. The unchanged harness
+failed all five trials: it omitted the project information and never made the
+important distinction that Omnigent exposes `project_id` but no separate pin
+field.
+
+The Omnigent client now reads the native session-project catalog, and every
+coordinator summary carries a typed project name and ID or `null`. A narrow
+organization question is rendered directly from those fields without a model
+round. The public fixture uses generic project names only; no live project IDs,
+workspace paths, or account-specific values enter the repository.
+
+### 2026-08-29 — Spoken notifications remain authoritative
+
+Hypothesis H55: once a proactive backend reply had been spoken and retained in
+history, Celeris would correctly answer a later “did we get a response?” check.
+The live trace disproved it twice. In the clearest exchange the coordinator
+delivered and spoke the real reply, unrelated small talk followed, and Celeris
+then claimed the agent had not responded and promised to keep monitoring. On
+the user's correction, the same model found the already-retained update. This
+was a model interpretation failure, not a polling or context-delivery failure.
+
+The harness now records a notification-sequence baseline for every successful
+send and the latest verified spoken reply for each target. A later response
+check is answered directly only when a real output, completion, failure, or
+decision notification for that target occurred after that send. A newer send
+resets the baseline, so an older update cannot be mistaken for its reply.
+
+The exact linked regression—send, proactive reply, unrelated spoken turn, then
+response check—passes with the final check taking zero model rounds. Promotion
+evidence is 113 passing unit tests, clean typecheck and build, 39 of 39 isolated
+trials, and all 33 stateful scenarios across 110 linked turns. The excluded
+ESPN session was not read or mutated.
+
+### 2026-08-29 — Capability honesty and failed-explanation recovery
+
+Hypothesis H56: the general truthfulness and brevity prompt was enough for
+Celeris to describe its terminal visibility accurately and recover from an
+incoherent explanation after the human objected. Both sanitized live-derived
+cases failed all five trials before correction. The model claimed broad output
+visibility without stating the persistence boundary; in the failed-joke flow it
+kept paraphrasing the same invented “up in the air” premise.
+
+The harness now answers terminal-visibility questions from its actual contract:
+persisted conversation plus stable tool or terminal items, no arbitrary live
+scrollback, and diffs only when Omnigent persisted them. A narrow explicit
+“stop repeating” correction also acknowledges the failure and stops without
+repeating the challenged premise. Both cases passed ten of ten in zero model
+rounds after the change.
+
+Current promotion evidence is 115 passing unit tests, clean typecheck and build,
+41 of 41 isolated trials, and all 33 stateful scenarios across 110 linked turns.
+No test touched the excluded ESPN session.

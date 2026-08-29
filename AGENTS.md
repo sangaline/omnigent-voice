@@ -133,7 +133,11 @@ Omnigent auth uses a runtime refresh token. At boot, the coordinator focuses the
 most recently active native session but does not create one. Focus is sticky:
 reading or listing sessions never changes it, and `focus_session` is only for an
 explicit user-requested switch. Every coordinator result includes the focused
-session, and send acknowledgements include their actual target session.
+session, and send acknowledgements include their actual target session. Session
+summaries also expose the native Omnigent project as a typed `{id, name}` value
+or `null`. Omnigent currently exposes no separate pinned-session field; the
+voice harness answers project-versus-pin questions from those typed values
+instead of asking the small model to infer organization from a title.
 Starting or explicitly focusing a session records the prior focus in a bounded
 server-owned stack. Archiving the focused session restores the newest still-valid
 prior focus, falling back to the most recently active unarchived session. The
@@ -173,6 +177,21 @@ unsafe, expired, concurrent-update, or longer results return to Celeris. This is
 voice-layer convenience only: standalone MCP clients continue passing their
 own explicit cursors and therefore degrade cleanly without process-local voice
 state.
+After each successful `send_message`, the voice harness records the current
+spoken-notification sequence for that exact target. If a later proactive
+`session_output`, completion, failure, or decision for that target is spoken,
+a subsequent “did we get a response?” or contradictory “it didn't get back”
+turn is answered deterministically from that verified spoken notification.
+This prevents Celeris from denying a reply already present in its retained
+history. A newer send resets the baseline, and the harness does not infer a
+positive response from an older notification.
+The coordinator can read persisted Omnigent conversation messages plus stable
+tool or terminal items. It does not have arbitrary live terminal scrollback,
+and a file diff is visible only when Omnigent persists it in an item. Direct
+capability questions about raw output are answered from this harness contract,
+not from model self-assessment. An explicit “stop repeating” correction is
+likewise handled before the model: acknowledge the repetition, reconsider the
+failed explanation, and do not restate its premise.
 Events consumed by `check_updates` or returned by a later tool call during a
 successful human turn are also retained as structured notification history,
 deduplicated by event ID, and their output cursors are committed with the spoken
@@ -480,6 +499,16 @@ prompt IDs again.
 A stdio MCP entry point is
 available with `npm run mcp`; authenticated remote HTTP transport is deliberately
 deferred.
+For future Claude integration, do not equate MCP transport notifications with
+proactive agent turns. MCP `2026-07-28` `subscriptions/listen` carries only
+tool/prompt/resource list changes and subscribed-resource invalidations; Tasks
+remain poll-driven. Ordinary Claude MCP does not inject an arbitrary server
+notification into model context or wake an idle agent. Experimental Claude
+Channels can carry the nonstandard `notifications/claude/channel` into a
+specially launched terminal CLI, but it is a separate optional adapter with
+client-specific support, not the remote MCP contract. Keep `check_updates` and
+`poll_output` cursors as the correctness path for standard clients even if a
+future transport also publishes advisory resource-change notifications.
 
 Every Celeris turn also receives an explicit context contract. Spoken dialogue
 is append-only in the hot path. By default, the harness retains raw dialogue

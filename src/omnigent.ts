@@ -87,6 +87,18 @@ export class OmnigentClient {
     return Array.isArray(listing.data) ? listing.data.filter(isObject) : [];
   }
 
+  public async listSessionProjects(): Promise<JsonObject[]> {
+    const response = await this.authorizedFetch("/v1/sessions/projects");
+    if (!response.ok) {
+      throw new Error(`Omnigent projects API returned HTTP ${response.status}`);
+    }
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) {
+      throw new Error("Omnigent projects API returned malformed JSON");
+    }
+    return payload.filter(isObject);
+  }
+
   public async getSession(sessionId: string): Promise<JsonObject> {
     const query = new URLSearchParams({
       include_items: "false",

@@ -11,7 +11,10 @@ import {
   directFocusedOutputSpeech,
   directGetOutputResultSpeech,
   directNoIncomingUpdateSpeech,
+  directOutputVisibilityCapabilitySpeech,
+  directRepetitionCorrectionSpeech,
   directPendingDecisionSpeech,
+  directSessionOrganizationSpeech,
   directPollOutputResultSpeech,
   directSessionOutputSpeech,
   immediateNotificationTargets,
@@ -167,6 +170,26 @@ const conversation = (
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Celeris coordinator conversation", () => {
+  it("describes terminal visibility without claiming arbitrary raw scrollback", () => {
+    expect(
+      directOutputVisibilityCapabilitySpeech(
+        "are you seeing raw terminal output like diffs or just the chat summary",
+      ),
+    ).toContain("persisted conversation");
+    expect(
+      directOutputVisibilityCapabilitySpeech("what is the latest session output"),
+    ).toBeUndefined();
+  });
+
+  it("stops a failed explanation instead of repeating its premise", () => {
+    expect(
+      directRepetitionCorrectionSpeech(
+        "stop just repeating yourself that explanation doesn't make any sense",
+      ),
+    ).toContain("doesn't make sense");
+    expect(directRepetitionCorrectionSpeech("please explain that again")).toBeUndefined();
+  });
+
   it("segments generated text at natural boundaries with a hard speech limit", () => {
     const segmenter = new StreamingSpeechSegmenter(54, 30);
     expect(segmenter.push("The first sentence arrives. The second")).toEqual([
@@ -1779,6 +1802,75 @@ describe("Celeris coordinator conversation", () => {
     expect(poll?.function?.parameters?.properties).not.toHaveProperty("cursor");
   });
 
+  it("treats a spoken backend notification as authoritative when asked whether the agent responded", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-send-question",
+            type: "function",
+            function: {
+              name: "send_message",
+              arguments: JSON.stringify({ message: "Does the integration support notifications?" }),
+            },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) =>
+      Promise.resolve(
+        name === "check_updates"
+          ? {
+              focused_session: { id: "session-voice", name: "Voice Work" },
+              known_sessions: [{ id: "session-voice", name: "Voice Work" }],
+              updates: [],
+              update_cursor: 40,
+            }
+          : {
+              accepted: true,
+              delivery: "immediate",
+              target_session: { id: "session-voice", name: "Voice Work" },
+              updates: [],
+            },
+      ),
+    );
+    const subject = conversation("test-key", tools);
+
+    await expect(
+      subject.respond("ask it whether the integration supports notifications"),
+    ).resolves.toBe("I sent that to Voice Work.");
+    subject.acknowledgeSpokenUpdates(
+      [
+        {
+          event_id: 41,
+          type: "session_output",
+          session_id: "session-voice",
+          name: "Voice Work",
+          status: "running",
+          output_delta: {
+            changed: true,
+            output: "assistant: It supports notifications with polling fallback.",
+            cursor: "item-41",
+          },
+        },
+      ],
+      "Voice Work says it supports notifications with polling fallback.",
+    );
+
+    await expect(subject.respond("did we get a response")).resolves.toBe(
+      "Yes. Voice Work says it supports notifications with polling fallback.",
+    );
+    await expect(
+      subject.respond("and it didn't get back to us with anything"),
+    ).resolves.toBe(
+      "Yes. Voice Work says it supports notifications with polling fallback.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("retains an output event consumed alongside a human turn", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       response({
@@ -3157,6 +3249,26 @@ describe("Celeris coordinator conversation", () => {
         state,
       ),
     ).toBeUndefined();
+  });
+
+  it("keeps project filing distinct from an unavailable pin flag", () => {
+    expect(
+      directSessionOrganizationSpeech(
+        "when you look at sessions can you tell if a session is pinned or not",
+        {
+          focused_session: {
+            id: "session-primary",
+            name: "Primary Work",
+            project: { id: "project-base", name: "Base Project" },
+          },
+          pending_decisions: [],
+          output_delta: { changed: false, output: "" },
+          updates: [],
+        },
+      ),
+    ).toBe(
+      "Omnigent doesn't expose a separate pinned-session flag. Primary Work is filed in Base Project.",
+    );
   });
 
   it("does not report an empty incoming-update check without complete evidence", () => {

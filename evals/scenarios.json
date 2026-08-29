@@ -4901,5 +4901,130 @@
         }
       }
     ]
+  },
+  {
+    "id": "spoken_reply_remains_authoritative_after_small_talk",
+    "description": "After a sent question receives and speaks a proactive backend reply, a later status check must not contradict that retained notification even after an unrelated turn.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "ask voice work if the remote integration can support push notifications",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+            "recent_actions": [
+              {
+                "action_id": 901,
+                "type": "message_sent",
+                "session_id": "session-voice",
+                "name": "Voice Work",
+                "message": "Can the remote integration support push notifications?"
+              }
+            ],
+            "updates": [],
+            "update_cursor": 0
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "sessionId": "session-voice",
+          "messageTerms": ["push notifications"],
+          "speechTerms": ["sent", "voice work"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 902,
+            "type": "session_output",
+            "session_id": "session-voice",
+            "name": "Voice Work",
+            "status": "running",
+            "output_delta": {
+              "changed": true,
+              "output": "assistant: The integration supports push notifications with a polling fallback.",
+              "cursor": "voice-902"
+            }
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["notifications", "polling fallback"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay ignore the work for a second and just tell me you're listening",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 901, "type": "message_sent", "session_id": "session-voice", "name": "Voice Work" }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 902
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["listening"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "and did we get a response",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 901, "type": "message_sent", "session_id": "session-voice", "name": "Voice Work" }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 902
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["yes", "notifications", "polling fallback"],
+          "speechForbiddenTerms": ["hasn't responded", "has not responded", "keep an eye", "monitor"],
+          "maxRounds": 0
+        }
+      }
+    ]
   }
 ]

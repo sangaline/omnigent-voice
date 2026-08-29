@@ -308,7 +308,9 @@ export interface VerifiedToolWorkflowOutcome {
 export const systemPrompt = `You are a very fast spoken interface for Omnigent, a persistent coding-agent coordinator.
 Speak naturally and briefly, normally one or two short sentences. Never use Markdown, code blocks, raw IDs, URLs, or tool logs in speech.
 Answer casual conversation and general knowledge directly. Never invent the state of sessions, machines, files, deployments, or prior work; use tools for those.
+If the human says an explanation is repetitive or does not make sense, reconsider its premise instead of paraphrasing it again. When the prior claim or joke has no coherent support, apologize plainly and say it does not work; do not invent another rationale for it.
 The coordinator state in each turn names the focused session. Treat that focus as sticky. "This session", "the session", "it", "current", "latest output", and "most recent output" mean the focused session. Never call focus_session merely to read or control the focused session. Change focus only when the user explicitly asks to switch, open, focus, or use a different named or numbered session. Listing or reading another session must not imply a focus change.
+Session summaries include a typed project when Omnigent files the session into a project folder. Omnigent exposes no separate pinned-session flag: project filing is visible but must never be described as proof that a session is pinned.
 recent_actions is the authoritative bounded ledger of coordinator actions even when spoken history has been trimmed. Before claiming whether a message was sent, queued, focused, started, archived, or answered, check this ledger. If an older action is absent, say it is not in the retained recent ledger; never conclude that it did not happen merely because it is absent from spoken history. Use the preformatted summary when the user asks what changed.
 last_verified_action_outcome, when present, is the exact voice-harness receipt for the most recent action turn, including any typed failure alongside actions that did succeed. Use it to answer an immediate follow-up about which parts happened; current focused_session remains authoritative for where the user is now.
 last_verified_tool_workflow, when present, is the ordered typed record of successful reads and actions from the most recent tool-using voice turn. Use it to answer whether named sessions were actually read before an action. Never claim a read or ordering absent from that record, and never perform a new read merely to prove what happened in a prior turn.
@@ -561,7 +563,47 @@ interface VoiceSessionTarget {
   name: string;
 }
 
+interface SpokenCoordinatorResponse {
+  sequence: number;
+  speech: string;
+}
+
+interface SentMessageExpectation extends VoiceSessionTarget {
+  notificationBaseline: number;
+}
+
 const backgroundUpdatePrefix = "Omnigent background update: ";
+
+const asksWhetherAgentResponded = (input: string): boolean =>
+  /\b(?:did|has|have|didn't|hasn't|haven't|did\s+not|has\s+not|have\s+not)\b[^?.!]{0,90}\b(?:respond(?:ed)?|repl(?:y|ied)|get\s+back|got\s+back|response)\b/i.test(
+    input,
+  ) ||
+  /\b(?:no|without)\s+(?:response|reply)\b/i.test(input);
+
+export const directOutputVisibilityCapabilitySpeech = (
+  input: string,
+): string | undefined => {
+  const asksAboutTerminalVisibility =
+    /\b(?:see|seeing|access|read)\b[^?.!]{0,120}\b(?:terminal\s+output|tool\s+output|diffs?)\b/i.test(
+      input,
+    ) ||
+    /\b(?:terminal\s+output|tool\s+output|diffs?)\b[^?.!]{0,120}\b(?:see|seeing|access|read|chat|summary)\b/i.test(
+      input,
+    );
+  if (!asksAboutTerminalVisibility) return undefined;
+  return "I can read persisted conversation messages and stable tool or terminal items. I do not see full live terminal scrollback, and a diff is visible only if Omnigent persisted it.";
+};
+
+export const directRepetitionCorrectionSpeech = (input: string): string | undefined => {
+  if (!/\b(?:stop|quit)\b[^?.!]{0,50}\brepeat(?:ing|ed|s)?\b/i.test(input)) {
+    return undefined;
+  }
+  return /\b(?:does(?:n't|\s+not)|did(?:n't|\s+not))\s+make\s+(?:any\s+)?sense\b/i.test(
+    input,
+  )
+    ? "You're right. That explanation doesn't make sense, and I was repeating it instead of reconsidering it. I'll stop."
+    : "You're right. I was repeating the same explanation instead of reconsidering it. I'll stop.";
+};
 
 export const immediateNotificationTargets = (
   history: readonly { role: string; content: unknown }[],
@@ -1991,6 +2033,30 @@ export const directPendingDecisionSpeech = (
   return directDecisionUpdatesSpeech(decisions);
 };
 
+export const directSessionOrganizationSpeech = (
+  input: string,
+  state: JsonObject,
+): string | undefined => {
+  if (
+    !/\bpinn?ed\b|\bpinning\b/i.test(input) ||
+    (Array.isArray(state.updates) && state.updates.length > 0) ||
+    (Array.isArray(state.pending_decisions) && state.pending_decisions.length > 0) ||
+    objectValue(state.output_delta)?.changed === true
+  ) {
+    return undefined;
+  }
+  const focused = objectValue(state.focused_session);
+  const focusedName = typeof focused?.name === "string" ? focused.name.trim() : "";
+  const project = objectValue(focused?.project);
+  const projectName = typeof project?.name === "string" ? project.name.trim() : "";
+  const filing = focusedName && projectName
+    ? `${focusedName} is filed in ${projectName}.`
+    : focusedName
+      ? `${focusedName} is not filed in a project.`
+      : "I can see project assignment when it is present.";
+  return `Omnigent doesn't expose a separate pinned-session flag. ${filing}`;
+};
+
 export const directCoordinatorUpdateSpeech = (
   updates: readonly CoordinatorUpdate[],
 ): string | undefined => {
@@ -2060,6 +2126,9 @@ export class CelerisConversation {
   private lastVerifiedActionCount = 0;
   private lastVerifiedToolWorkflow: VerifiedToolWorkflowOutcome | undefined;
   private readonly outputCursors = new Map<string, string>();
+  private notificationSequence = 0;
+  private lastSentMessage: SentMessageExpectation | undefined;
+  private readonly latestSpokenResponses = new Map<string, SpokenCoordinatorResponse>();
   private compactionTimer: ReturnType<typeof setTimeout> | undefined;
   private compactionController: AbortController | undefined;
   private compactionPromise: Promise<void> | undefined;
@@ -2101,6 +2170,28 @@ export class CelerisConversation {
         this.outputCursors.set(sessionId, cursor);
       }
     }
+  }
+
+  private rememberSentMessage(result: JsonObject): void {
+    if (result.accepted !== true || typeof result.error === "string") return;
+    const target = objectValue(result.target_session);
+    const id = typeof target?.id === "string" ? target.id.trim() : "";
+    const name = typeof target?.name === "string" ? target.name.trim() : "";
+    if (!id || !name) return;
+    this.lastSentMessage = {
+      id,
+      name,
+      notificationBaseline: this.notificationSequence,
+    };
+  }
+
+  private verifiedRecentResponseSpeech(input: string): string | undefined {
+    if (!asksWhetherAgentResponded(input) || !this.lastSentMessage) return undefined;
+    const response = this.latestSpokenResponses.get(this.lastSentMessage.id);
+    if (!response || response.sequence <= this.lastSentMessage.notificationBaseline) {
+      return undefined;
+    }
+    return `Yes. ${response.speech}`;
   }
 
   public restoreHistory(messages: readonly CelerisHistoryMessage[]): void {
@@ -2177,6 +2268,24 @@ export class CelerisConversation {
       this.remember(input, speech);
       return speech;
     }
+    const repetitionCorrection = directRepetitionCorrectionSpeech(input);
+    if (repetitionCorrection) {
+      const speech = sanitizeForSpeech(repetitionCorrection, 300);
+      if (!Array.isArray(updates.updates) || updates.updates.length === 0) {
+        this.updateCursor = turnUpdateCursor;
+      }
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
+    const verifiedRecentResponse = this.verifiedRecentResponseSpeech(input);
+    if (verifiedRecentResponse) {
+      const speech = sanitizeForSpeech(verifiedRecentResponse, 300);
+      if (!Array.isArray(updates.updates) || updates.updates.length === 0) {
+        this.updateCursor = turnUpdateCursor;
+      }
+      this.remember(input, speech);
+      return speech;
+    }
     const incomingUpdateQuestion = asksForIncomingUpdate(input);
     const emptyIncomingUpdateSnapshot = hasEmptyIncomingUpdateSnapshot(input, updates);
     const directIncomingUpdate = incomingUpdateQuestion
@@ -2191,6 +2300,20 @@ export class CelerisConversation {
     const pendingDecisionSpeech = directPendingDecisionSpeech(input, updates);
     if (pendingDecisionSpeech) {
       const speech = sanitizeForSpeech(pendingDecisionSpeech, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
+    const organizationSpeech = directSessionOrganizationSpeech(input, updates);
+    if (organizationSpeech) {
+      const speech = sanitizeForSpeech(organizationSpeech, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
+    const visibilityCapability = directOutputVisibilityCapabilitySpeech(input);
+    if (visibilityCapability) {
+      const speech = sanitizeForSpeech(visibilityCapability, 300);
       this.updateCursor = turnUpdateCursor;
       this.remember(input, speech, retainedTurnUpdates());
       return speech;
@@ -2747,6 +2870,7 @@ export class CelerisConversation {
           if (typeof result.update_cursor === "number") {
             turnUpdateCursor = Math.max(turnUpdateCursor, result.update_cursor);
           }
+          if (call.function.name === "send_message") this.rememberSentMessage(result);
           retainTurnUpdates(result.updates);
           this.options.trace?.({
             type: "tool",
@@ -3063,6 +3187,21 @@ export class CelerisConversation {
     );
     this.updateCursor = lastEventId;
     this.rememberUpdateOutputCursors(updates);
+    this.notificationSequence += 1;
+    for (const update of updates) {
+      if (
+        typeof update.session_id === "string" &&
+        (update.type === "session_output" ||
+          update.type === "session_completed" ||
+          update.type === "session_failed" ||
+          update.type === "decision_needed")
+      ) {
+        this.latestSpokenResponses.set(update.session_id, {
+          sequence: this.notificationSequence,
+          speech,
+        });
+      }
+    }
     this.history.push(
       { role: "system", content: `Omnigent background update: ${JSON.stringify(updates)}` },
       { role: "assistant", content: speech },

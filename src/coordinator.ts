@@ -257,13 +257,22 @@ export const formatConversationItems = (
   return { items, omitted: formatted.length - items.length };
 };
 
-const summary = (session: JsonObject): JsonObject => ({
-  id: sessionId(session) ?? "",
-  name: sessionName(session),
-  status: stringValue(session.status) ?? "unknown",
-  last_activity: timeAgo(session.updated_at ?? session.last_activity_at),
-  pending_prompts: pendingCount(session),
-});
+const summary = (
+  session: JsonObject,
+  projectNames: ReadonlyMap<string, string> = new Map(),
+): JsonObject => {
+  const projectId = stringValue(session.project_id);
+  return {
+    id: sessionId(session) ?? "",
+    name: sessionName(session),
+    status: stringValue(session.status) ?? "unknown",
+    last_activity: timeAgo(session.updated_at ?? session.last_activity_at),
+    pending_prompts: pendingCount(session),
+    project: projectId
+      ? { id: projectId, name: projectNames.get(projectId) ?? null }
+      : null,
+  };
+};
 
 const voicePrompts = (snapshot: JsonObject): JsonObject[] =>
   (Array.isArray(snapshot.pending_elicitations)
@@ -333,12 +342,15 @@ export class OmnigentCoordinator {
   private actionSequence = 0;
   private readonly recentActions: CoordinatorAction[] = [];
   private readonly pendingDecisions = new Map<string, JsonObject>();
+  private readonly projectNames = new Map<string, string>();
+  private projectsRefreshedAt = 0;
   private timer: NodeJS.Timeout | undefined;
   private polling: Promise<void> | undefined;
 
   public constructor(private readonly options: CoordinatorOptions) {}
 
   public async start(): Promise<void> {
+    await this.refreshProjects(true);
     const sessions = await this.options.omnigent.listSessions(30);
     this.seed(sessions);
     await this.refreshPendingDecisions(sessions);
@@ -438,6 +450,7 @@ export class OmnigentCoordinator {
   }
 
   private async listSessions(args: Record<string, unknown>): Promise<JsonObject> {
+    await this.refreshProjects(true);
     const limit = typeof args.limit === "number" ? args.limit : 8;
     const filter = typeof args.status === "string" ? args.status : "any";
     const sessions = await this.options.omnigent.listSessions(Math.max(limit, 30));
@@ -451,7 +464,7 @@ export class OmnigentCoordinator {
     );
     return {
       sessions: filtered.slice(0, limit).map((session) => ({
-        ...summary(session),
+        ...this.summarize(session),
         focused: sessionId(session) === this.focusedSessionId,
       })),
     };
@@ -464,7 +477,7 @@ export class OmnigentCoordinator {
     const alreadyFocused = id === this.focusedSessionId;
     if (!alreadyFocused) this.rememberPreviousFocus(id);
     this.focusedSessionId = id;
-    this.focusedSession = summary(snapshot);
+    this.focusedSession = this.summarize(snapshot);
     this.sessionSummaries.set(id, this.focusedSession);
     if (!alreadyFocused) {
       this.options.logger.info("coordinator.focus.changed", {
@@ -482,7 +495,7 @@ export class OmnigentCoordinator {
     await this.ensureOutputMonitor(id);
     const prompts = voicePrompts(snapshot);
     return {
-      focused_session: summary(snapshot),
+      focused_session: this.summarize(snapshot),
       focus_changed: !alreadyFocused,
       already_focused: alreadyFocused,
       prompts,
@@ -565,7 +578,7 @@ export class OmnigentCoordinator {
     const delivery = args.delivery === "queued" ? "queued" : "immediate";
     await this.ensureOutputMonitor(id);
     const snapshot = await this.options.omnigent.getSession(id);
-    const target = summary(snapshot);
+    const target = this.summarize(snapshot);
     this.sessionSummaries.set(id, target);
     if (id === this.focusedSessionId) this.focusedSession = target;
     if (
@@ -618,7 +631,7 @@ export class OmnigentCoordinator {
     const id = this.sessionFrom(args);
     const snapshot = await this.options.omnigent.getSession(id);
     await this.options.omnigent.archiveSession(id);
-    const archived = summary(snapshot);
+    const archived = this.summarize(snapshot);
     this.outputStates.delete(id);
     const wasFocused = id === this.focusedSessionId;
     let focusReason = "unchanged";
@@ -671,7 +684,7 @@ export class OmnigentCoordinator {
     const before = await this.options.omnigent.getSession(id);
     const previousName = sessionName(before);
     const response = await this.options.omnigent.renameSession(id, title);
-    const renamed = summary({ ...before, ...response, id, title });
+    const renamed = this.summarize({ ...before, ...response, id, title });
     this.sessionSummaries.set(id, renamed);
     if (id === this.focusedSessionId) this.focusedSession = renamed;
     const decision = this.pendingDecisions.get(id);
@@ -753,7 +766,7 @@ export class OmnigentCoordinator {
     if (!id) throw new Error("Omnigent returned no session id");
     this.rememberPreviousFocus(id);
     this.focusedSessionId = id;
-    this.focusedSession = summary(created);
+    this.focusedSession = this.summarize(created);
     this.sessionSummaries.set(id, this.focusedSession);
     this.recentSessionIds = [
       id,
@@ -768,7 +781,7 @@ export class OmnigentCoordinator {
       instruction: instruction.slice(0, 500),
       summary: `Started and focused ${sessionName(created)}: ${instruction.slice(0, 300)}`,
     });
-    return { started: true, focused_session: summary(created) };
+    return { started: true, focused_session: this.summarize(created) };
   }
 
   private requiredString(args: Record<string, unknown>, name: string): string {
@@ -832,6 +845,34 @@ export class OmnigentCoordinator {
     }
   }
 
+  private summarize(session: JsonObject): JsonObject {
+    return summary(session, this.projectNames);
+  }
+
+  private async refreshProjects(force = false): Promise<void> {
+    if (!force && Date.now() - this.projectsRefreshedAt < 60_000) return;
+    const listProjects = (
+      this.options.omnigent as OmnigentClient & {
+        listSessionProjects?: () => Promise<JsonObject[]>;
+      }
+    ).listSessionProjects;
+    if (typeof listProjects !== "function") return;
+    try {
+      const projects = await listProjects.call(this.options.omnigent);
+      this.projectNames.clear();
+      for (const project of projects) {
+        const id = stringValue(project.id);
+        const name = stringValue(project.name);
+        if (id && name) this.projectNames.set(id, name);
+      }
+      this.projectsRefreshedAt = Date.now();
+    } catch (error) {
+      this.options.logger.warn("coordinator.projects.failed", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private rememberSessions(sessions: JsonObject[]): void {
     this.recentSessionIds = sessions
       .map(sessionId)
@@ -839,7 +880,7 @@ export class OmnigentCoordinator {
     for (const session of sessions) {
       const id = sessionId(session);
       if (!id) continue;
-      const compact = summary(session);
+      const compact = this.summarize(session);
       this.sessionSummaries.set(id, compact);
       if (id === this.focusedSessionId) this.focusedSession = compact;
     }
@@ -870,6 +911,7 @@ export class OmnigentCoordinator {
   }
 
   private async poll(): Promise<void> {
+    await this.refreshProjects();
     const sessions = await this.options.omnigent.listSessions(30);
     this.rememberSessions(sessions);
     await this.refreshPendingDecisions(sessions);

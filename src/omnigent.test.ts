@@ -63,4 +63,35 @@ describe("Omnigent API client", () => {
       body: JSON.stringify({ title: "Audio Packet Research" }),
     });
   });
+
+  it("reads the installed session project folder contract", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: "opaque", expires_in: 3600 }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([{ id: "project-base", name: "Base Project", icon: null }]),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OmnigentClient({
+      baseUrl: "https://omnigent.test",
+      refreshToken: "opaque-refresh",
+      agentName: "default-agent",
+      workspace: "/workspace",
+      logger: new Logger("error"),
+    });
+
+    await expect(client.listSessionProjects()).resolves.toEqual([
+      { id: "project-base", name: "Base Project", icon: null },
+    ]);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      "https://omnigent.test/v1/sessions/projects",
+    );
+  });
 });
