@@ -4196,5 +4196,127 @@
         }
       }
     ]
+  },
+  {
+    "id": "incremental_poll_cursor_across_voice_turns",
+    "description": "Continue a background session's chronological output from its spoken notification cursor, then advance that opaque cursor across another voice turn without changing sticky focus or replaying old output.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+        { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 610
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 610,
+            "type": "session_output",
+            "session_id": "session-side-audit",
+            "name": "Side Audit",
+            "status": "running",
+            "output_delta": {
+              "changed": true,
+              "output": "assistant: The initial batch passed all 18 checks.",
+              "cursor": "item-18"
+            }
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side audit", "18", "passed"],
+          "maxRounds": 0
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay uh anything newer from that one since that update",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+            { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 610
+        },
+        "toolResults": {
+          "poll_output": {
+            "target_session": { "id": "session-side-audit", "name": "Side Audit", "status": "running" },
+            "focus_changed": false,
+            "changed": true,
+            "output": "assistant: The retry then passed all 20 checks.",
+            "cursor": "item-20",
+            "cursor_expired": false
+          }
+        },
+        "expected": {
+          "toolSequence": ["poll_output"],
+          "forbiddenTools": ["get_output", "focus_session", "send_message"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "poll_output",
+              "sessionId": "session-side-audit",
+              "argumentEquals": { "cursor": "item-18" }
+            }
+          ],
+          "speechTerms": ["side audit", "20", "passed"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "and anything newer from side audit after that now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+            { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 610
+        },
+        "toolResults": {
+          "poll_output": {
+            "target_session": { "id": "session-side-audit", "name": "Side Audit", "status": "running" },
+            "focus_changed": false,
+            "changed": false,
+            "output": "",
+            "cursor": "item-20",
+            "cursor_expired": false
+          }
+        },
+        "expected": {
+          "toolSequence": ["poll_output"],
+          "forbiddenTools": ["get_output", "focus_session", "send_message"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "poll_output",
+              "sessionId": "session-side-audit",
+              "argumentEquals": { "cursor": "item-20" }
+            }
+          ],
+          "speechAnyTerms": [["no new", "nothing new", "no additional", "hasn't produced", "has not produced"]],
+          "speechTerms": ["side audit"],
+          "maxRounds": 2
+        }
+      }
+    ]
   }
 ]

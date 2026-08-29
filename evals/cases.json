@@ -16,7 +16,13 @@
     "expected": {
       "toolSequence": [],
       "speechAnyTerms": [["can't", "don't have", "cannot"]],
-      "speechForbiddenTerms": ["periodically", "keep an eye", "i'll monitor"],
+      "speechForbiddenTerms": [
+        "keep an eye",
+        "i'll monitor",
+        "i'll poll",
+        "i can poll periodically",
+        "i can check periodically"
+      ],
       "maxRounds": 1
     }
   },

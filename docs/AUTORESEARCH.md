@@ -1188,3 +1188,43 @@ miss; that scenario then passed five of five targeted runs and the complete
 linked rerun passed all 27 scenarios and all 92 turns. Every coordinator
 interaction in this experiment used the frozen exact production MCP path; no
 live Omnigent session, including the excluded ESPN session, was read or mutated.
+
+### 2026-08-29 — Voice-owned incremental output cursors
+
+Hypothesis H42: telling Celeris that `poll_output` accepts a cursor was enough
+for a spoken follow-up such as “anything newer from that one since that update.”
+A new three-turn background-session scenario disproved this. After a direct
+Side Audit notification, the unchanged production harness selected
+`get_output` for both follow-ups in five of five runs. It had no durable cursor
+available to the model and therefore replayed a page instead of continuing the
+chronological stream. The baseline was zero of five scenarios.
+
+The voice harness now owns this mechanical state. It records a notification's
+opaque per-session cursor only after that notification is actually spoken and
+acknowledged. Explicit incremental language resolves the authoritative session
+from notification history or known names, forces `poll_output`, removes the
+session ID and prior cursor from the model-visible schema, and injects both at
+execution. A successful poll advances its stored cursor only after the turn has
+a spoken response. Short safe changed output and the unchanged result are
+rendered directly from typed fields, eliminating a second model round. Cursor
+expiry, concurrent events, long text, URLs, and code still fall back to Celeris.
+The standalone MCP contract is unchanged: stateless clients pass and retain
+their explicit cursor themselves.
+
+The linked target passed ten of ten runs and all 30 turns. Its twenty user
+polls each used exactly one Celeris round, advanced `item-18` to `item-20`, kept
+Release Work focused, and then reported no newer stable output from `item-20`.
+Median model/tool latency across those polls was about 133 ms; the range was
+106–368 ms, with direct notifications remaining zero-round. Notification-send
+and action-priority neighbor scenarios each passed five of five. A separate
+notification-reference sample first had one low-frequency wording omission,
+then passed ten of ten unchanged on a traced rerun.
+
+One isolated broad run correctly said it could not “poll periodically,” but a
+bare forbidden-word assertion scored the negative statement as a failure. The
+rubric now rejects positive fake-monitoring claims rather than the word itself;
+the unchanged behavior passed ten of ten. Final promotion evidence is 95 unit
+tests, clean typecheck and build, 32 of 32 isolated trials, and all 28 stateful
+scenarios across 95 linked turns. All coordinator interactions remained frozen;
+no live Omnigent session, including the excluded ESPN session, was read or
+mutated.

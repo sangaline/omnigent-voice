@@ -139,6 +139,17 @@ Every tool result includes only this MCP connection's unread `updates` plus an
 cursor for clients without notifications. A cursor beyond the current process
 or older than the retained window sets `update_cursor_expired` and returns the
 available window. Events are never globally drained by one caller.
+When a spoken or acknowledged `session_output` notification carries an output
+cursor, the voice harness retains that opaque cursor process-locally for its
+exact session. A later explicit “anything newer,” “since that,” or “after that”
+read of that session forces `poll_output`; the model-visible schema omits both
+the authoritative session ID and prior cursor, and the harness injects them.
+The returned cursor is committed only after a successful spoken response. A
+short safe changed or unchanged result is rendered directly in one model round;
+unsafe, expired, concurrent-update, or longer results return to Celeris. This is
+voice-layer convenience only: standalone MCP clients continue passing their
+own explicit cursors and therefore degrade cleanly without process-local voice
+state.
 When the channel runtime is idle and at least one trusted non-bot human is
 actually present in the voice channel, those real events are spoken
 proactively; joining the channel schedules any waiting update. Never play into

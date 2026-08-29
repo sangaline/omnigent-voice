@@ -774,7 +774,7 @@ export const voiceReadRouting = (
   notificationTargets: readonly VoiceSessionTarget[] = [],
 ): VoiceReadRouting => {
   if (
-    !/\b(?:what|latest|status|progress|output|said|found|doing|read|show|check|inspect)\b/i.test(
+    !/\b(?:what|latest|newer|newest|update|since|status|progress|output|said|found|doing|read|show|check|inspect)\b/i.test(
       input,
     )
   ) {
@@ -825,6 +825,11 @@ export const voiceReadRouting = (
 const retryRequest = (input: string): boolean =>
   /^(?:(?:can|could|would)\s+you\s+(?:please\s+)?try\s+again|(?:please\s+)?(?:try|retry)(?:\s+(?:that|it))?(?:\s+again)?)[.!?]*$/i.test(
     input.trim(),
+  );
+
+const requestsIncrementalOutput = (input: string): boolean =>
+  /\b(?:anything\s+new(?:er)?|what(?:'s|\s+is)\s+new|newer|since\s+(?:that|the)|after\s+that)\b/i.test(
+    input,
   );
 
 const failedCoordinatorSpeech = (content: string): boolean =>
@@ -951,6 +956,7 @@ const voiceSafeTool = (
   routing: VoiceMessageRouting,
   focusRouting: VoiceFocusRouting,
   readRouting: VoiceReadRouting,
+  pollCursor?: string | undefined,
 ): OpenAiTool => {
   if (tool.function.name === "archive_session") {
     return {
@@ -1011,11 +1017,16 @@ const voiceSafeTool = (
       : undefined;
     const safeProperties = { ...properties };
     delete safeProperties.session_id;
+    if (tool.function.name === "poll_output" && pollCursor) {
+      delete safeProperties.cursor;
+    }
     return {
       ...tool,
       function: {
         ...tool.function,
-        description: `Read the explicitly named ${readRouting.target?.name ?? "target"} session without changing focus. The voice harness supplies and verifies its authoritative ID.`,
+        description:
+          `Read the explicitly named ${readRouting.target?.name ?? "target"} session without changing focus. ` +
+          `The voice harness supplies and verifies its authoritative ID${tool.function.name === "poll_output" && pollCursor ? " and prior output cursor" : ""}.`,
         parameters: {
           ...parameters,
           properties: safeProperties,
@@ -1541,6 +1552,36 @@ export const directGetOutputResultSpeech = (
   return `${target} update: ${text}`;
 };
 
+export const directPollOutputResultSpeech = (
+  result: JsonObject,
+): string | undefined => {
+  if (
+    result.cursor_expired === true ||
+    (Array.isArray(result.updates) && result.updates.length > 0)
+  ) {
+    return undefined;
+  }
+  const target = resultSessionName(result.target_session);
+  if (!target) return undefined;
+  if (result.changed === false) {
+    return `${target} has no new stable output since the last update.`;
+  }
+  const output = typeof result.output === "string"
+    ? result.output.trim().replace(/^assistant:\s*/i, "")
+    : "";
+  if (
+    result.changed !== true ||
+    !output ||
+    output.length > 240 ||
+    output.includes("```") ||
+    /https?:\/\//i.test(output) ||
+    output.split("\n").length > 3
+  ) {
+    return undefined;
+  }
+  return `${target} update: ${output}`;
+};
+
 export const directSessionOutputSpeech = (
   updates: readonly CoordinatorUpdate[],
 ): string | undefined => {
@@ -1793,6 +1834,7 @@ export class CelerisConversation {
   private lastVerifiedActionOutcome?: string;
   private lastVerifiedActionCount = 0;
   private lastVerifiedToolWorkflow: VerifiedToolWorkflowOutcome | undefined;
+  private readonly outputCursors = new Map<string, string>();
   private compactionTimer: ReturnType<typeof setTimeout> | undefined;
   private compactionController: AbortController | undefined;
   private compactionPromise: Promise<void> | undefined;
@@ -1810,6 +1852,29 @@ export class CelerisConversation {
       this.memoryPolicy.compactionIdleMs < 0
     ) {
       throw new Error("Invalid Celeris memory policy");
+    }
+  }
+
+  private rememberUpdateOutputCursors(updates: readonly CoordinatorUpdate[]): void {
+    for (const update of updates) {
+      const sessionId = typeof update.session_id === "string" ? update.session_id : "";
+      const delta = objectValue(update.output_delta);
+      const cursor = typeof delta?.cursor === "string" ? delta.cursor.trim() : "";
+      if (sessionId && cursor) this.outputCursors.set(sessionId, cursor);
+    }
+  }
+
+  private rememberPollOutputCursors(
+    executions: readonly { name: string; result: JsonObject }[],
+  ): void {
+    for (const { name, result } of executions) {
+      if (name !== "poll_output" || typeof result.error === "string") continue;
+      const target = objectValue(result.target_session);
+      const sessionId = typeof target?.id === "string" ? target.id : "";
+      const cursor = typeof result.cursor === "string" ? result.cursor.trim() : "";
+      if (sessionId && cursor && result.cursor_expired !== true) {
+        this.outputCursors.set(sessionId, cursor);
+      }
     }
   }
 
@@ -1973,6 +2038,15 @@ export class CelerisConversation {
       this.remember(input, speech);
       return speech;
     }
+    const incrementalPoll =
+      requestsIncrementalOutput(input) &&
+        readRouting.mode === "named" &&
+        readRouting.target
+        ? {
+            target: readRouting.target,
+            cursor: this.outputCursors.get(readRouting.target.id),
+          }
+        : undefined;
     const startInstruction = voiceStartInstruction(input);
     const messageInstruction = voiceMessageInstruction(
       input,
@@ -2021,7 +2095,15 @@ export class CelerisConversation {
           );
         },
       )
-      .map((tool) => voiceSafeTool(tool, messageRouting, focusRouting, readRouting));
+      .map((tool) =>
+        voiceSafeTool(
+          tool,
+          messageRouting,
+          focusRouting,
+          readRouting,
+          incrementalPoll?.cursor,
+        )
+      );
     const allowedTools = new Set(tools.map((tool) => tool.function.name));
     const requiredCompoundActions =
       messageRouting.mode === "named" &&
@@ -2044,7 +2126,9 @@ export class CelerisConversation {
       let retriedEmptyCompletion = false;
       let forcedToolName: string | undefined = needsFocusLookup
         ? "list_sessions"
-        : undefined;
+        : incrementalPoll?.cursor
+          ? "poll_output"
+          : undefined;
       const attemptedMessageTargetIds = new Set<string>();
       const executedAcrossRounds: Array<{ name: string; result: JsonObject }> = [];
       const verifiedActionReceipts = (): string[] =>
@@ -2107,6 +2191,7 @@ export class CelerisConversation {
             this.lastVerifiedActionOutcome = verifiedOutcome;
             this.lastVerifiedActionCount = verifiedActionReceipts().length;
           }
+          this.rememberPollOutputCursors(executedAcrossRounds);
           this.updateCursor = turnUpdateCursor;
           this.remember(input, speech);
           return speech;
@@ -2188,6 +2273,16 @@ export class CelerisConversation {
             readRouting.target
           ) {
             args = { ...args, session_id: readRouting.target.id };
+          }
+          if (
+            call.function.name === "poll_output" &&
+            incrementalPoll?.cursor
+          ) {
+            args = {
+              ...args,
+              session_id: incrementalPoll.target.id,
+              cursor: incrementalPoll.cursor,
+            };
           }
           if (call.function.name === "start_session" && startInstruction) {
             args = { ...args, instruction: startInstruction };
@@ -2446,6 +2541,7 @@ export class CelerisConversation {
           );
           this.lastVerifiedActionOutcome = speech;
           this.lastVerifiedActionCount = successfulReceipts.length + failedTools.length;
+          this.rememberPollOutputCursors(executedAcrossRounds);
           this.updateCursor = turnUpdateCursor;
           this.remember(input, speech);
           return speech;
@@ -2474,6 +2570,23 @@ export class CelerisConversation {
               300,
             );
             this.lastVerifiedActionCount = actionReceipts.length;
+            this.rememberPollOutputCursors(executedAcrossRounds);
+            this.updateCursor = turnUpdateCursor;
+            this.remember(input, speech);
+            return speech;
+          }
+        }
+        if (
+          executedThisRound.length === 1 &&
+          executedThisRound[0]!.name === "poll_output" &&
+          incrementalPoll?.cursor
+        ) {
+          const directPollSpeech = directPollOutputResultSpeech(
+            executedThisRound[0]!.result,
+          );
+          if (directPollSpeech) {
+            const speech = sanitizeForSpeech(directPollSpeech, 300);
+            this.rememberPollOutputCursors(executedAcrossRounds);
             this.updateCursor = turnUpdateCursor;
             this.remember(input, speech);
             return speech;
@@ -2501,6 +2614,7 @@ export class CelerisConversation {
               : undefined;
           if (directReadSpeech) {
             const speech = sanitizeForSpeech(directReadSpeech, 300);
+            this.rememberPollOutputCursors(executedAcrossRounds);
             this.updateCursor = turnUpdateCursor;
             this.remember(input, speech);
             return speech;
@@ -2511,6 +2625,7 @@ export class CelerisConversation {
           );
           if (visibilitySpeech) {
             const speech = sanitizeForSpeech(visibilitySpeech, 300);
+            this.rememberPollOutputCursors(executedAcrossRounds);
             this.updateCursor = turnUpdateCursor;
             this.remember(input, speech);
             return speech;
@@ -2529,6 +2644,7 @@ export class CelerisConversation {
           );
           this.lastVerifiedActionOutcome = speech;
           this.lastVerifiedActionCount = successfulReceipts.length;
+          this.rememberPollOutputCursors(executedAcrossRounds);
           this.updateCursor = turnUpdateCursor;
           this.remember(input, speech);
           return speech;
@@ -2588,6 +2704,7 @@ export class CelerisConversation {
       this.updateCursor,
     );
     this.updateCursor = lastEventId;
+    this.rememberUpdateOutputCursors(updates);
     this.history.push(
       { role: "system", content: `Omnigent background update: ${JSON.stringify(updates)}` },
       { role: "assistant", content: speech },

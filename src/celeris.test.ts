@@ -10,6 +10,7 @@ import {
   directCoordinatorUpdateSpeech,
   directFocusedOutputSpeech,
   directGetOutputResultSpeech,
+  directPollOutputResultSpeech,
   directSessionOutputSpeech,
   immediateNotificationTargets,
   isDeclarativeMissedSend,
@@ -86,6 +87,17 @@ const toolClient = (): CoordinatorToolClient => ({
         properties: {
           session_id: { type: "string" },
           page: { type: "number" },
+        },
+      },
+    },
+    {
+      name: "poll_output",
+      description: "Read stable output after an opaque cursor.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_id: { type: "string" },
+          cursor: { type: "string" },
         },
       },
     },
@@ -321,6 +333,39 @@ describe("Celeris coordinator conversation", () => {
       directGetOutputResultSpeech("what did the agent say", {
         target_session: { id: "session-primary", name: "Primary Work" },
         latest_message: { role: "user", text: "Do not attribute this to the agent." },
+        updates: [],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("speaks only short safe incremental poll results directly", () => {
+    expect(
+      directPollOutputResultSpeech({
+        target_session: { id: "session-side", name: "Side Audit" },
+        changed: true,
+        output: "assistant: The retry passed all 20 checks.",
+        cursor: "item-20",
+        cursor_expired: false,
+        updates: [],
+      }),
+    ).toBe("Side Audit update: The retry passed all 20 checks.");
+    expect(
+      directPollOutputResultSpeech({
+        target_session: { id: "session-side", name: "Side Audit" },
+        changed: false,
+        output: "",
+        cursor: "item-20",
+        cursor_expired: false,
+        updates: [],
+      }),
+    ).toBe("Side Audit has no new stable output since the last update.");
+    expect(
+      directPollOutputResultSpeech({
+        target_session: { id: "session-side", name: "Side Audit" },
+        changed: true,
+        output: "assistant: This cursor can no longer prove continuity.",
+        cursor: "item-20",
+        cursor_expired: true,
         updates: [],
       }),
     ).toBeUndefined();
@@ -1085,9 +1130,10 @@ describe("Celeris coordinator conversation", () => {
         function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
       }>;
     };
-    expect(request.tools).toHaveLength(3);
+    expect(request.tools).toHaveLength(4);
     expect(request.tools?.map((tool) => tool.function?.name)).not.toContain("focus_session");
     expect(request.tools?.map((tool) => tool.function?.name)).toContain("answer_prompt");
+    expect(request.tools?.map((tool) => tool.function?.name)).toContain("poll_output");
     const send = request.tools?.find((tool) => tool.function?.name === "send_message");
     expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");
     expect(
@@ -1541,6 +1587,127 @@ describe("Celeris coordinator conversation", () => {
     const read = request.tools?.find((tool) => tool.function?.name === "get_output");
     expect(read?.function?.description).toContain("Side Audit");
     expect(read?.function?.parameters?.properties).not.toHaveProperty("session_id");
+  });
+
+  it("retains and advances a spoken notification's output cursor across voice turns", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-poll-first",
+              type: "function",
+              function: { name: "poll_output", arguments: "{}" },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-poll-second",
+              type: "function",
+              function: { name: "poll_output", arguments: "{}" },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    let pollCount = 0;
+    vi.mocked(tools.callTool).mockImplementation((name: string) => {
+      if (name === "check_updates") {
+        return Promise.resolve({
+          focused_session: { id: "session-release", name: "Release Work" },
+          known_sessions: [
+            { id: "session-release", name: "Release Work" },
+            { id: "session-side", name: "Side Audit" },
+          ],
+          updates: [],
+          update_cursor: 610,
+        });
+      }
+      pollCount += 1;
+      return Promise.resolve(
+        pollCount === 1
+          ? {
+              target_session: { id: "session-side", name: "Side Audit" },
+              changed: true,
+              output: "assistant: The retry passed all 20 checks.",
+              cursor: "item-20",
+              cursor_expired: false,
+              updates: [],
+            }
+          : {
+              target_session: { id: "session-side", name: "Side Audit" },
+              changed: false,
+              output: "",
+              cursor: "item-20",
+              cursor_expired: false,
+              updates: [],
+            },
+      );
+    });
+    const subject = conversation("test-key", tools);
+    subject.acknowledgeSpokenUpdates(
+      [
+        {
+          event_id: 610,
+          type: "session_output",
+          session_id: "session-side",
+          name: "Side Audit",
+          status: "running",
+          output_delta: {
+            changed: true,
+            output: "assistant: The initial batch passed all 18 checks.",
+            cursor: "item-18",
+          },
+        },
+      ],
+      "Side Audit update: The initial batch passed all 18 checks.",
+    );
+
+    await expect(
+      subject.respond("okay uh anything newer from that one since that update"),
+    ).resolves.toBe("Side Audit update: The retry passed all 20 checks.");
+    await expect(
+      subject.respond("and anything newer from side audit after that now"),
+    ).resolves.toBe("Side Audit has no new stable output since the last update.");
+
+    expect(tools.callTool).toHaveBeenNthCalledWith(1, "check_updates", {
+      after_event_id: 610,
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "poll_output", {
+      session_id: "session-side",
+      cursor: "item-18",
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(3, "check_updates", {
+      after_event_id: 610,
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(4, "poll_output", {
+      session_id: "session-side",
+      cursor: "item-20",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tool_choice?: { function?: { name?: string } };
+      tools?: Array<{
+        function?: {
+          name?: string;
+          parameters?: { properties?: Record<string, unknown> };
+        };
+      }>;
+    };
+    expect(firstRequest.tool_choice?.function?.name).toBe("poll_output");
+    const poll = firstRequest.tools?.find(
+      (tool) => tool.function?.name === "poll_output",
+    );
+    expect(poll?.function?.parameters?.properties).not.toHaveProperty("session_id");
+    expect(poll?.function?.parameters?.properties).not.toHaveProperty("cursor");
   });
 
   it("clarifies an ambiguous notification read without invoking the model", async () => {
