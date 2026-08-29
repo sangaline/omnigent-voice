@@ -330,6 +330,16 @@ but a WAV voice prompt works. Build the guided S2S experiment on native Q4 and
 keep the existing staged voice pipeline selectable until the new Discord loop
 is verified end to end.
 
+The guided native experiment is implemented behind `VOICE_RUNTIME=kame`; the
+default remains `staged`. `native/moshi-kame.patch` adds KAME's oracle embedding
+and one-token-per-frame queue to pinned `Codes4Fun/moshi.cpp`, while
+`native/kame_bridge.cpp` exposes raw 24 kHz float32 audio over stdin/stdout and
+guidance/events on descriptors 3/4. `src/s2s.ts` owns the subprocess and
+`src/discord.ts` clocks 80 ms full-duplex frames while the existing local ASR
+runs in parallel. Celeris tool results replace oracle guidance; KAME's generated
+text and rolling frame tails are retained in structured runtime logs. Model
+weights remain external runtime mounts. See `docs/S2S.md`.
+
 ## Commands
 
 ```bash

@@ -25,12 +25,14 @@ import {
   peakAmplitude,
   resampleLinear,
   stereoPcm16ToMono16k,
+  stereoPcm16ToMono24k,
 } from "./audio.js";
 import { CelerisConversation } from "./celeris.js";
 import { CoordinatorUpdate, OmnigentCoordinator } from "./coordinator.js";
 import { isCancelCommand } from "./control.js";
 import { Logger } from "./log.js";
 import { LocalSpeech } from "./speech.js";
+import { KameS2SRuntime } from "./s2s.js";
 
 interface DiscordVoiceOptions {
   token: string;
@@ -44,6 +46,7 @@ interface DiscordVoiceOptions {
   speech: LocalSpeech;
   coordinator: OmnigentCoordinator;
   celeris: CelerisConversation;
+  s2s?: KameS2SRuntime | undefined;
 }
 
 export class DiscordVoiceBot {
@@ -65,6 +68,12 @@ export class DiscordVoiceBot {
   private notificationTimer: NodeJS.Timeout | undefined;
   private notificationAbort: AbortController | undefined;
   private unsubscribeCoordinator?: () => void;
+  private unsubscribeS2SAudio?: () => void;
+  private s2sTimer?: NodeJS.Timeout | undefined;
+  private s2sOutput?: PassThrough;
+  private readonly s2sInputChunks: Float32Array[] = [];
+  private s2sInputOffset = 0;
+  private s2sQueuedSamples = 0;
   private activeUserTurns = 0;
   private responseEpoch = 0;
   private playbackEpoch = 0;
@@ -102,6 +111,7 @@ export class DiscordVoiceBot {
     this.player.on("error", (error) => {
       this.options.logger.error("discord.playback.failed", error);
     });
+    if (this.options.s2s) this.startS2SLoop();
     this.unsubscribeCoordinator = this.options.coordinator.subscribeUpdates((update) => {
       this.queueCoordinatorUpdate(update);
     });
@@ -112,8 +122,11 @@ export class DiscordVoiceBot {
     this.shuttingDown = true;
     if (this.transcriptTimer) clearTimeout(this.transcriptTimer);
     if (this.notificationTimer) clearTimeout(this.notificationTimer);
+    if (this.s2sTimer) clearTimeout(this.s2sTimer);
     this.notificationAbort?.abort();
     this.unsubscribeCoordinator?.();
+    this.unsubscribeS2SAudio?.();
+    this.s2sOutput?.end();
     this.playbackEpoch += 1;
     this.player.stop(true);
     this.connection?.destroy();
@@ -152,6 +165,75 @@ export class DiscordVoiceBot {
     return guilds[0]!;
   }
 
+  private startS2SLoop(): void {
+    const s2s = this.options.s2s!;
+    const output = new PassThrough({ highWaterMark: 1024 * 1024 });
+    this.s2sOutput = output;
+    this.player.play(createAudioResource(output, { inputType: StreamType.Raw }));
+    this.unsubscribeS2SAudio = s2s.subscribeAudio((audio) => {
+      if (this.shuttingDown) return;
+      const pcm = monoFloatToStereoPcm16(
+        resampleLinear(audio, s2s.ready.sampleRate, 48_000),
+      );
+      if (!output.write(pcm)) {
+        this.options.logger.warn("s2s.output.backpressure", {
+          queuedBytes: output.writableLength,
+        });
+      }
+    });
+
+    const intervalMs = 1_000 / s2s.ready.frameRate;
+    let deadline = performance.now();
+    const tick = (): void => {
+      if (this.shuttingDown) return;
+      const now = performance.now();
+      if (now - deadline > intervalMs) {
+        this.options.logger.warn("s2s.input.clock_late", {
+          lateMs: Math.round(now - deadline),
+        });
+        deadline = now;
+      }
+      s2s.sendAudio(this.takeS2SInputFrame(s2s.ready.frameSize));
+      deadline += intervalMs;
+      this.s2sTimer = setTimeout(tick, Math.max(0, deadline - performance.now()));
+    };
+    tick();
+    this.options.logger.info("discord.s2s.started", {
+      frameMs: intervalMs,
+    });
+  }
+
+  private queueS2SInput(samples: Float32Array): void {
+    if (!this.options.s2s || samples.length === 0) return;
+    this.s2sInputChunks.push(samples);
+    this.s2sQueuedSamples += samples.length;
+    const queuedMs = (this.s2sQueuedSamples / this.options.s2s.ready.sampleRate) * 1_000;
+    if (queuedMs > 500) {
+      this.options.logger.warn("s2s.input.audio_backlog", {
+        queuedMs: Math.round(queuedMs),
+      });
+    }
+  }
+
+  private takeS2SInputFrame(frameSize: number): Float32Array {
+    const output = new Float32Array(frameSize);
+    let written = 0;
+    while (written < frameSize && this.s2sInputChunks.length > 0) {
+      const chunk = this.s2sInputChunks[0]!;
+      const available = chunk.length - this.s2sInputOffset;
+      const count = Math.min(frameSize - written, available);
+      output.set(chunk.subarray(this.s2sInputOffset, this.s2sInputOffset + count), written);
+      written += count;
+      this.s2sInputOffset += count;
+      this.s2sQueuedSamples -= count;
+      if (this.s2sInputOffset >= chunk.length) {
+        this.s2sInputChunks.shift();
+        this.s2sInputOffset = 0;
+      }
+    }
+    return output;
+  }
+
   private onSpeakingStart(userId: string): void {
     if (this.shuttingDown || this.recordingUsers.size > 0) return;
     if (userId === this.client.user?.id) return;
@@ -175,14 +257,18 @@ export class DiscordVoiceBot {
     });
     stream.on("data", (packet: Buffer) => {
       try {
-        const samples = stereoPcm16ToMono16k(decoder.decode(packet));
+        const decoded = decoder.decode(packet);
+        const samples = stereoPcm16ToMono16k(decoded);
+        this.queueS2SInput(stereoPcm16ToMono24k(decoded));
         transcription.accept(samples);
         const packetPeak = peakAmplitude(samples);
         if (inputEpoch === undefined && packetPeak >= this.options.bargeInPeak) {
           const interruptedPlayback = this.player.state.status !== AudioPlayerStatus.Idle;
           inputEpoch = ++this.responseEpoch;
-          this.playbackEpoch += 1;
-          this.player.stop(true);
+          if (!this.options.s2s) {
+            this.playbackEpoch += 1;
+            this.player.stop(true);
+          }
           this.notificationAbort?.abort();
           this.options.logger.info("speech.voice.confirmed", {
             peakAmplitude: Number(packetPeak.toFixed(4)),
@@ -240,8 +326,10 @@ export class DiscordVoiceBot {
 
     const epoch = inputEpoch ?? ++this.responseEpoch;
     if (inputEpoch === undefined) {
-      this.playbackEpoch += 1;
-      this.player.stop(true);
+      if (!this.options.s2s) {
+        this.playbackEpoch += 1;
+        this.player.stop(true);
+      }
       this.notificationAbort?.abort();
     }
     this.options.logger.info("conversation.user.segment", {
@@ -282,15 +370,18 @@ export class DiscordVoiceBot {
       text: transcript,
       audioMs,
     });
-    this.player.stop(true);
+    if (!this.options.s2s) this.player.stop(true);
     try {
       if (isCancelCommand(transcript)) {
         try {
           const interrupted = await this.options.coordinator.interruptFocused();
-          await this.speak(interrupted ? "Stopped." : "Nothing is running.", epoch);
+          await this.deliverSpeech(
+            interrupted ? "Stopped." : "Nothing is running.",
+            epoch,
+          );
         } catch (error) {
           this.options.logger.error("omnigent.interrupt.failed", error);
-          await this.speak("I couldn't stop it cleanly.", epoch);
+          await this.deliverSpeech("I couldn't stop it cleanly.", epoch);
         }
         return;
       }
@@ -313,13 +404,22 @@ export class DiscordVoiceBot {
         superseded: epoch !== this.responseEpoch,
       });
       if (epoch !== this.responseEpoch) return;
-      await this.speak(spoken, epoch);
+      await this.deliverSpeech(spoken, epoch);
     } catch (error) {
       this.options.logger.error("voice.turn.failed", error);
       if (epoch === this.responseEpoch) {
-        await this.speak("I couldn't reach the coordination layer.", epoch);
+        await this.deliverSpeech("I couldn't reach the coordination layer.", epoch);
       }
     }
+  }
+
+  private async deliverSpeech(text: string, epoch: number): Promise<boolean> {
+    if (!text || epoch !== this.responseEpoch) return false;
+    if (this.options.s2s) {
+      this.options.s2s.guide(text, true);
+      return true;
+    }
+    return this.speak(text, epoch);
   }
 
   private async speak(text: string, epoch: number, retry = 0): Promise<boolean> {
@@ -397,7 +497,7 @@ export class DiscordVoiceBot {
       this.shuttingDown ||
       this.recordingUsers.size > 0 ||
       this.activeUserTurns > 0 ||
-      this.player.state.status !== AudioPlayerStatus.Idle
+      (!this.options.s2s && this.player.state.status !== AudioPlayerStatus.Idle)
     ) {
       this.scheduleCoordinatorNotification();
       return;
@@ -414,7 +514,7 @@ export class DiscordVoiceBot {
         superseded: false,
         source: "background_update",
       });
-      if (await this.speak(spoken, epoch)) {
+      if (await this.deliverSpeech(spoken, epoch)) {
         this.options.celeris.acknowledgeSpokenUpdates(updates, spoken);
       }
     } finally {

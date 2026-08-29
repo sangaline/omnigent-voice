@@ -15,6 +15,14 @@ Discord as the synthesizer produces each chunk.
 The project is intentionally narrow: one caller, one focused Omnigent session,
 one container, and no text or web interface.
 
+An optional guided speech-to-speech experiment keeps the same coordinator but
+replaces staged playback with native KAME Q4/Vulkan audio. Discord audio is fed
+to KAME and local streaming ASR concurrently; verified Celeris results are
+injected into KAME's oracle-text stream. Set `VOICE_RUNTIME=kame` and mount the
+required model files to enable it. `VOICE_RUNTIME=staged` retains the original
+ASR/Celeris/Piper path as an immediate fallback. See `docs/S2S.md` for the
+native protocol and safety gate.
+
 Structured JSON logs are written to stdout. When `LOG_FILE` is set, the same
 events are appended to that file for durable retention. Conversation events
 include recognized user transcripts, generated assistant responses, and the

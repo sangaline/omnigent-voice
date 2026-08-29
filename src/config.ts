@@ -1,4 +1,5 @@
 export interface Config {
+  voiceRuntime: "staged" | "kame";
   discordBotToken: string;
   discordGuildId?: string | undefined;
   discordVoiceChannelId?: string | undefined;
@@ -24,6 +25,13 @@ export interface Config {
   sherpaTtsThreads: number;
   sherpaTtsSpeakerId: number;
   sherpaTtsSpeed: number;
+  kameBridgePath?: string | undefined;
+  kameConfigPath?: string | undefined;
+  kameModelPath?: string | undefined;
+  kameMimiPath?: string | undefined;
+  kameTokenizerPath?: string | undefined;
+  kameDevice: string;
+  kameContextFrames: number;
   logLevel: "debug" | "info" | "warn" | "error";
   logFile?: string | undefined;
 }
@@ -87,6 +95,28 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     throw new Error("LOG_LEVEL must be debug, info, warn, or error");
   }
 
+  const voiceRuntime = optional(env, "VOICE_RUNTIME") ?? "staged";
+  if (voiceRuntime !== "staged" && voiceRuntime !== "kame") {
+    throw new Error("VOICE_RUNTIME must be staged or kame");
+  }
+  const kameBridgePath = optional(env, "KAME_BRIDGE_PATH");
+  const kameConfigPath = optional(env, "KAME_CONFIG_PATH");
+  const kameModelPath = optional(env, "KAME_MODEL_PATH");
+  const kameMimiPath = optional(env, "KAME_MIMI_PATH");
+  const kameTokenizerPath = optional(env, "KAME_TOKENIZER_PATH");
+  if (
+    voiceRuntime === "kame" &&
+    (!kameBridgePath ||
+      !kameConfigPath ||
+      !kameModelPath ||
+      !kameMimiPath ||
+      !kameTokenizerPath)
+  ) {
+    throw new Error(
+      "KAME bridge, config, model, Mimi, and tokenizer paths are required in kame mode",
+    );
+  }
+
   const celerisHistoryCompactMessages = positiveInteger(
     env,
     "CELERIS_HISTORY_COMPACT_MESSAGES",
@@ -104,6 +134,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
   }
 
   return {
+    voiceRuntime,
     discordBotToken: required(env, "DISCORD_BOT_TOKEN"),
     discordGuildId: optional(env, "DISCORD_GUILD_ID"),
     discordVoiceChannelId: optional(env, "DISCORD_VOICE_CHANNEL_ID"),
@@ -143,6 +174,13 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     sherpaTtsThreads: positiveInteger(env, "SHERPA_TTS_THREADS", 4),
     sherpaTtsSpeakerId: nonnegativeInteger(env, "SHERPA_TTS_SPEAKER_ID", 0),
     sherpaTtsSpeed: positiveNumber(env, "SHERPA_TTS_SPEED", 1),
+    kameBridgePath,
+    kameConfigPath,
+    kameModelPath,
+    kameMimiPath,
+    kameTokenizerPath,
+    kameDevice: optional(env, "KAME_DEVICE") ?? "Vulkan0",
+    kameContextFrames: positiveInteger(env, "KAME_CONTEXT_FRAMES", 3_000),
     logLevel: logLevel as Config["logLevel"],
     logFile: optional(env, "LOG_FILE"),
   };

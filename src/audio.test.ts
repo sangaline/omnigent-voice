@@ -4,6 +4,7 @@ import {
   monoFloatToStereoPcm16,
   resampleLinear,
   stereoPcm16ToMono16k,
+  stereoPcm16ToMono24k,
 } from "./audio.js";
 
 describe("audio conversion", () => {
@@ -22,6 +23,15 @@ describe("audio conversion", () => {
     expect(result[0]).toBeCloseTo(0.5);
   });
 
+  it("downsamples 48 kHz stereo PCM to 24 kHz mono", () => {
+    const pcm = Buffer.alloc(2 * 4);
+    pcm.writeInt16LE(16_384, 0);
+    pcm.writeInt16LE(16_384, 2);
+    const result = stereoPcm16ToMono24k(pcm);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBeCloseTo(0.5);
+  });
+
   it("resamples and creates interleaved stereo PCM", () => {
     const resampled = resampleLinear(new Float32Array([0, 1]), 2, 4);
     expect([...resampled]).toEqual([0, 0.5, 1, 1]);
@@ -32,4 +42,3 @@ describe("audio conversion", () => {
     expect(pcm.readInt16LE(6)).toBe(32_767);
   });
 });
-

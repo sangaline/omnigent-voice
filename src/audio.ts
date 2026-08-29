@@ -22,6 +22,19 @@ export const stereoPcm16ToMono16k = (pcm: Buffer): Float32Array => {
   return outputIndex === output.length ? output : output.slice(0, outputIndex);
 };
 
+export const stereoPcm16ToMono24k = (pcm: Buffer): Float32Array => {
+  const stereoFrames = Math.floor(pcm.length / 4);
+  const output = new Float32Array(Math.floor(stereoFrames / 2));
+  let outputIndex = 0;
+  for (let frame = 0; frame + 1 < stereoFrames; frame += 2) {
+    const byteOffset = frame * 4;
+    const left = pcm.readInt16LE(byteOffset);
+    const right = pcm.readInt16LE(byteOffset + 2);
+    output[outputIndex++] = (left + right) / 65_536;
+  }
+  return outputIndex === output.length ? output : output.slice(0, outputIndex);
+};
+
 export const resampleLinear = (
   input: Float32Array,
   sourceRate: number,
@@ -60,4 +73,3 @@ export const peakAmplitude = (samples: Float32Array): number => {
   for (const sample of samples) peak = Math.max(peak, Math.abs(sample));
   return peak;
 };
-

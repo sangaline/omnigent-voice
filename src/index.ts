@@ -6,6 +6,7 @@ import { Logger } from "./log.js";
 import { CoordinatorMcpClient } from "./mcp.js";
 import { OmnigentClient } from "./omnigent.js";
 import { LocalSpeech } from "./speech.js";
+import { KameS2SRuntime } from "./s2s.js";
 
 const config = loadConfig(process.env);
 const logger = new Logger(config.logLevel, config.logFile);
@@ -13,6 +14,7 @@ const logger = new Logger(config.logLevel, config.logFile);
 logger.info("startup", {
   celerisEnabled: Boolean(config.celerisApiKey),
   persistentLogEnabled: Boolean(config.logFile),
+  voiceRuntime: config.voiceRuntime,
 });
 
 const speech = await LocalSpeech.create({
@@ -48,6 +50,20 @@ const celeris = new CelerisConversation({
     compactionIdleMs: config.celerisHistoryCompactionIdleMs,
   },
 });
+const s2s =
+  config.voiceRuntime === "kame"
+    ? new KameS2SRuntime({
+        executable: config.kameBridgePath!,
+        configPath: config.kameConfigPath!,
+        modelPath: config.kameModelPath!,
+        mimiPath: config.kameMimiPath!,
+        tokenizerPath: config.kameTokenizerPath!,
+        device: config.kameDevice,
+        contextFrames: config.kameContextFrames,
+        logger,
+      })
+    : undefined;
+if (s2s) await s2s.start();
 const bot = new DiscordVoiceBot({
   token: config.discordBotToken,
   guildId: config.discordGuildId,
@@ -60,6 +76,7 @@ const bot = new DiscordVoiceBot({
   speech,
   coordinator,
   celeris,
+  s2s,
 });
 
 await bot.start();
@@ -67,6 +84,7 @@ await bot.start();
 const shutdown = async (signal: string): Promise<void> => {
   logger.info("shutdown.started", { signal });
   await bot.stop();
+  await s2s?.stop();
   coordinator.stop();
   await tools.close();
   process.exit(0);
