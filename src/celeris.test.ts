@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  allowsArchive,
   allowsFocusChange,
   CelerisConversation,
   CoordinatorToolClient,
@@ -36,6 +37,14 @@ const toolClient = (): CoordinatorToolClient => ({
       },
     },
     {
+      name: "archive_session",
+      description: "Archive the focused session and restore the previous focus.",
+      inputSchema: {
+        type: "object",
+        properties: { session_id: { type: "string" } },
+      },
+    },
+    {
       name: "check_updates",
       description: "Check updates.",
       inputSchema: { type: "object", properties: {} },
@@ -66,6 +75,8 @@ describe("Celeris coordinator conversation", () => {
     expect(allowsFocusChange("Switch to the voice agent session.")).toBe(true);
     expect(allowsFocusChange("What's the most recent output?")).toBe(false);
     expect(allowsFocusChange("Check the session we were already in.")).toBe(false);
+    expect(allowsArchive("Archive this temporary session.")).toBe(true);
+    expect(allowsArchive("What is this session doing?")).toBe(false);
   });
 
   it("answers an ordinary conversational turn directly", async () => {
@@ -93,6 +104,23 @@ describe("Celeris coordinator conversation", () => {
       tools?: Array<{ function?: { name?: string } }>;
     };
     expect(request.tools?.map((tool) => tool.function?.name)).toContain("focus_session");
+  });
+
+  it("offers archive only on an explicit archive turn and fixes its target to focus", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({ content: "Archived the side task; you're back in Primary work." }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await conversation("test-key").respond("Archive this temporary session.");
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tools?: Array<{
+        function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
+      }>;
+    };
+    const archive = request.tools?.find((tool) => tool.function?.name === "archive_session");
+    expect(archive).toBeDefined();
+    expect(archive?.function?.parameters?.properties).not.toHaveProperty("session_id");
   });
 
   it("executes an MCP coordinator tool and voices the immediate result", async () => {

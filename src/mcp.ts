@@ -108,6 +108,18 @@ export const createCoordinatorMcpServer = (
   );
 
   server.registerTool(
+    "archive_session",
+    {
+      description:
+        "Archive a session. If it is focused, restore the previous focused session, falling back to the most recently active session.",
+      inputSchema: {
+        session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
+      },
+    },
+    (args) => toolResult(coordinator, "archive_session", args),
+  );
+
+  server.registerTool(
     "answer_prompt",
     {
       description:

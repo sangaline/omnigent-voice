@@ -22,11 +22,14 @@ exact assistant text whose audio begins playing. These logs are intentionally
 sensitive and belong only on private runtime storage; they are never built into
 the image.
 
-The coordinator exposes eight tools: list and explicitly focus sessions, read
+The coordinator exposes nine tools: list and explicitly focus sessions, read
 recent output, poll only stable new output, send an immediate or deliberately
-queued message, answer a structured prompt, start a session, and drain
-background updates. The same server can run over stdio with `npm run mcp`; the
-voice process uses an in-memory MCP transport to avoid network latency.
+queued message, archive the focused session, answer a structured prompt, start
+a session, and drain background updates. Focus is server-owned state included
+in every tool result. Archiving a temporary focused session restores the prior
+valid focus and reports both sides of the transition for the spoken response.
+The same server can run over stdio with `npm run mcp`; the voice process uses an
+in-memory MCP transport to avoid network latency.
 
 A native poll loop keeps collecting focused-session output while audio is
 playing and while the human is speaking. When recognition finalizes, the model

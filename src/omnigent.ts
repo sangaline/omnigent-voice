@@ -97,6 +97,14 @@ export class OmnigentClient {
     );
   }
 
+  public async archiveSession(sessionId: string): Promise<JsonObject> {
+    return this.requestJson(`/v1/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ archived: true }),
+    });
+  }
+
   public async listItems(
     sessionId: string,
     limit: number,

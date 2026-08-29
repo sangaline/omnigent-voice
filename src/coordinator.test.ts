@@ -43,6 +43,7 @@ describe("Omnigent coordinator", () => {
       sendMessage: vi.fn(),
       resolveElicitation: vi.fn(),
       createSession: vi.fn(),
+      archiveSession: vi.fn(),
       interruptSession: vi.fn(),
     } as unknown as OmnigentClient;
     const coordinator = new OmnigentCoordinator({
@@ -60,6 +61,7 @@ describe("Omnigent coordinator", () => {
         "get_output",
         "poll_output",
         "send_message",
+        "archive_session",
         "answer_prompt",
         "start_session",
         "check_updates",
@@ -113,6 +115,7 @@ describe("Omnigent coordinator", () => {
       sendMessage,
       resolveElicitation: vi.fn(),
       createSession: vi.fn(),
+      archiveSession: vi.fn(),
       interruptSession: vi.fn(),
     } as unknown as OmnigentClient;
     const coordinator = new OmnigentCoordinator({
@@ -159,6 +162,59 @@ describe("Omnigent coordinator", () => {
         queued_messages: 1,
       });
       expect(sendMessage).toHaveBeenCalledTimes(1);
+    } finally {
+      coordinator.stop();
+      await client.close();
+    }
+  });
+
+  it("restores the previous focus after archiving a temporary session", async () => {
+    const now = new Date().toISOString();
+    const primary = {
+      id: "session-primary",
+      title: "Primary work",
+      status: "idle",
+      updated_at: now,
+    };
+    const temporary = {
+      id: "session-temporary",
+      title: "Temporary side task",
+      status: "idle",
+      updated_at: now,
+    };
+    const listSessions = vi
+      .fn()
+      .mockResolvedValueOnce([primary, temporary])
+      .mockResolvedValue([primary]);
+    const archiveSession = vi.fn().mockResolvedValue({ archived: true });
+    const omnigent = {
+      listSessions,
+      getSession: vi.fn().mockImplementation((id: string) =>
+        Promise.resolve(id === temporary.id ? temporary : primary),
+      ),
+      listItems: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
+      sendMessage: vi.fn(),
+      resolveElicitation: vi.fn(),
+      createSession: vi.fn(),
+      archiveSession,
+      interruptSession: vi.fn(),
+    } as unknown as OmnigentClient;
+    const coordinator = new OmnigentCoordinator({
+      omnigent,
+      logger: new Logger("error"),
+      pollIntervalMs: 60_000,
+    });
+    await coordinator.start();
+    const client = await CoordinatorMcpClient.create(coordinator);
+    try {
+      await client.callTool("focus_session", { session_id: temporary.id });
+      await expect(client.callTool("archive_session", {})).resolves.toMatchObject({
+        archived: true,
+        archived_session: { id: temporary.id, name: "Temporary side task" },
+        focus_reason: "previous_focus",
+        focused_session: { id: primary.id, name: "Primary work" },
+      });
+      expect(archiveSession).toHaveBeenCalledWith(temporary.id);
     } finally {
       coordinator.stop();
       await client.close();

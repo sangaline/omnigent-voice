@@ -168,6 +168,7 @@ const meaningfulOutput = (raw: JsonObject): string => {
 export class OmnigentCoordinator {
   private focusedSessionId: string | undefined;
   private focusedSession: JsonObject | undefined;
+  private readonly focusHistory: string[] = [];
   private readonly sessionSummaries = new Map<string, JsonObject>();
   private readonly deferredMessages: Array<{
     sessionId: string;
@@ -247,6 +248,9 @@ export class OmnigentCoordinator {
       case "send_message":
         result = await this.sendMessage(args);
         break;
+      case "archive_session":
+        result = await this.archiveSession(args);
+        break;
       case "answer_prompt":
         result = await this.answerPrompt(args);
         break;
@@ -295,6 +299,7 @@ export class OmnigentCoordinator {
     const id = this.requiredString(args, "session_id");
     const snapshot = await this.options.omnigent.getSession(id);
     const previousName = stringValue(this.focusedSession?.name) ?? "none";
+    this.rememberPreviousFocus(id);
     this.focusedSessionId = id;
     this.focusedSession = summary(snapshot);
     this.sessionSummaries.set(id, this.focusedSession);
@@ -395,6 +400,47 @@ export class OmnigentCoordinator {
     };
   }
 
+  private async archiveSession(args: Record<string, unknown>): Promise<JsonObject> {
+    const id = this.sessionFrom(args);
+    const snapshot = await this.options.omnigent.getSession(id);
+    await this.options.omnigent.archiveSession(id);
+    const archived = summary(snapshot);
+    this.outputStates.delete(id);
+    const wasFocused = id === this.focusedSessionId;
+    let focusReason = "unchanged";
+    if (wasFocused) {
+      const sessions = await this.options.omnigent.listSessions(30);
+      this.rememberSessions(sessions);
+      const available = new Set(
+        sessions.map(sessionId).filter((value): value is string => Boolean(value)),
+      );
+      let nextId: string | undefined;
+      while (this.focusHistory.length > 0 && !nextId) {
+        const candidate = this.focusHistory.pop();
+        if (candidate && candidate !== id && available.has(candidate)) nextId = candidate;
+      }
+      if (nextId) {
+        focusReason = "previous_focus";
+      } else {
+        nextId = sessionId(sessions[0] ?? {});
+        focusReason = nextId ? "most_recent_active" : "no_active_session";
+      }
+      this.focusedSessionId = nextId;
+      this.focusedSession = nextId ? this.sessionSummaries.get(nextId) : undefined;
+      if (nextId) await this.ensureOutputMonitor(nextId);
+    }
+    this.options.logger.info("coordinator.session.archived", {
+      archived: sessionName(snapshot),
+      nextFocus: stringValue(this.focusedSession?.name) ?? "none",
+      focusReason,
+    });
+    return {
+      archived: true,
+      archived_session: archived,
+      focus_reason: focusReason,
+    };
+  }
+
   private async answerPrompt(args: Record<string, unknown>): Promise<JsonObject> {
     const focusedId = this.sessionFrom(args);
     const promptId = this.requiredString(args, "prompt_id");
@@ -422,6 +468,7 @@ export class OmnigentCoordinator {
     });
     const id = sessionId(created);
     if (!id) throw new Error("Omnigent returned no session id");
+    this.rememberPreviousFocus(id);
     this.focusedSessionId = id;
     this.focusedSession = summary(created);
     this.sessionSummaries.set(id, this.focusedSession);
@@ -434,6 +481,15 @@ export class OmnigentCoordinator {
     const value = typeof args[name] === "string" ? args[name].trim() : "";
     if (!value) throw new Error(`${name} is required`);
     return value;
+  }
+
+  private rememberPreviousFocus(nextId: string): void {
+    const previous = this.focusedSessionId;
+    if (!previous || previous === nextId) return;
+    const existing = this.focusHistory.lastIndexOf(previous);
+    if (existing >= 0) this.focusHistory.splice(existing, 1);
+    this.focusHistory.push(previous);
+    if (this.focusHistory.length > 20) this.focusHistory.splice(0, this.focusHistory.length - 20);
   }
 
   private sessionFrom(args: Record<string, unknown>): string {

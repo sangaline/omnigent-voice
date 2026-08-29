@@ -55,6 +55,11 @@ most recently active native session but does not create one. Focus is sticky:
 reading or listing sessions never changes it, and `focus_session` is only for an
 explicit user-requested switch. Every coordinator result includes the focused
 session, and send acknowledgements include their actual target session.
+Starting or explicitly focusing a session records the prior focus in a bounded
+server-owned stack. Archiving the focused session restores the newest still-valid
+prior focus, falling back to the most recently active unarchived session. The
+archive result identifies both the archived and newly focused sessions, and the
+voice layer must speak that transition rather than relying on model memory.
 
 The coordinator polls recent session summaries and stable conversation items
 every two seconds, including while the human is speaking. At ASR finalization,
@@ -78,9 +83,11 @@ rejects `focus_session` unless the current transcript explicitly requests a
 switch/select/open/focus action or an ordinal selection. This is a runtime
 safety guard in addition to the prompt; ordinary latest/current-output language
 cannot mutate focus.
-The eight tools are `list_sessions`, `focus_session`, `get_output`,
-`poll_output`, `send_message`, `answer_prompt`, `start_session`, and
-`check_updates`. `poll_output` accepts and returns an explicit opaque cursor,
+The nine tools are `list_sessions`, `focus_session`, `get_output`,
+`poll_output`, `send_message`, `archive_session`, `answer_prompt`,
+`start_session`, and `check_updates`. `archive_session` is withheld unless the
+human explicitly says archive, and its voice-facing schema can only target the
+focused session. `poll_output` accepts and returns an explicit opaque cursor,
 returns only stable newer output, and never changes focus. This makes the tool
 usable by stateless remote MCP clients; omission returns the bounded buffered
 window. `send_message` defaults to
