@@ -339,7 +339,10 @@ the native patch deliberately supports both that layout and Moshi's fused
 projection tensors. A paced public-audio smoke test injected oracle text after
 the caller stopped, and both KAME's generated token stream and independent
 local ASR recovered the intended guided sentence. Treat this as the native
-runtime gate, not as a substitute for a live Discord/phone test.
+runtime gate, not as a substitute for a live Discord/phone test. RADV's first
+inference frame takes roughly 617 ms to compile/initialize; `KameS2SRuntime`
+therefore sends and discards 20 silent frames before the Discord bot connects.
+Do not remove that startup warmup or expose its output to callers.
 
 The guided native experiment is implemented behind `VOICE_RUNTIME=kame`; the
 default remains `staged`. `native/moshi-kame.patch` adds KAME's oracle embedding

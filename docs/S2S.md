@@ -77,4 +77,7 @@ test injected guidance after public test speech; the native generated-text
 stream and an independent local ASR pass both recovered, “I hear you clearly.
 The guided real-time voice path is working.” The bridge logs every frame over
 the 80 ms deadline separately so cold-start and recurrent misses cannot hide in
-a rolling percentile.
+a rolling percentile. The target driver incurs a roughly 617 ms first-frame
+shader warmup; the Node runtime sends and discards 20 silent frames before
+Discord connects. That warmup completed in 1.84 seconds in the container smoke
+test, after which the production Node fd3/fd4 client accepted live guidance.
