@@ -5,14 +5,17 @@
 - Treat `docs/MCP-SECURITY.md` as a release gate. Do not add a remotely
   reachable transport until its identity, authorization, isolation, revocation,
   audit, and abuse tests pass.
-- Keep the in-process voice transport and stdio server as the canonical,
-  non-networked coordinator implementation. Design any remote adapter as a thin
-  transport layer rather than duplicating tool behavior.
-- Map the existing Omnigent GitHub OAuth identity onto narrow coordinator
-  authorization. Before exposing a listener, write the threat model for this
-  remote-code-execution boundary: private reachability, caller identity,
-  per-session authorization, audit attribution, token handling, rate limits,
-  and revocation.
+- Finish deploying the implemented dedicated gateway entrypoint described in
+  `docs/MCP-ARCHITECTURE.md`. It starts with read-only `whoami` and
+  `list_sessions`; every upstream request uses the caller's encrypted Omnigent
+  grant and ordinary session ACLs.
+- Treat the gateway as the future account-scoped semantic boundary. Keep the
+  current in-process voice transport intact for the auth milestone, then move it
+  onto the proven gateway core instead of maintaining duplicate tool behavior.
+- Map the existing Omnigent GitHub/OIDC identity onto narrow coordinator
+  authorization through the one-time CLI-ticket proof. Never use a global
+  Omnigent credential, a user-identity header, or browser cookies on MCP tool
+  routes.
 - Verify the exact supported authentication and transport flows for Claude Code,
   Claude mobile/web, and Codex against current primary documentation, including
   OAuth discovery, client registration, callbacks, and Streamable HTTP support.
@@ -23,8 +26,12 @@
 - Specify graceful degradation for clients without push: explicit cursors,
   idempotent replay, bounded event retention, cursor-expiry behavior, and cheap
   client polling.
-- Produce an implementation estimate and staged plan before adding any public or
-  remotely reachable endpoint.
+- Keep ingress disabled until discovery, PKCE, consent, code replay, refresh
+  rotation/reuse, revocation, cross-account isolation, rate limiting, and
+  credential-log tests pass.
+- Apply and verify the hash-guarded Omnigent CLI-ticket patch, render the exact
+  gateway Ingress routes, deploy one replica with its private state PVC, then
+  perform the real Claude web/mobile OAuth connection and revocation test.
 
 ## Voice follow-ups after the current deployment
 

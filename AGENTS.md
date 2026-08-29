@@ -8,8 +8,11 @@ Minimal, speech-only Discord interface for an existing Omnigent deployment.
   channel IDs, personal paths, private hostnames, or deployment-specific defaults.
 - Secrets and deployment configuration enter only through runtime environment
   variables. Never use Docker build arguments for secrets.
-- The deployed application is one outbound-only container. It exposes no HTTP
-  service and needs no Kubernetes Service or Ingress.
+- The Discord voice Deployment remains one outbound-only container with no
+  Service or Ingress. The same credential-free image also contains a separate
+  `mcp:remote` entrypoint; it runs in a different pod/process with its own PVC,
+  Service, path-specific Ingress, resources, and kill switch. Never mount the
+  public listener in the Discord voice process.
 - Treat the coordinator tools as remote-code-execution authority: messages can
   cause coding agents to run commands. The voice runtime must use only its
   in-process MCP transport, and the standalone server must remain stdio-only.
@@ -19,9 +22,11 @@ Minimal, speech-only Discord interface for an existing Omnigent deployment.
   auditable caller identity before it is enabled.
 - `docs/MCP-SECURITY.md` is the release gate for any remote coordinator
   transport. GitHub/OIDC authentication alone is insufficient: exact stable
-  principal admission, per-tool scopes, Omnigent session ACLs, explicit remote
-  write targets, event isolation, revocation, audit attribution, and abuse tests
-  must all pass before a Service or Ingress is added.
+  principal-to-account linkage, per-tool scopes, Omnigent session ACLs,
+  explicit remote write targets, event isolation, revocation, audit attribution,
+  and abuse tests must all pass before a remote route is added. The proposed
+  account-scoped semantic core and ingress design live in
+  `docs/MCP-ARCHITECTURE.md`.
 - Keep the interaction voice-first: no web UI, buttons, menus, or required slash
   commands.
 
@@ -528,9 +533,33 @@ successful prompt resolutions to be acknowledged without another model round.
 An immediate outcome audit such as “did both actually happen?” repeats only the
 last typed receipt and says that the outcomes are recorded; it never calls stale
 prompt IDs again.
-A stdio MCP entry point is
-available with `npm run mcp`; authenticated remote HTTP transport is deliberately
-deferred.
+A stdio MCP entry point is available with `npm run mcp`. The same image exposes
+the separate `npm run mcp:remote` entrypoint for an authenticated, path-routed
+HTTP gateway, never a listener in the voice pod. It uses OAuth authorization
+code + PKCE, strict public-client DCR, explicit consent, ten-minute opaque
+access tokens, rotating refresh tokens with reuse revocation, and encrypted
+per-user Omnigent grants. Gateway tokens/codes are stored only as SHA-256
+digests; the upstream grant is AES-256-GCM encrypted with record-specific AAD.
+The encryption key enters only through a runtime Secret and state lives on a
+private SQLite PVC. A global service credential or impersonation header is
+forbidden.
+
+The first remote surface is deliberately only `whoami` and `list_sessions`
+under `omnigent.read`. Each tool obtains a delegated Omnigent access token, so
+the upstream account/session ACL is the authority. The gateway's issuer is the
+public HTTPS origin; its standard authorization, token, registration,
+revocation, authorization-server metadata, and path-specific protected-resource
+metadata routes are path-routed to the gateway alongside `/mcp`. Consent and
+the Omnigent return callback live below `/mcp/oauth/`. The gateway becomes the
+shared account-scoped semantic boundary after external Claude testing proves
+the contract.
+
+The Omnigent trust handoff uses its existing CLI/OIDC ticket flow. A reviewed,
+hash-guarded runtime patch makes a fulfilled ticket return to the already
+sanitized same-origin path, includes the validated OIDC issuer/subject in the
+one-time poll response, and tags the MCP grant as a scoped delegated client.
+The gateway binds `(issuer, subject)` one-to-one with Omnigent's canonical
+account identifier and fails closed on any later remap.
 For future Claude integration, do not equate MCP transport notifications with
 proactive agent turns. MCP `2026-07-28` `subscriptions/listen` carries only
 tool/prompt/resource list changes and subscribed-resource invalidations; Tasks
@@ -761,6 +790,7 @@ npm run eval -- --api-key-file /private/path/celeris-key
 npm run eval:scenarios -- --api-key-file /private/path/celeris-key
 npm run dev
 npm run mcp
+npm run mcp:remote
 npm run s2s:smoke
 podman build -t omnigent-voice:dev .
 experiments/personaplex/run-benchmark.sh --mode both

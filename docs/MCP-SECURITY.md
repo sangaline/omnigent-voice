@@ -1,8 +1,10 @@
 # Remote Omnigent MCP security gate
 
-Status: design only. The deployed voice process has no Service or Ingress, its
-coordinator MCP transport is in-process, and the standalone MCP entry point is
-stdio-only. This document does not authorize a network listener.
+Status: release gate. The gateway implementation exists behind a separate
+entrypoint but is not externally deployed until the tests and rendered routing
+review below pass. The deployed voice process still has no Service or Ingress,
+its coordinator MCP transport is in-process, and the standalone development
+entry point remains stdio-only.
 
 ## Security posture
 
@@ -14,9 +16,9 @@ identity; it does not by itself authorize any coordinator operation.
 Remote MCP must fail closed unless every layer below is present:
 
 1. TLS and standards-compliant OAuth discovery and authorization.
-2. An exact allowed human principal, represented by stable OIDC issuer and
-   subject claims. A GitHub login name is retained for display and audit but is
-   not the sole authorization key because login names can change or be reused.
+2. An active Omnigent account linked to stable OIDC issuer and subject claims.
+   A GitHub login name is retained for display and audit but is not the sole
+   authorization key because login names can change or be reused.
 3. Audience-, client-, and scope-bound access tokens with online revocation.
 4. Omnigent session ACL checks on every read and write after authentication.
 5. Server-side restrictions on the agents, hosts, and workspaces that a remote
@@ -24,9 +26,12 @@ Remote MCP must fail closed unless every layer below is present:
 6. Per-principal event filtering, cursor state, action attribution, and private
    audit logs.
 
-The allowed issuer, stable subject, and human-readable login belong in private
-runtime configuration. An absent allowlist disables remote MCP rather than
-admitting every valid GitHub or organization member.
+Identity links belong in Omnigent's private account store. A newly authenticated
+GitHub/OIDC principal is denied until the normal Omnigent admission flow creates
+or enables an account and binds its immutable issuer/subject pair. Organization
+membership alone is not coordinator authorization. An optional operator
+allowlist can further narrow admission, but it must not replace per-account
+session permissions.
 
 ## Shared semantic core
 
@@ -37,10 +42,11 @@ core performs authorization and returns typed state, action receipts, and event
 cursors.
 
 The voice adapter may retain its private focus stack and deterministic name
-routing because it authenticates one allowed Discord caller. Remote MCP must not
-share an implicit focus across chats or clients. Remote writes carry an explicit
-session target; a convenience focus is scoped to one authenticated MCP context
-and never becomes authority for another context.
+routing because it authenticates one allowed Discord caller and one linked
+Omnigent account. Remote MCP must not share an implicit focus across chats,
+clients, or accounts. Remote writes carry an explicit session target; a
+convenience focus is scoped to one authenticated MCP context and never becomes
+authority for another context.
 
 The common event contract is a durable, monotonically ordered replay stream:
 
@@ -79,7 +85,7 @@ authorization never relies on a client honoring annotations.
 ## OAuth requirements
 
 The remote resource should reuse Omnigent's existing GitHub-through-OIDC login
-and user mapping while exposing the standard MCP OAuth surface:
+and account admission while exposing the standard MCP OAuth surface:
 
 - RFC 9728 protected-resource metadata for the exact MCP resource URI.
 - Authorization-server metadata, authorization-code flow, and PKCE S256.
@@ -116,10 +122,13 @@ private voice adapter.
 ## Required security tests before exposure
 
 - Unauthenticated requests receive a standards-compliant challenge and no data.
-- A valid but unallowlisted GitHub/OIDC principal receives no session metadata.
+- A valid but unlinked, disabled, or unadmitted GitHub/OIDC principal receives
+  no session metadata.
 - Wrong issuer, audience, client, scope, expiration, or signature is rejected.
 - Read-only tokens cannot send, start, archive, rename, or answer prompts.
-- A valid caller cannot read or mutate a session lacking the required ACL.
+- A valid caller cannot read or mutate a session lacking the required ACL, and
+  two simultaneously connected accounts cannot observe each other's session
+  names, events, focus state, pending prompts, or action receipts.
 - Focus and event cursors cannot cross OAuth clients, MCP contexts, or users.
 - Event notifications never contain unauthorized payload and refetch rechecks
   authorization after an ACL change.
@@ -132,3 +141,12 @@ private voice adapter.
 
 No remote endpoint should be deployed until these tests are automated and the
 rendered Kubernetes resources have been reviewed for unintended routes.
+
+The initial implementation additionally limits DCR to public PKCE clients,
+permits only the `omnigent.read` scope, and exposes only `whoami` and
+`list_sessions`. Its integration suite covers discovery/challenges, unsafe
+redirect rejection, explicit same-origin consent, PKCE failure, authorization
+code replay, resource mismatch, refresh reuse revocation, upstream grant
+revocation, two-account session isolation, and raw database scans for plaintext
+credentials. Write tools remain prohibited even after the read-only connector
+is first exposed.
