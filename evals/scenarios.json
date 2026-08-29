@@ -105,6 +105,10 @@
         "input": "switch me over to the side audit one",
         "coordinatorState": {
           "focused_session": { "id": "session-voice", "name": "Voice Build", "status": "running" },
+          "known_sessions": [
+            { "id": "session-voice", "name": "Voice Build", "status": "running", "focused": true },
+            { "id": "session-side", "name": "Side Audit", "status": "idle", "focused": false }
+          ],
           "recent_actions": [],
           "output_delta": { "changed": false, "output": "" },
           "updates": [],
@@ -489,7 +493,8 @@
         ],
         "expected": {
           "toolSequence": [],
-          "speechTerms": ["primary work", "release tests", "passed"],
+          "speechTerms": ["primary work", "release tests"],
+          "speechAnyTerms": [["passed", "passing", "all pass", "green", "succeeded", "successful"]],
           "maxRounds": 1
         }
       },
@@ -556,7 +561,8 @@
         "checkUpdatesAfter": 31,
         "expected": {
           "toolSequence": [],
-          "speechTerms": ["primary work", "release tests", "passed"],
+          "speechTerms": ["primary work", "release tests"],
+          "speechAnyTerms": [["passed", "passing", "all pass", "green", "succeeded", "successful"]],
           "maxRounds": 1
         }
       }
@@ -1364,6 +1370,258 @@
           "toolSequence": [],
           "forbiddenTools": ["get_output", "focus_session"],
           "speechTerms": ["primary work", "restart", "healthy"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "proactive_current_session_output",
+    "description": "Proactively speak a stable assistant message from the running focused session, then resolve a follow-up from notification history without rereading output.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-live", "name": "Live Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-live", "name": "Live Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 91,
+            "type": "session_output",
+            "session_id": "session-live",
+            "name": "Live Work",
+            "status": "running",
+            "output_delta": {
+              "changed": true,
+              "output": "The decoder now passes eight reconnect tests; the soak is still running.",
+              "cursor": "live-8"
+            }
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["decoder", "eight", "soak"],
+          "speechForbiddenTerms": ["keep an eye", "monitor", "watch it", "report back"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait say that update again",
+        "coordinatorState": {
+          "focused_session": { "id": "session-live", "name": "Live Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-live", "name": "Live Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 91
+        },
+        "checkUpdatesAfter": 91,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output"],
+          "speechTerms": ["decoder", "eight", "soak"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "compound_send_then_switch",
+    "description": "Execute two explicit coordinator actions from one ASR-style utterance, acknowledge both, and carry the resulting focus and action evidence into the next turn.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "okay tell side beta rerun the voice worker and switch me over there",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-beta", "name": "Side Beta", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+              { "id": "session-beta", "name": "Side Beta", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 92, "type": "message_sent", "summary": "Sent immediately to Side Beta: Rerun the voice worker." }
+            ]
+          },
+          "focus_session": {
+            "focus_changed": true,
+            "focused_session": { "id": "session-beta", "name": "Side Beta", "status": "running" },
+            "previous_focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-beta", "name": "Side Beta", "status": "running", "focused": true },
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 92, "type": "message_sent", "summary": "Sent immediately to Side Beta: Rerun the voice worker." },
+              { "action_id": 93, "type": "focus_changed", "summary": "Focused Side Beta from Primary Work." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message", "focus_session"],
+          "alternativeToolSequences": [["focus_session", "send_message"]],
+          "unorderedCallExpectations": [
+            { "name": "send_message", "sessionId": "session-beta", "messageTerms": ["rerun", "voice worker"], "delivery": "not_queued" },
+            { "name": "focus_session", "sessionId": "session-beta" }
+          ],
+          "speechTerms": ["side beta"],
+          "speechAnyTerms": [["sent", "told"], ["switched", "focused", "now in"]],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "and just confirm where am i and did that actually send",
+        "coordinatorState": {
+          "focused_session": { "id": "session-beta", "name": "Side Beta", "status": "running" },
+          "known_sessions": [
+            { "id": "session-beta", "name": "Side Beta", "status": "running", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 92, "type": "message_sent", "summary": "Sent immediately to Side Beta: Rerun the voice worker." },
+            { "action_id": 93, "type": "focus_changed", "summary": "Focused Side Beta from Primary Work." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["send_message", "get_output", "focus_session"],
+          "speechTerms": ["side beta"],
+          "speechAnyTerms": [["sent", "delivered"]],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "compound_action_partial_failure",
+    "description": "Report both the successful and failed portions of a two-action transaction rather than erasing the successful send when focus switching fails.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell side beta rerun the voice worker then uh switch me to that one",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-beta", "name": "Side Beta", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 94, "type": "message_sent", "summary": "Sent immediately to Side Beta: Rerun the voice worker." }
+            ]
+          },
+          "focus_session": {
+            "error": "The target session disappeared before focus changed",
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 94, "type": "message_sent", "summary": "Sent immediately to Side Beta: Rerun the voice worker." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message", "focus_session"],
+          "alternativeToolSequences": [["focus_session", "send_message"]],
+          "unorderedCallExpectations": [
+            { "name": "send_message", "sessionId": "session-beta", "messageTerms": ["rerun", "voice worker"], "delivery": "not_queued" },
+            { "name": "focus_session", "sessionId": "session-beta" }
+          ],
+          "speechTerms": ["side beta"],
+          "speechAnyTerms": [["sent", "told"], ["couldn't switch", "could not switch", "failed to switch"]],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait so what part actually happened and where am i",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-beta", "name": "Side Beta", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 94, "type": "message_sent", "summary": "Sent immediately to Side Beta: Rerun the voice worker." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["send_message", "get_output", "focus_session"],
+          "speechTerms": ["side beta", "primary work"],
+          "speechAnyTerms": [["sent", "delivered"]],
           "maxRounds": 1
         }
       }

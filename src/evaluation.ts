@@ -11,6 +11,11 @@ export interface VoiceToolCallExpectation {
   argumentEquals?: Record<string, unknown> | undefined;
 }
 
+export type VoiceUnorderedToolCallExpectation = Omit<
+  VoiceToolCallExpectation,
+  "index"
+>;
+
 export interface VoiceEvalExpectation {
   toolSequence: Array<string>;
   alternativeToolSequences?: Array<Array<string>> | undefined;
@@ -28,6 +33,7 @@ export interface VoiceEvalExpectation {
   speechExact?: string | undefined;
   maxRounds?: number | undefined;
   callExpectations?: VoiceToolCallExpectation[] | undefined;
+  unorderedCallExpectations?: VoiceUnorderedToolCallExpectation[] | undefined;
 }
 
 export interface VoiceEvalCase {
@@ -244,20 +250,23 @@ export const scoreVoiceEval = (
       `argument ${name} ${JSON.stringify(first?.arguments[name])} != ${JSON.stringify(value)}`,
     );
   }
-  for (const expectedCall of testCase.expected.callExpectations ?? []) {
-    const call = observation.toolCalls[expectedCall.index];
-    check(Boolean(call), `missing tool call at index ${expectedCall.index}`);
-    if (!call) continue;
+  const scoreExpectedCall = (
+    expectedCall: VoiceUnorderedToolCallExpectation,
+    call: ObservedToolCall | undefined,
+    label: string,
+  ): void => {
+    check(Boolean(call), `missing tool call ${label}`);
+    if (!call) return;
     if (expectedCall.name) {
       check(
         call.name === expectedCall.name,
-        `tool call ${expectedCall.index} name ${call.name} != ${expectedCall.name}`,
+        `tool call ${label} name ${call.name} != ${expectedCall.name}`,
       );
     }
     if (expectedCall.sessionId) {
       check(
         call.arguments.session_id === expectedCall.sessionId,
-        `tool call ${expectedCall.index} session_id ${String(call.arguments.session_id)} != ${expectedCall.sessionId}`,
+        `tool call ${label} session_id ${String(call.arguments.session_id)} != ${expectedCall.sessionId}`,
       );
     }
     if (expectedCall.messageTerms) {
@@ -267,7 +276,7 @@ export const scoreVoiceEval = (
       for (const term of expectedCall.messageTerms) {
         check(
           lowerIncludes(message, term),
-          `tool call ${expectedCall.index} message omitted ${JSON.stringify(term)}`,
+          `tool call ${label} message omitted ${JSON.stringify(term)}`,
         );
       }
     }
@@ -277,15 +286,30 @@ export const scoreVoiceEval = (
         expectedCall.delivery === "not_queued"
           ? delivery !== "queued"
           : delivery === expectedCall.delivery,
-        `tool call ${expectedCall.index} delivery ${String(delivery)} != ${expectedCall.delivery}`,
+        `tool call ${label} delivery ${String(delivery)} != ${expectedCall.delivery}`,
       );
     }
     for (const [name, value] of Object.entries(expectedCall.argumentEquals ?? {})) {
       check(
         JSON.stringify(call.arguments[name]) === JSON.stringify(value),
-        `tool call ${expectedCall.index} argument ${name} ${JSON.stringify(call.arguments[name])} != ${JSON.stringify(value)}`,
+        `tool call ${label} argument ${name} ${JSON.stringify(call.arguments[name])} != ${JSON.stringify(value)}`,
       );
     }
+  };
+  for (const expectedCall of testCase.expected.callExpectations ?? []) {
+    scoreExpectedCall(
+      expectedCall,
+      observation.toolCalls[expectedCall.index],
+      String(expectedCall.index),
+    );
+  }
+  const unmatchedCalls = [...observation.toolCalls];
+  for (const expectedCall of testCase.expected.unorderedCallExpectations ?? []) {
+    const callIndex = expectedCall.name
+      ? unmatchedCalls.findIndex((call) => call.name === expectedCall.name)
+      : 0;
+    const [call] = callIndex >= 0 ? unmatchedCalls.splice(callIndex, 1) : [];
+    scoreExpectedCall(expectedCall, call, `named ${expectedCall.name ?? "call"}`);
   }
   for (const term of testCase.expected.speechTerms ?? []) {
     check(lowerIncludes(observation.speech, term), `speech omitted ${JSON.stringify(term)}`);

@@ -641,7 +641,7 @@
     "coordinatorState": {
       "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
       "recent_actions": [
-        { "action_id": 14, "type": "message_sent", "summary": "Sent immediately to Primary Work: this is a delivery test" }
+        { "action_id": 14, "type": "message_sent", "session_id": "session-primary", "name": "Primary Work", "delivery": "immediate", "message": "This is a delivery test.", "summary": "Sent immediately to Primary Work: this is a delivery test" }
       ],
       "output_delta": { "changed": false, "output": "" },
       "updates": [],
@@ -659,7 +659,14 @@
           { "position": 1, "kind": "message", "role": "user", "text": "This is a delivery test." }
         ],
         "items_omitted": 0,
-        "has_more": false
+        "has_more": false,
+        "recent_delivery_visibility": {
+          "action_id": 14,
+          "delivery": "immediate",
+          "status": "visible_on_page",
+          "matching_position": 1,
+          "page": 1
+        }
       }
     },
     "expected": {
@@ -711,7 +718,7 @@
     "coordinatorState": {
       "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
       "recent_actions": [
-        { "action_id": 18, "type": "message_sent", "summary": "Sent immediately to Primary Work: reply with delivery confirmed" }
+        { "action_id": 18, "type": "message_sent", "session_id": "session-primary", "name": "Primary Work", "delivery": "immediate", "message": "Reply with delivery confirmed.", "summary": "Sent immediately to Primary Work: reply with delivery confirmed" }
       ],
       "output_delta": { "changed": false, "output": "" },
       "updates": [],
@@ -729,7 +736,14 @@
           { "position": 1, "kind": "message", "role": "assistant", "text": "Still finishing the previous operation." }
         ],
         "items_omitted": 0,
-        "has_more": false
+        "has_more": false,
+        "recent_delivery_visibility": {
+          "action_id": 18,
+          "delivery": "immediate",
+          "status": "not_visible_on_page",
+          "matching_position": null,
+          "page": 1
+        }
       }
     },
     "expected": {
@@ -762,7 +776,7 @@
     "coordinatorState": {
       "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
       "recent_actions": [
-        { "action_id": 19, "type": "message_sent", "summary": "Sent immediately to Primary Work: rerun the timing check" }
+        { "action_id": 19, "type": "message_sent", "session_id": "session-primary", "name": "Primary Work", "delivery": "immediate", "message": "Rerun the timing check.", "summary": "Sent immediately to Primary Work: rerun the timing check" }
       ],
       "output_delta": { "changed": false, "output": "" },
       "updates": [],
@@ -780,7 +794,14 @@
           { "position": 1, "kind": "message", "role": "assistant", "text": "The earlier operation is still active." }
         ],
         "items_omitted": 0,
-        "has_more": false
+        "has_more": false,
+        "recent_delivery_visibility": {
+          "action_id": 19,
+          "delivery": "immediate",
+          "status": "not_visible_on_page",
+          "matching_position": null,
+          "page": 1
+        }
       }
     },
     "expected": {
@@ -813,7 +834,7 @@
     "coordinatorState": {
       "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
       "recent_actions": [
-        { "action_id": 20, "type": "message_sent", "summary": "Sent immediately to Primary Work: rerun the timing check" }
+        { "action_id": 20, "type": "message_sent", "session_id": "session-primary", "name": "Primary Work", "delivery": "immediate", "message": "Rerun the timing check.", "summary": "Sent immediately to Primary Work: rerun the timing check" }
       ],
       "output_delta": { "changed": false, "output": "" },
       "updates": [],
@@ -832,7 +853,14 @@
           { "position": 2, "kind": "message", "role": "user", "text": "Rerun the timing check." }
         ],
         "items_omitted": 0,
-        "has_more": false
+        "has_more": false,
+        "recent_delivery_visibility": {
+          "action_id": 20,
+          "delivery": "immediate",
+          "status": "visible_on_page",
+          "matching_position": 2,
+          "page": 1
+        }
       }
     },
     "expected": {

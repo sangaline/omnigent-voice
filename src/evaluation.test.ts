@@ -228,6 +228,55 @@ describe("voice harness evaluation", () => {
     );
   });
 
+  it("checks independent compound actions without imposing call order", () => {
+    const compound: VoiceEvalCase = {
+      ...testCase,
+      expected: {
+        toolSequence: ["send_message", "focus_session"],
+        alternativeToolSequences: [["focus_session", "send_message"]],
+        unorderedCallExpectations: [
+          {
+            name: "send_message",
+            sessionId: "session-side",
+            messageTerms: ["rerun", "worker"],
+          },
+          { name: "focus_session", sessionId: "session-side" },
+        ],
+      },
+    };
+    const reversed: VoiceEvalObservation = {
+      ...observation,
+      toolCalls: [
+        {
+          name: "focus_session",
+          arguments: { session_id: "session-side" },
+          result: { focus_changed: true },
+        },
+        {
+          name: "send_message",
+          arguments: {
+            session_id: "session-side",
+            message: "Rerun the voice worker",
+          },
+          result: { accepted: true },
+        },
+      ],
+    };
+    expect(scoreVoiceEval(compound, reversed).passed).toBe(true);
+    expect(
+      scoreVoiceEval(compound, {
+        ...reversed,
+        toolCalls: [
+          reversed.toolCalls[0]!,
+          {
+            ...reversed.toolCalls[1]!,
+            arguments: { session_id: "session-side", message: "Do something" },
+          },
+        ],
+      }).failures,
+    ).toEqual(expect.arrayContaining([expect.stringContaining("message omitted")]));
+  });
+
   it("rejects invented spoken numbers while allowing configured thresholds", () => {
     const numericCase: VoiceEvalCase = {
       ...testCase,

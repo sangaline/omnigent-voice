@@ -218,6 +218,7 @@ for (const scenario of scenarios) {
           invalid,
           ...score,
           observation,
+          ...(hasOption("--include-trace") ? { trace: trace.map((event) => ({ ...event })) } : {}),
         };
         turnResults.push(result);
         if (!hasOption("--json")) {

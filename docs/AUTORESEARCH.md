@@ -337,3 +337,114 @@ harness model cases, and all 45 turns across nine persistent linked scenarios.
 There were no invalid model-service trials. The linked suite includes the
 thirteen-turn compound workflow as well as notification, cursor, decision,
 named routing, rename, and focus-restoration regressions.
+
+### 2026-08-29 — Proactive progress and compound action receipts
+
+Hypothesis H12: newly persisted assistant output from a still-running monitored
+session is useful enough to announce proactively, while raw tool and terminal
+activity is too noisy. The coordinator now emits a replayable `session_output`
+event only for a new assistant message. A lifecycle transition in the same poll
+owns the accumulated output, preventing duplicate progress-plus-completion
+announcements. A coordinator/MCP test proves that one assistant update is
+published and replayed while a later tool-only item creates no unsolicited
+event.
+
+The initial model-facing scenario passed one of two complete runs because one
+notification omitted the still-running soak test. Three diagnostic runs also
+found one offer to “keep an eye on” the session, which the runtime cannot
+promise. A notification-local contract now requires preserving both concrete
+progress and remaining work, asks for input only on an actual decision, and
+forbids offers of future monitoring. The revised persistent scenario passed all
+ten turns across five runs, including a follow-up that repeated the update from
+notification history without rereading Omnigent.
+
+Hypothesis H13: one utterance can safely request more than one independent
+coordinator mutation, but final speech should be derived from typed results
+rather than another unconstrained acknowledgement completion. A send-then-
+switch baseline selected both correct tools in one model round. Two of three
+initial runs gave a complete final acknowledgement; a diagnostic five-run set
+then passed, confirming intermittent speech variance rather than action drift.
+When the send succeeded but focus failed, however, all three baseline runs hid
+the successful send and reported only the switch failure.
+
+The deterministic renderer now combines verified receipts when every action in
+the model response succeeds, reducing successful send-plus-switch from two
+model rounds to one. On partial failure it preserves verified completed-action
+receipts before the deterministic error. Successful compound flow passed ten
+of ten linked turns across five runs in 112–369 ms per action turn; the partial-
+failure flow passed six of six linked turns across three runs in 127–390 ms per
+action turn. Conventional coverage is now 42 tests. Full isolated and linked
+promotion gates remain required before deployment.
+
+Hypothesis H14: short stable output is already voice-sized, so explicitly
+preserving each condition, count, outcome, and remaining-work clause will reduce
+speech omissions without a second completion. Before this change, repeated
+five- and eight-run probes intermittently dropped either “after reconnect” or
+the release-test result. Natural inflections such as “passing” and “all passes”
+were accepted as rubric corrections, while a response that said only “finished”
+remained a real failure. The late short-delta contract then passed all 40 turns
+across eight complete runs of the affected scenario.
+
+A subsequent full linked sweep exposed one explicit switch turn that spoke
+without calling `focus_session`. Eight exact replays selected the tool, but a
+ten-run stress test produced one malformed opaque ID with a trailing brace.
+The voice harness now resolves one explicitly named focus target through the
+authoritative `known_sessions` map, removes the ID from the model-visible
+schema, and injects the exact target. This mirrors named-message routing and
+fails closed on unresolved ambiguity. Five sequential runs then passed all 35
+turns of the focus-and-notification scenario. The compound evaluator also now
+checks independent send and focus arguments without imposing call order; once
+both IDs are injected, either order has the same verified final state.
+
+The partial-failure follow-up uncovered a separate state-shaping problem. A
+successful send appears in `recent_actions`, but a failed focus attempt does
+not, leaving ordinary assistant speech as the only explicit failure record.
+Raw completion tracing confirmed that Celeris sometimes returned a genuine
+empty `stop` response and sometimes substituted an unnecessary output read.
+Repeating a typed `last_verified_action_outcome` improved the flow from five of
+ten to nine of ten runs. A narrow immediate follow-up asking only which part
+happened and where the user is can now be rendered from that verified receipt
+plus current focus, while visibility questions and new actions remain on the
+model path. This passed all 20 turns across ten runs; the follow-up itself took
+zero model rounds. The runner's optional `--json --include-trace` output records
+sanitized raw completion shapes for future diagnosis. Full promotion gates are
+still pending after these changes.
+
+Hypothesis H15: asking Celeris to compare a delivery ledger entry with raw
+conversation items is both slower and less reliable than returning the
+comparison as typed MCP state. The isolated visibility gate regressed to zero
+of five despite the sent user message being present, consistently describing
+it as absent. Adding `recent_delivery_visibility` to `get_output` raised the
+case to nine of ten, with the remaining model completion containing only the
+word “thought.”
+
+The coordinator now compares the latest recorded sent or queued message for the
+target session with typed user messages on the returned page and reports
+`visible_on_page` or `not_visible_on_page`. This is intentionally page-local and
+does not infer whether an agent responded. Once Celeris selects the required
+read, the voice harness renders that typed result directly rather than asking
+for a second completion. Four positive and negative visibility cases passed all
+20 targeted trials. Warm turns fell from roughly 270–365 ms over two model
+rounds to 131–183 ms over one round. Full promotion gates remain pending.
+
+Hypothesis H16: literal user task clauses and already voice-sized progress do
+not benefit from paraphrasing by the fast model. In the full linked gate, one
+`start_session` instruction changed “receipt wording” into “resend
+acknowledgements,” and one short proactive update again omitted the still-
+running soak clause despite the strengthened prompt.
+
+For clear “start/make/create/open a session to/for …” requests, the harness now
+injects the user's exact trailing task clause while Celeris still chooses the
+tool, title, agent, and workspace. The thirteen-turn compound workflow then
+passed all 65 turns across five runs. A single plain `session_output` update up
+to 240 characters and three lines is now spoken directly with its session name;
+URLs, code fences, long output, and multi-event batches still use Celeris. The
+proactive scenario passed all 20 turns across ten runs, with the unsolicited
+progress turn taking zero model rounds. Full promotion gates remain pending.
+
+Final promotion result: typecheck and build clean, 46 of 46 conventional tests,
+27 of 27 isolated production-harness cases, and all 51 turns across 12 linked
+scenarios. There were no invalid model-service trials. One-round model turns in
+the linked sweep were generally 105–237 ms, two-round reads were 222–356 ms,
+and the short proactive update plus typed partial-failure verification required
+zero model rounds. This candidate is accepted for deployment.
