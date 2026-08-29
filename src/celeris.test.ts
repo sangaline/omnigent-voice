@@ -85,6 +85,7 @@ describe("Celeris coordinator conversation", () => {
 
     await expect(conversation("test-key").respond("Hello")).resolves.toBe("Hello there.");
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      messages?: Array<{ role?: string; content?: string }>;
       tools?: Array<{
         function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
       }>;
@@ -93,6 +94,11 @@ describe("Celeris coordinator conversation", () => {
     expect(request.tools?.map((tool) => tool.function?.name)).not.toContain("focus_session");
     const send = request.tools?.find((tool) => tool.function?.name === "send_message");
     expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");
+    expect(
+      request.messages?.some((message) =>
+        message.content?.includes('"context_measurement":"No token or page-count introspection'),
+      ),
+    ).toBe(true);
   });
 
   it("offers focus mutation only on an explicit switch turn", async () => {
