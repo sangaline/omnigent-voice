@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import type { OfflineTts, OnlineRecognizer } from "sherpa-onnx-node";
 import { Logger } from "./log.js";
+import { PocketTtsRuntime } from "./pocket-tts.js";
 
 const require = createRequire(import.meta.url);
 const sherpa = require("sherpa-onnx-node") as typeof import("sherpa-onnx-node");
@@ -10,10 +11,15 @@ const sherpa = require("sherpa-onnx-node") as typeof import("sherpa-onnx-node");
 interface SpeechOptions {
   asrModelDir: string;
   ttsModelDir: string;
+  ttsRuntime?: "piper" | "pocket" | undefined;
   asrThreads: number;
   ttsThreads: number;
   ttsSpeakerId: number;
   ttsSpeed: number;
+  pocketTtsPythonExecutable?: string | undefined;
+  pocketTtsBridgePath?: string | undefined;
+  pocketTtsVoice?: string | undefined;
+  pocketTtsQuantize?: boolean | undefined;
   logger: Logger;
 }
 
@@ -120,15 +126,14 @@ const requireDirectory = (path: string, label: string): string => {
 export class LocalSpeech {
   private constructor(
     private readonly recognizer: OnlineRecognizer,
-    private readonly tts: OfflineTts,
+    private readonly tts: OfflineTts | undefined,
+    private readonly pocketTts: PocketTtsRuntime | undefined,
     private readonly options: SpeechOptions,
   ) {}
 
   public static async create(options: SpeechOptions): Promise<LocalSpeech> {
     requireDirectory(options.asrModelDir, "SHERPA_ASR_MODEL_DIR");
-    requireDirectory(options.ttsModelDir, "SHERPA_TTS_MODEL_DIR");
     const asrFiles = walkFiles(options.asrModelDir);
-    const ttsFiles = walkFiles(options.ttsModelDir);
     const recognizer = new sherpa.OnlineRecognizer({
       featConfig: { sampleRate: 16_000, featureDim: 80 },
       modelConfig: {
@@ -146,33 +151,53 @@ export class LocalSpeech {
       enableEndpoint: false,
     });
 
-    const tts = await sherpa.OfflineTts.createAsync({
-      model: {
-        vits: {
-          model: findFile(ttsFiles, /^en_US-lessac-medium\.onnx$/i, "TTS model"),
-          tokens: findFile(ttsFiles, /^tokens\.txt$/i, "TTS tokens"),
-          dataDir: join(options.ttsModelDir, "espeak-ng-data"),
-          noiseScale: 0.667,
-          noiseScaleW: 0.8,
-          lengthScale: 1,
+    const ttsRuntime = options.ttsRuntime ?? "piper";
+    let tts: OfflineTts | undefined;
+    let pocketTts: PocketTtsRuntime | undefined;
+    if (ttsRuntime === "pocket") {
+      if (!options.pocketTtsPythonExecutable || !options.pocketTtsBridgePath) {
+        throw new Error("Pocket TTS Python executable and bridge path are required");
+      }
+      pocketTts = new PocketTtsRuntime({
+        executable: options.pocketTtsPythonExecutable,
+        bridgePath: options.pocketTtsBridgePath,
+        voice: options.pocketTtsVoice ?? "alba",
+        quantize: options.pocketTtsQuantize ?? true,
+        logger: options.logger,
+      });
+      await pocketTts.start();
+    } else {
+      requireDirectory(options.ttsModelDir, "SHERPA_TTS_MODEL_DIR");
+      const ttsFiles = walkFiles(options.ttsModelDir);
+      tts = await sherpa.OfflineTts.createAsync({
+        model: {
+          vits: {
+            model: findFile(ttsFiles, /^en_US-lessac-medium\.onnx$/i, "TTS model"),
+            tokens: findFile(ttsFiles, /^tokens\.txt$/i, "TTS tokens"),
+            dataDir: join(options.ttsModelDir, "espeak-ng-data"),
+            noiseScale: 0.667,
+            noiseScaleW: 0.8,
+            lengthScale: 1,
+          },
         },
-      },
-      maxNumSentences: 1,
-      silenceScale: 0.25,
-      numThreads: options.ttsThreads,
-      provider: "cpu",
-    });
-    if (options.ttsSpeakerId >= tts.numSpeakers) {
-      throw new Error(
-        `SHERPA_TTS_SPEAKER_ID must be below ${tts.numSpeakers}`,
-      );
+        maxNumSentences: 1,
+        silenceScale: 0.25,
+        numThreads: options.ttsThreads,
+        provider: "cpu",
+      });
+      if (options.ttsSpeakerId >= tts.numSpeakers) {
+        throw new Error(
+          `SHERPA_TTS_SPEAKER_ID must be below ${tts.numSpeakers}`,
+        );
+      }
     }
     options.logger.info("speech.models.ready", {
       sherpaVersion: sherpa.version,
-      ttsSpeakers: tts.numSpeakers,
-      ttsSampleRate: tts.sampleRate,
+      ttsRuntime,
+      ttsSpeakers: tts?.numSpeakers ?? 1,
+      ttsSampleRate: tts?.sampleRate ?? pocketTts?.ready.sampleRate,
     });
-    return new LocalSpeech(recognizer, tts, options);
+    return new LocalSpeech(recognizer, tts, pocketTts, options);
   }
 
   public transcribe(samples: Float32Array): string {
@@ -186,18 +211,22 @@ export class LocalSpeech {
   }
 
   public async synthesize(text: string): Promise<SynthesizedAudio> {
-    const started = performance.now();
-    this.options.logger.info("tts.started", { characters: text.length });
-    const audio = await this.tts.generateAsync({
-      text,
-      sid: this.options.ttsSpeakerId,
-      speed: this.options.ttsSpeed,
+    const chunks: Float32Array[] = [];
+    let samples = 0;
+    let sampleRate = 0;
+    await this.synthesizeStreaming(text, (audio) => {
+      chunks.push(audio.samples);
+      samples += audio.samples.length;
+      sampleRate = audio.sampleRate;
     });
-    this.options.logger.info("tts.complete", {
-      durationMs: Math.round(performance.now() - started),
-      audioMs: Math.round((audio.samples.length / audio.sampleRate) * 1_000),
-    });
-    return audio;
+    const combined = new Float32Array(samples);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+    if (sampleRate <= 0) throw new Error("TTS returned no audio");
+    return { samples: combined, sampleRate };
   }
 
   public async synthesizeStreaming(
@@ -207,7 +236,27 @@ export class LocalSpeech {
     const started = performance.now();
     let chunks = 0;
     this.options.logger.info("tts.started", { characters: text.length });
-    const audio = await this.tts.generateAsync({
+    if (this.pocketTts) {
+      const result = await this.pocketTts.generate(text, (audio) => {
+        chunks += 1;
+        if (chunks === 1) {
+          this.options.logger.info("tts.first_chunk", {
+            durationMs: Math.round(performance.now() - started),
+          });
+        }
+        return onChunk(audio);
+      });
+      this.options.logger.info("tts.complete", {
+        durationMs: Math.round(performance.now() - started),
+        audioMs: result.audioMs,
+        chunks: result.chunks,
+        runtime: "pocket",
+      });
+      return;
+    }
+    const tts = this.tts;
+    if (!tts) throw new Error("No TTS runtime is available");
+    const audio = await tts.generateAsync({
       text,
       sid: this.options.ttsSpeakerId,
       speed: this.options.ttsSpeed,
@@ -219,7 +268,7 @@ export class LocalSpeech {
             durationMs: Math.round(performance.now() - started),
           });
         }
-        return onChunk({ samples, sampleRate: this.tts.sampleRate }) !== false;
+        return onChunk({ samples, sampleRate: tts.sampleRate }) !== false;
       },
     });
     if (chunks === 0 && audio.samples.length > 0) {
@@ -231,5 +280,9 @@ export class LocalSpeech {
       audioMs: Math.round((audio.samples.length / audio.sampleRate) * 1_000),
       chunks,
     });
+  }
+
+  public async stop(): Promise<void> {
+    await this.pocketTts?.stop();
   }
 }

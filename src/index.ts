@@ -21,10 +21,15 @@ logger.info("startup", {
 const speech = await LocalSpeech.create({
   asrModelDir: config.sherpaAsrModelDir,
   ttsModelDir: config.sherpaTtsModelDir,
+  ttsRuntime: config.ttsRuntime,
   asrThreads: config.sherpaAsrThreads,
   ttsThreads: config.sherpaTtsThreads,
   ttsSpeakerId: config.sherpaTtsSpeakerId,
   ttsSpeed: config.sherpaTtsSpeed,
+  pocketTtsPythonExecutable: config.pocketTtsPythonExecutable,
+  pocketTtsBridgePath: config.pocketTtsBridgePath,
+  pocketTtsVoice: config.pocketTtsVoice,
+  pocketTtsQuantize: config.pocketTtsQuantize,
   logger,
 });
 const omnigent = new OmnigentClient({
@@ -102,6 +107,7 @@ await bot.start();
 const shutdown = async (signal: string): Promise<void> => {
   logger.info("shutdown.started", { signal });
   await bot.stop();
+  await speech.stop();
   await endpoint?.stop();
   await s2s?.stop();
   coordinator.stop();

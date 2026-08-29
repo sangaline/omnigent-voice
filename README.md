@@ -9,8 +9,12 @@ a coding agent to finish. Speech is synthesized locally and streamed back into
 the same voice channel.
 
 ASR runs incrementally while the caller is speaking. Celeris responses are
-currently short batch completions, while low-latency Piper TTS audio is sent to
-Discord as the synthesizer produces each chunk.
+short completions, then a persistent, int8 Pocket TTS runtime begins natural
+24 kHz speech in roughly 34-39 ms. Every generated 80 ms audio chunk is sent to
+Discord immediately; the complete reply is never buffered before playback.
+If the caller barges in, Discord playback and the in-progress Pocket generation
+are both cancelled so the next turn does not wait behind discarded audio.
+Piper remains available with `TTS_RUNTIME=piper` as a lower-quality fallback.
 
 The project is intentionally narrow: one caller, one focused Omnigent session,
 one container, and no text or web interface.
@@ -21,8 +25,8 @@ to local streaming ASR immediately and through a short bounded delay before
 KAME, allowing verified Celeris results to reach the oracle-text stream before
 the model observes the user's endpoint. Native audio is fail-closed outside a
 verified response. Set `VOICE_RUNTIME=kame` and mount the required model files
-to enable the experiment. `VOICE_RUNTIME=staged` retains the original
-ASR/Celeris/Piper path as an immediate fallback. See `docs/S2S.md` for the
+to enable the experiment. `VOICE_RUNTIME=staged` uses the reliable streaming
+ASR/Celeris/Pocket path. See `docs/S2S.md` for the
 native protocol, incident record, and live-test gates.
 
 Structured JSON logs are written to stdout. When `LOG_FILE` is set, the same
@@ -131,7 +135,9 @@ podman run --rm --env-file .env omnigent-voice:dev
 
 The image has no embedded deployment configuration or credentials. See
 `.env.example` for the runtime interface. Set `LOG_FILE` to a writable runtime
-path to retain the JSONL event log across process restarts.
+path to retain the JSONL event log across process restarts. The Pocket model and
+public `alba` voice state are downloaded without authentication during the
+image build and run with Hugging Face offline mode at runtime.
 
 ## Prompt replay
 

@@ -1,5 +1,6 @@
 export interface Config {
   voiceRuntime: "staged" | "kame";
+  ttsRuntime: "piper" | "pocket";
   discordBotToken: string;
   discordGuildId?: string | undefined;
   discordVoiceChannelId?: string | undefined;
@@ -35,6 +36,10 @@ export interface Config {
   sherpaTtsThreads: number;
   sherpaTtsSpeakerId: number;
   sherpaTtsSpeed: number;
+  pocketTtsPythonExecutable: string;
+  pocketTtsBridgePath: string;
+  pocketTtsVoice: string;
+  pocketTtsQuantize: boolean;
   kameBridgePath?: string | undefined;
   kameConfigPath?: string | undefined;
   kameModelPath?: string | undefined;
@@ -118,6 +123,10 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
   if (voiceRuntime !== "staged" && voiceRuntime !== "kame") {
     throw new Error("VOICE_RUNTIME must be staged or kame");
   }
+  const ttsRuntime = optional(env, "TTS_RUNTIME") ?? "piper";
+  if (ttsRuntime !== "piper" && ttsRuntime !== "pocket") {
+    throw new Error("TTS_RUNTIME must be piper or pocket");
+  }
   const kameBridgePath = optional(env, "KAME_BRIDGE_PATH");
   const kameConfigPath = optional(env, "KAME_CONFIG_PATH");
   const kameModelPath = optional(env, "KAME_MODEL_PATH");
@@ -154,6 +163,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
 
   return {
     voiceRuntime,
+    ttsRuntime,
     discordBotToken: required(env, "DISCORD_BOT_TOKEN"),
     discordGuildId: optional(env, "DISCORD_GUILD_ID"),
     discordVoiceChannelId: optional(env, "DISCORD_VOICE_CHANNEL_ID"),
@@ -209,6 +219,13 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     sherpaTtsThreads: positiveInteger(env, "SHERPA_TTS_THREADS", 4),
     sherpaTtsSpeakerId: nonnegativeInteger(env, "SHERPA_TTS_SPEAKER_ID", 0),
     sherpaTtsSpeed: positiveNumber(env, "SHERPA_TTS_SPEED", 1),
+    pocketTtsPythonExecutable:
+      optional(env, "POCKET_TTS_PYTHON") ?? "/opt/pocket-tts/bin/python",
+    pocketTtsBridgePath:
+      optional(env, "POCKET_TTS_BRIDGE_PATH") ??
+      "/opt/omnigent-voice/pocket-tts/bridge.py",
+    pocketTtsVoice: optional(env, "POCKET_TTS_VOICE") ?? "alba",
+    pocketTtsQuantize: boolean(env, "POCKET_TTS_QUANTIZE", true),
     kameBridgePath,
     kameConfigPath,
     kameModelPath,

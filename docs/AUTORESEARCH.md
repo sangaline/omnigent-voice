@@ -827,3 +827,40 @@ typecheck plus 69 tests. Promotion additionally requires a live start, more
 than one minute idle, then a guided response with no backpressure events. The
 KAME no-speech timeout remains a distinct model reliability failure and is not
 considered fixed by this transport change.
+
+### 2026-08-29 — Pocket staged-runtime promotion
+
+Hypothesis H30: the reliable staged pipeline can regain a natural voice without
+giving up Piper's first-audio latency or buffering a complete reply. Pocket TTS
+3.0.2 now runs as one persistent, CPU-only int8 process inside the existing
+container. A newline-framed stdio bridge streams each 24 kHz float chunk to the
+Node Discord path as it is generated. The public model and `alba` voice state are
+cached at image build time without authentication; runtime network access is
+disabled for the model cache.
+
+The exact final-image path produced first audio in 34-39 ms. One 3.28-second
+reply generated in 437-448 ms across 41 chunks. Three 3.28-4.08 second
+intelligibility probes generated in 0.51-0.68 seconds and the bundled Nemotron
+recognizer recovered all content except two minor article/word-form omissions.
+The Celeris OpenAI-compatible endpoint also accepted `stream: true`, but a
+32-token probe delivered headers at 308 ms and the entire two-chunk event stream
+by 310 ms. Its current short completions leave essentially no text-generation
+overlap to exploit; the measured audio-generation and ASR paths are genuinely
+streaming.
+
+Hypothesis H31: stopping Discord playback alone is sufficient barge-in. This was
+false for a long Pocket reply because generation would continue serially and
+delay the next request even though its audio was discarded. The bridge now reads
+cancel commands concurrently with inference and stops between generated frames.
+A deterministic integration test cancels a 100-chunk reply after its first chunk
+and immediately completes the following generation. In the exact container a
+real long reply produced its first chunk at 39 ms, acknowledged cancellation at
+51 ms with only 80 ms of audio rendered, and began the next reply 49 ms later.
+The conventional gate is a clean typecheck and 72 tests.
+
+KAME remains offline. Retained live metadata showed 17 guidance attempts in the
+failed phone-test interval, 11 speech starts, 11 timeouts, and 6 interruptions.
+Multiple 27-30 second retries and one response producing over 1,400 transcript
+characters confirm that the caller's more-than-one-minute gibberish report was a
+model/runtime termination failure, not merely a Discord stream-lifetime bug.
+Only the staged Pocket path is eligible for the next live test.

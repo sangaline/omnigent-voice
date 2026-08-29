@@ -24,21 +24,30 @@ Minimal, speech-only Discord interface for an existing Omnigent deployment.
 
 Discord voice receive -> local sherpa-onnx streaming ASR -> Celeris conversation
 layer -> direct spoken reply or small Omnigent MCP coordinator tools -> local
-sherpa-onnx TTS -> Discord voice. Coordinator actions return immediately;
+Pocket TTS -> Discord voice. Coordinator actions return immediately;
 Celeris never waits for a coding agent to complete work before acknowledging it.
 
 The bundled runtime models are the int8 0.6B Nemotron English streaming
-transducer with 560 ms chunks and Piper US English Lessac medium. Both run on
-CPU through `sherpa-onnx-node`; model
+transducer with 560 ms chunks, int8 Pocket TTS 3.0.2 with the public `alba`
+voice, and Piper US English Lessac medium as a fallback. Speech models run on
+CPU; ASR and Piper use `sherpa-onnx-node`, while Pocket stays warm behind a
+private stdio Python bridge. Model
 archives and checksums belong in the container build, never in git. TTS progress
 chunks stream into Discord as they are generated; do not regress to buffering a
 complete utterance before playback. Each Discord utterance also owns a live ASR
 stream: decoded 16 kHz packets are accepted and decoded while the caller is
 still speaking, and end-of-turn performs only right-context padding and a final
 drain. Do not regress to accumulating the full waveform before recognition.
-Piper replaced Kokoro because same-host measurements reduced first TTS audio
-from roughly 0.9-1.2 seconds to 35-52 ms and full generation from 2.2-3.5
-seconds to 87-190 ms for short voice replies.
+Pocket is the staged deployment default because it retains Piper-class first
+audio latency with a substantially more natural voice. The exact stripped
+container loaded and warmed Pocket in about 5.05 seconds, produced first audio
+in 34 ms, and generated 3.28 seconds of audio in 437 ms across 41 chunks.
+Startup is outside the live turn path. Three 3.28-4.08 second intelligibility
+probes generated in 0.51-0.68 seconds and were independently recognized by the
+bundled Nemotron model with only two minor word omissions. Returning `false`
+from the Discord chunk callback sends a real cancellation to the warm bridge;
+do not regress to rendering an unheard long reply before accepting the next TTS
+request. Piper remains selectable with `TTS_RUNTIME=piper`.
 
 Nemotron replaced the smaller 80 ms NeMo fast-conformer after the live Discord
 transcript showed severe omissions and substitutions. On the host, the 560 ms

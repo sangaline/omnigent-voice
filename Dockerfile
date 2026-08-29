@@ -120,6 +120,35 @@ FROM python:3.13-slim-trixie AS endpoint-python
 RUN pip install --no-cache-dir --target /opt/smart-turn-python \
       numpy==2.5.2 onnxruntime==1.29.0
 
+FROM node:24-trixie-slim AS pocket-python
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/pocket-tts \
+    && /opt/pocket-tts/bin/pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/cpu \
+      torch==2.13.0+cpu \
+    && /opt/pocket-tts/bin/pip install --no-cache-dir pocket-tts==3.0.2
+
+ENV HF_HOME=/opt/pocket-cache \
+    POCKET_TTS_NO_BEARTYPE=1
+
+RUN /opt/pocket-tts/bin/python -c \
+      'from pocket_tts import TTSModel; model = TTSModel.load_model(quantize=True); model.get_state_for_audio_prompt("alba")' \
+    && rm -rf \
+      /opt/pocket-tts/lib/python*/site-packages/torch/include \
+      /opt/pocket-tts/lib/python*/site-packages/torch/test \
+      /opt/pocket-tts/lib/python*/site-packages/pip \
+      /opt/pocket-tts/lib/python*/site-packages/pip-*.dist-info \
+      /opt/pocket-tts/lib/python*/site-packages/setuptools \
+      /opt/pocket-tts/lib/python*/site-packages/setuptools-*.dist-info \
+    && find /opt/pocket-tts/lib/python*/site-packages/torch/bin \
+      -mindepth 1 ! -name torch_shm_manager -delete \
+    && find /opt/pocket-tts -type d -name __pycache__ -prune -exec rm -rf '{}' +
+
 FROM node:24-trixie-slim
 
 RUN apt-get update \
@@ -132,6 +161,11 @@ ENV NODE_ENV=production \
     SHERPA_ASR_MODEL_DIR=/opt/models/asr \
     SHERPA_TTS_MODEL_DIR=/opt/models/tts \
     KAME_BRIDGE_PATH=/opt/omnigent-voice/bin/kame-bridge \
+    POCKET_TTS_PYTHON=/opt/pocket-tts/bin/python \
+    POCKET_TTS_BRIDGE_PATH=/opt/omnigent-voice/pocket-tts/bridge.py \
+    HF_HOME=/opt/pocket-cache \
+    HF_HUB_OFFLINE=1 \
+    POCKET_TTS_NO_BEARTYPE=1 \
     SMART_TURN_BRIDGE_PATH=/opt/omnigent-voice/smart-turn/bridge.py \
     PYTHONPATH=/opt/smart-turn-python \
     LD_LIBRARY_PATH=/opt/omnigent-voice/bin
@@ -139,6 +173,8 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=endpoint-python /opt/smart-turn-python /opt/smart-turn-python
+COPY --from=pocket-python /opt/pocket-tts /opt/pocket-tts
+COPY --from=pocket-python /opt/pocket-cache /opt/pocket-cache
 COPY --from=build /app/dist ./dist
 COPY package.json ./package.json
 COPY --from=models /models/asr /opt/models/asr
@@ -146,6 +182,7 @@ COPY --from=models /models/tts /opt/models/tts
 COPY --from=models /models/endpoint /opt/models/endpoint
 COPY --from=native /out/ /opt/omnigent-voice/bin/
 COPY runtime/smart-turn /opt/omnigent-voice/smart-turn
+COPY runtime/pocket-tts /opt/omnigent-voice/pocket-tts
 
 USER node
 CMD ["node", "dist/index.js"]
