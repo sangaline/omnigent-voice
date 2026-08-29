@@ -119,3 +119,21 @@ The optional result file is a JSON object such as
 same tool is called more than once. Replay output and supplied tool results can
 contain private transcript or session text and tool arguments. Keep them local
 and never commit copied logs, result fixtures, or reports.
+
+## Harness evaluation
+
+The public `evals/cases.json` corpus contains sanitized spontaneous-speech and
+ASR-like interactions derived from observed failure patterns. The evaluator
+runs the production conversation class, MCP schemas, prompt assembly, and tool
+loop; only Omnigent is replaced by deterministic frozen state and results.
+
+```bash
+npm run eval -- --api-key-file /private/path/celeris-key
+npm run eval -- --api-key-file /private/path/celeris-key \
+  --case retry_missing_send --runs 5
+```
+
+Prompt override flags match replay. HTTP rate limits and transport failures are
+reported as invalid rather than quality failures, while empty model turns and
+wrong tool behavior still fail. Keys, reports, and cases copied from private
+transcripts must remain outside the repository.

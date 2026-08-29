@@ -117,3 +117,45 @@ speech in one model round. Eight corresponding successful send flows still
 acknowledged the confirmed target, and six supplied chronological read flows
 grounded the answer in the latest message. Conventional tests are now 26, with
 a regression asserting that the second model request is skipped on error.
+
+### 2026-08-28 — Durable corpus and authoritative state
+
+Hypothesis H3: a sanitized corpus with structured expectations can distinguish
+general harness improvements from fixes that merely fit one retained phrase.
+
+Result: accepted. The evaluator now runs the production conversation and MCP
+loop over 24 public sanitized cases. It scores tool sequence, arguments, target,
+speech requirements, rounds, latency, and tokens. Cases cover ASR corruption,
+resend versus visibility, action-ledger truth, sticky focus, background
+references, chronological output, delivery modes, archive restoration,
+structured approval, context honesty, errors, and fresh output deltas. Repeated
+trials expose stochastic behavior. HTTP rate-limit and transport failures are
+invalid trials; unusable successful responses remain harness failures.
+
+Two initial false negatives required exact words where faithful synonyms were
+acceptable. After correcting those rubric bugs, the stable weaknesses were:
+prior-send verification and fresh output-delta use each passed zero of five,
+already-focused handling passed three of five, and honest correction passed
+four of five.
+
+Hypothesis H4: another global system-prompt sentence will make the model prefer
+authoritative state over redundant reads.
+
+Result: rejected. The global suffix did not change either zero-of-five state
+failure. Removing read tools was also rejected because the model often returned
+an empty completion when its preferred read capability disappeared.
+
+Revised hypothesis H4b: keep read tools, put the evidence rule in the late
+current-turn invariant, hide only provably redundant capabilities, and
+explicitly distinguish a declarative missed-action complaint from a question
+about visible output. The runtime already calls `check_updates`; conservative
+focused-name matching can hide `focus_session` when that target is active.
+
+Result: accepted. The four unstable flows each passed five of five targeted
+trials. The missed-send and visibility boundary passed five of five on both
+original cases. Three held-out paraphrases chose the correct tool in all fifteen
+trials; one speech check was relaxed because all five correct answers confirmed
+visibility without unnecessarily repeating the message body. The expanded full
+run passed all 22 valid trials; the two late trials invalidated by HTTP 429 were
+rerun individually and both passed, completing a 24-of-24 candidate result with
+no untested cases. Conventional tests are now 29.

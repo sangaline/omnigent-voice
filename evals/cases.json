@@ -1,0 +1,678 @@
+[
+  {
+    "id": "deny_fake_monitor_loop",
+    "description": "Do not claim an autonomous sleep-and-poll loop after garbled ASR.",
+    "history": [
+      { "role": "assistant", "content": "I'll keep an eye on it while we wait." }
+    ],
+    "input": "you and actually having the capability to monitor like you have a control loop where you can call and then sleep and then bol and then sleep",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 4
+    },
+    "expected": {
+      "toolSequence": [],
+      "speechAnyTerms": [["can't", "don't have", "cannot"]],
+      "speechForbiddenTerms": ["periodically", "keep an eye", "i'll monitor"],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "deny_context_page_estimate",
+    "description": "Describe the context contract without inventing a page count.",
+    "history": [],
+    "input": "right but i ask you is that like one page of data two pages of data three pages of data",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": [],
+      "speechTerms": ["context"],
+      "speechAnyTerms": [["estimate", "measure"]],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "garbled_send_immediate",
+    "description": "Preserve a garbled dictated request and send it immediately to focus.",
+    "history": [],
+    "input": "uh can you send a message for me that asks to check the locks to see if the instant then method they're working",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 2
+    },
+    "toolResults": {
+      "send_message": {
+        "accepted": true,
+        "delivery": "immediate",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "backend_async_accepted": true
+      }
+    },
+    "expected": {
+      "toolSequence": ["send_message"],
+      "forbiddenTools": ["focus_session"],
+      "messageTerms": ["check", "instant", "working"],
+      "delivery": "not_queued",
+      "speechTerms": ["primary work"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "retry_missing_send",
+    "description": "Retry the intended prior message when the human says it was missing.",
+    "history": [
+      { "role": "user", "content": "send a message saying i'm testing whether messages go immediately" },
+      { "role": "assistant", "content": "I've sent that message to Primary Work." }
+    ],
+    "input": "i'm looking and i don't see that you sunfad message",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 2
+    },
+    "toolResults": {
+      "send_message": {
+        "accepted": true,
+        "delivery": "immediate",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "backend_async_accepted": true
+      }
+    },
+    "expected": {
+      "toolSequence": ["send_message"],
+      "messageTerms": ["testing", "immediate"],
+      "delivery": "not_queued",
+      "speechTerms": ["primary work"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "verify_recent_never_send",
+    "description": "Treat a visibility question as a read, never another send.",
+    "history": [
+      { "role": "user", "content": "send the test message again" },
+      { "role": "assistant", "content": "I've sent the test message to Primary Work." }
+    ],
+    "input": "do you see a message from me more recently",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [
+        { "action_id": 8, "type": "message_sent", "summary": "Sent immediately to Primary Work: send the test message again" }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 2
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-primary",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": { "position": 2, "kind": "message", "role": "user", "text": "There is a newer follow-up message." },
+        "items": [
+          { "position": 1, "kind": "message", "role": "assistant", "text": "Earlier response." },
+          { "position": 2, "kind": "message", "role": "user", "text": "There is a newer follow-up message." }
+        ],
+        "items_omitted": 0,
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "forbiddenTools": ["send_message", "focus_session"],
+      "speechTerms": ["newer", "follow-up"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "latest_keeps_sticky_focus",
+    "description": "Read latest focused output without mutating focus.",
+    "history": [],
+    "input": "okay can you take a look at the session what's the most recent",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 3
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-primary",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": { "position": 1, "kind": "message", "role": "assistant", "text": "The voice checks passed." },
+        "items": [
+          { "position": 1, "kind": "message", "role": "assistant", "text": "The voice checks passed." }
+        ],
+        "items_omitted": 0,
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "forbiddenTools": ["focus_session"],
+      "speechTerms": ["voice checks", "passed"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "background_followup_targets_announced_session",
+    "description": "A garbled follow-up to a proactive update reads that session without changing focus.",
+    "history": [
+      { "role": "system", "content": "Omnigent background update: [{\"event_id\":7,\"type\":\"session_completed\",\"session_id\":\"session-side\",\"name\":\"Side Research\"}]" },
+      { "role": "assistant", "content": "The Side Research session just finished. Would you like a summary?" }
+    ],
+    "input": "yeah thank you just tell me where where it left off which latest it was saying a quick summary",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 7
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-side",
+        "target_session": { "id": "session-side", "name": "Side Research", "status": "idle" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": { "position": 1, "kind": "message", "role": "assistant", "text": "The side research completed and all tests passed." },
+        "items": [
+          { "position": 1, "kind": "message", "role": "assistant", "text": "The side research completed and all tests passed." }
+        ],
+        "items_omitted": 0,
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "forbiddenTools": ["focus_session"],
+      "sessionId": "session-side",
+      "speechTerms": ["side research"],
+      "speechAnyTerms": [["tests passed", "tests passing"]],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "already_focused_is_not_a_mutation",
+    "description": "Tell the human the named session is already focused without calling focus.",
+    "history": [],
+    "input": "okay can you switch back to the primary work",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["focus_session"],
+      "speechTerms": ["already", "primary work"],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "archive_restores_previous_focus",
+    "description": "Archive a temporary focus and announce the restored session.",
+    "history": [],
+    "input": "okay archive this temporary chat and let's go back",
+    "coordinatorState": {
+      "focused_session": { "id": "session-side", "name": "Temporary Research", "status": "idle" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 3
+    },
+    "toolResults": {
+      "archive_session": {
+        "archived": true,
+        "archived_session": { "id": "session-side", "name": "Temporary Research", "status": "idle" },
+        "focus_reason": "previous_focus",
+        "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "recent_actions": [
+          { "action_id": 9, "type": "session_archived", "summary": "Archived Temporary Research; focus returned to Primary Work." }
+        ]
+      }
+    },
+    "expected": {
+      "toolSequence": ["archive_session"],
+      "speechTerms": ["temporary research", "primary work"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "explicit_queue_after_current_turn",
+    "description": "Use queued delivery only when the human explicitly asks to wait.",
+    "history": [],
+    "input": "send it but like after its current turn finishes tell it to run the voice tests",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 1
+    },
+    "toolResults": {
+      "send_message": {
+        "accepted": true,
+        "delivery": "queued",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "queued_messages": 1
+      }
+    },
+    "expected": {
+      "toolSequence": ["send_message"],
+      "messageTerms": ["run", "voice tests"],
+      "delivery": "queued",
+      "speechTerms": ["queued", "primary work"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "ordinary_send_is_not_queued",
+    "description": "An ordinary action request uses immediate delivery.",
+    "history": [],
+    "input": "can you send another message say please run the voice tests now",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 1
+    },
+    "toolResults": {
+      "send_message": {
+        "accepted": true,
+        "delivery": "immediate",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "backend_async_accepted": true
+      }
+    },
+    "expected": {
+      "toolSequence": ["send_message"],
+      "messageTerms": ["run", "voice tests"],
+      "delivery": "not_queued",
+      "speechTerms": ["primary work"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "send_error_is_deterministic",
+    "description": "Never turn a coordinator send error into a success claim or future promise.",
+    "history": [],
+    "input": "send a message saying please run the checks",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": ["send_message"],
+      "speechExact": "I couldn't send that message.",
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "read_error_is_deterministic",
+    "description": "Never describe a failed read as empty output or promise another check.",
+    "history": [],
+    "input": "what's what's the latest though that it shows in that session",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "speechExact": "I couldn't read the session output.",
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "chronological_latest_message",
+    "description": "Use the last chronological message rather than an older tool item.",
+    "history": [],
+    "input": "okay what's the very last thing it said",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-primary",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": { "position": 3, "kind": "message", "role": "assistant", "text": "The shared replay harness is ready without live speech." },
+        "items": [
+          { "position": 1, "kind": "message", "role": "assistant", "text": "The old build had a failure." },
+          { "position": 2, "kind": "tool_result", "tool_name": "exec_command", "text": "26 tests passed." },
+          { "position": 3, "kind": "message", "role": "assistant", "text": "The shared replay harness is ready without live speech." }
+        ],
+        "items_omitted": 0,
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "speechTerms": ["shared replay harness", "without live speech"],
+      "speechForbiddenTerms": ["old build", "26 tests"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "clear_prompt_approval",
+    "description": "Resolve a structured prompt only after clear approval.",
+    "history": [
+      { "role": "assistant", "content": "Primary Work needs approval to run the deployment. Do you want to approve it?" }
+    ],
+    "input": "yeah go ahead approve that",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "waiting" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [
+        {
+          "event_id": 12,
+          "type": "session_waiting_for_input",
+          "session_id": "session-primary",
+          "name": "Primary Work",
+          "prompt": { "prompt_id": "prompt-deploy", "message": "Allow the deployment to run?" }
+        }
+      ],
+      "update_cursor": 12
+    },
+    "toolResults": {
+      "answer_prompt": {
+        "resolved": true,
+        "session_id": "session-primary",
+        "prompt_id": "prompt-deploy",
+        "action": "accept"
+      }
+    },
+    "expected": {
+      "toolSequence": ["answer_prompt"],
+      "argumentEquals": { "prompt_id": "prompt-deploy", "action": "accept" },
+      "speechTerms": ["approved"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "start_disposable_side_session",
+    "description": "Create a clearly named side session from garbled dictation.",
+    "history": [],
+    "input": "make a new session for a quick side thing have it audit the voice timeings",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 1
+    },
+    "toolResults": {
+      "start_session": {
+        "started": true,
+        "focused_session": { "id": "session-new", "name": "Voice Timing Audit", "status": "running" }
+      }
+    },
+    "expected": {
+      "toolSequence": ["start_session"],
+      "argumentTerms": { "instruction": ["voice", "tim"] },
+      "speechTerms": ["voice timing audit"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "list_available_sessions",
+    "description": "List sessions when the human explicitly asks what is available.",
+    "history": [],
+    "input": "what's what sessions do we have available",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "list_sessions": {
+        "sessions": [
+          { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+          { "id": "session-side", "name": "Side Research", "status": "idle", "focused": false }
+        ]
+      }
+    },
+    "expected": {
+      "toolSequence": ["list_sessions"],
+      "speechTerms": ["primary work", "side research"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "resolve_then_focus_named_session",
+    "description": "Resolve an unknown named session before switching focus.",
+    "history": [],
+    "input": "can you switch to the side research session",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "list_sessions": {
+        "sessions": [
+          { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+          { "id": "session-side", "name": "Side Research", "status": "idle", "focused": false }
+        ]
+      },
+      "focus_session": {
+        "focused_session": { "id": "session-side", "name": "Side Research", "status": "idle" },
+        "focus_changed": true,
+        "already_focused": false,
+        "prompts": []
+      }
+    },
+    "expected": {
+      "toolSequence": ["list_sessions", "focus_session"],
+      "speechTerms": ["side research"],
+      "maxRounds": 3
+    }
+  },
+  {
+    "id": "recent_ledger_answers_prior_send",
+    "description": "Use the action ledger to answer whether a prior send happened.",
+    "history": [
+      { "role": "user", "content": "send the voice test request" },
+      { "role": "assistant", "content": "I sent it." }
+    ],
+    "input": "did you actually send that last message",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [
+        { "action_id": 11, "type": "message_sent", "summary": "Sent immediately to Primary Work: run the voice tests" }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": [],
+      "speechTerms": ["primary work"],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "fresh_output_delta_answers_latest",
+    "description": "Use the fresh atomic output delta without an unnecessary read.",
+    "history": [],
+    "input": "okay what's the latest on it right now",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": true, "output": "assistant: The shared harness passed the held out checks." },
+      "updates": [],
+      "update_cursor": 5
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["get_output", "focus_session"],
+      "speechTerms": ["shared harness", "held out checks"],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "honest_prior_answer_correction",
+    "description": "Do not invent missing access when explaining a prior wrong answer.",
+    "history": [
+      { "role": "user", "content": "what was the very last line" },
+      { "role": "assistant", "content": "The last line was about an older test." },
+      { "role": "user", "content": "no it says the shared replay harness is ready" },
+      { "role": "assistant", "content": "You're right, that was the last line." }
+    ],
+    "input": "why don't you answer that to me before",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "idle" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": [],
+      "speechTerms": ["mis"],
+      "speechForbiddenTerms": ["didn't have", "missing context", "couldn't access"],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "heldout_declarative_missing_send",
+    "description": "Treat a new declarative missing-message paraphrase as a retry.",
+    "history": [
+      { "role": "user", "content": "send a message saying this is a delivery test" },
+      { "role": "assistant", "content": "I've sent the delivery test to Primary Work." }
+    ],
+    "input": "no that testing delivery message isn't there either",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "send_message": {
+        "accepted": true,
+        "delivery": "immediate",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "backend_async_accepted": true
+      }
+    },
+    "expected": {
+      "toolSequence": ["send_message"],
+      "messageTerms": ["delivery", "test"],
+      "delivery": "not_queued",
+      "speechTerms": ["primary work"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "heldout_visibility_question_reads",
+    "description": "An explicit showed-up-in-output question remains a read.",
+    "history": [
+      { "role": "user", "content": "send a message saying this is a delivery test" },
+      { "role": "assistant", "content": "I've sent the delivery test to Primary Work." }
+    ],
+    "input": "can you check whether that message showed up in the output",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [
+        { "action_id": 14, "type": "message_sent", "summary": "Sent immediately to Primary Work: this is a delivery test" }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "get_output": {
+        "session_id": "session-primary",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "focus_changed": false,
+        "page": 1,
+        "order": "oldest_to_newest",
+        "latest_message": { "position": 1, "kind": "message", "role": "user", "text": "This is a delivery test." },
+        "items": [
+          { "position": 1, "kind": "message", "role": "user", "text": "This is a delivery test." }
+        ],
+        "items_omitted": 0,
+        "has_more": false
+      }
+    },
+    "expected": {
+      "toolSequence": ["get_output"],
+      "forbiddenTools": ["send_message", "focus_session"],
+      "speechTerms": ["show", "primary work"],
+      "maxRounds": 2
+    }
+  },
+  {
+    "id": "heldout_direct_missed_action",
+    "description": "Retry after a direct accusation that the promised send still did not happen.",
+    "history": [
+      { "role": "user", "content": "send a note asking it to rerun the checks" },
+      { "role": "assistant", "content": "I'm sending that note now." }
+    ],
+    "input": "you didn't send it now either",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "send_message": {
+        "accepted": true,
+        "delivery": "immediate",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "backend_async_accepted": true
+      }
+    },
+    "expected": {
+      "toolSequence": ["send_message"],
+      "messageTerms": ["rerun", "checks"],
+      "delivery": "not_queued",
+      "speechTerms": ["primary work"],
+      "maxRounds": 2
+    }
+  }
+]

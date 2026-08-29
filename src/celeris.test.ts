@@ -7,6 +7,7 @@ import {
   CelerisMemoryPolicy,
   CoordinatorToolClient,
   serializeToolResult,
+  targetsFocusedSession,
 } from "./celeris.js";
 import { Logger } from "./log.js";
 import { CoordinatorExecutor, CoordinatorMcpClient } from "./mcp.js";
@@ -105,6 +106,16 @@ describe("Celeris coordinator conversation", () => {
     expect(allowsFocusChange("Check the session we were already in.")).toBe(false);
     expect(allowsArchive("Archive this temporary session.")).toBe(true);
     expect(allowsArchive("What is this session doing?")).toBe(false);
+    expect(targetsFocusedSession("Switch back to Primary Work.", "Primary Work")).toBe(true);
+    expect(
+      targetsFocusedSession(
+        "Switch back to the Omnigent Voice Agent.",
+        "Prepare Omnigent Voice Agent",
+      ),
+    ).toBe(true);
+    expect(
+      targetsFocusedSession("Switch from Primary Work to Side Research.", "Primary Work"),
+    ).toBe(false);
   });
 
   it("answers an ordinary conversational turn directly", async () => {
@@ -118,7 +129,7 @@ describe("Celeris coordinator conversation", () => {
         function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
       }>;
     };
-    expect(request.tools).toHaveLength(2);
+    expect(request.tools).toHaveLength(1);
     expect(request.tools?.map((tool) => tool.function?.name)).not.toContain("focus_session");
     const send = request.tools?.find((tool) => tool.function?.name === "send_message");
     expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");

@@ -26,7 +26,16 @@ export interface CelerisToolTrace {
   result: JsonObject;
 }
 
-export type CelerisTraceEvent = CelerisCompletionTrace | CelerisToolTrace;
+export interface CelerisErrorTrace {
+  type: "error";
+  phase: "turn" | "notification";
+  message: string;
+}
+
+export type CelerisTraceEvent =
+  | CelerisCompletionTrace
+  | CelerisToolTrace
+  | CelerisErrorTrace;
 
 export interface CelerisHistoryMessage {
   role: "system" | "user" | "assistant";
@@ -103,8 +112,9 @@ Resolve short replies against the immediately preceding spoken exchange. When th
 
 export const currentTurnActionInvariant = `CURRENT TURN EXECUTION RULES:
 If the immediately preceding assistant speech announced a different session and this human turn follows up on that announcement without naming another target, call the read tool with the session_id from the preceding Omnigent background update. This read-only reference overrides sticky focus and never changes focus.
-If the human states that a requested message was missing, not sent, or not received, repeat send_message with the intended message. A question asking whether a message is visible or recent, or explicitly asking to inspect or verify output, is instead a read request: use get_output and never send a message for that question.
-No coordinator action has happened in this human turn yet. If the human asks for an action, or if answering requires current coordinator data, your next output must be the appropriate tool call, not prose. Only a successful tool result later in this turn proves the action happened. The recent_actions ledger describes prior turns and never satisfies a new request. “Another,” “again,” “retry,” “now,” and corrections that an action was missed require a new tool call. Execute tools before speaking. Never say that you will need to pull or check data, offer to check it, ask permission for a read-only check, or promise to perform a tool action after the response; call the tool now.`;
+If the human states that a requested message was missing, not sent, or not received, repeat send_message with the intended message. A declarative correction such as “I don't see the message” after you claimed to send it is a missed-action complaint and requires send_message. An actual question asking whether a message is visible or recent, or explicitly asking to inspect or verify output, is instead a read request: use get_output and never send a message for that question.
+No coordinator action has happened in this human turn yet. If the human asks for an action, or if answering requires current coordinator data, your next output must be the appropriate tool call, not prose. Only a successful tool result later in this turn proves the action happened. The recent_actions ledger describes prior turns and never satisfies a new request. “Another,” “again,” “retry,” “now,” and corrections that an action was missed require a new tool call. Execute tools before speaking. Never say that you will need to pull or check data, offer to check it, ask permission for a read-only check, or promise to perform a tool action after the response; call the tool now.
+The coordinator snapshot immediately above is already current data for this turn. When output_delta.changed is true and its content answers a latest or current-status question, answer directly from it without another read. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.`;
 
 const contextContract = (
   memoryPolicy: CelerisMemoryPolicy,
@@ -219,6 +229,31 @@ export const allowsFocusChange = (input: string): boolean =>
   );
 
 export const allowsArchive = (input: string): boolean => /\barchive\b/i.test(input);
+
+const words = (value: string): string[] =>
+  value
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 1 && !["the", "a", "an", "session"].includes(word));
+
+export const targetsFocusedSession = (input: string, focusedName: unknown): boolean => {
+  if (typeof focusedName !== "string" || !allowsFocusChange(input)) return false;
+  const match = /\b(?:switch|focus|open|select|choose|pick|use)\b(?:\s+back)?(?:\s+to|\s+on)?\s+(.+)/i.exec(
+    input,
+  );
+  if (!match?.[1]) return false;
+  const targetWords = words(match[1]);
+  const focusedWords = words(focusedName);
+  if (targetWords.length === 0 || focusedWords.length === 0) return false;
+  const overlap = targetWords.filter((word) => focusedWords.includes(word)).length;
+  return (
+    overlap >= 2 &&
+    overlap / targetWords.length >= 0.6 &&
+    overlap / focusedWords.length >= 0.6
+  );
+};
 
 const voiceSafeTool = (tool: OpenAiTool): OpenAiTool => {
   if (tool.function.name === "archive_session") {
@@ -346,9 +381,22 @@ export class CelerisConversation {
     ];
     const tools = (await this.tools())
       .filter(
-        (tool) =>
-          (tool.function.name !== "focus_session" || allowsFocusChange(input)) &&
-          (tool.function.name !== "archive_session" || allowsArchive(input)),
+        (tool) => {
+          const name = tool.function.name;
+          const focusedSession = updates.focused_session;
+          const focusedName =
+            focusedSession &&
+            typeof focusedSession === "object" &&
+            !Array.isArray(focusedSession)
+              ? (focusedSession as JsonObject).name
+              : undefined;
+          return (
+            name !== "check_updates" &&
+            (name !== "focus_session" ||
+              (allowsFocusChange(input) && !targetsFocusedSession(input, focusedName))) &&
+            (name !== "archive_session" || allowsArchive(input))
+          );
+        },
       )
       .map(voiceSafeTool);
     const allowedTools = new Set(tools.map((tool) => tool.function.name));
@@ -418,6 +466,11 @@ export class CelerisConversation {
       }
       throw new Error("Celeris exceeded the coordinator tool-call limit");
     } catch (error) {
+      this.options.trace?.({
+        type: "error",
+        phase: "turn",
+        message: error instanceof Error ? error.message : String(error),
+      });
       this.options.logger.error("celeris.turn.failed", error);
       return "I couldn't reach the coordination layer just now.";
     }
@@ -447,6 +500,11 @@ export class CelerisConversation {
       return sanitizeForSpeech(content, 300);
     } catch (error) {
       if (signal.aborted) return undefined;
+      this.options.trace?.({
+        type: "error",
+        phase: "notification",
+        message: error instanceof Error ? error.message : String(error),
+      });
       this.options.logger.error("celeris.notification.failed", error);
       return undefined;
     }

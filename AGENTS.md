@@ -119,7 +119,10 @@ schema so messages can only target the focused session. It also withholds and
 rejects `focus_session` unless the current transcript explicitly requests a
 switch/select/open/focus action or an ordinal selection. This is a runtime
 safety guard in addition to the prompt; ordinary latest/current-output language
-cannot mutate focus.
+cannot mutate focus. Conservative name-token matching also withholds
+`focus_session` when the requested target is already focused. The harness
+withholds `check_updates` from the voice model because it calls that tool
+atomically before constructing every turn and later tool results carry updates.
 The nine tools are `list_sessions`, `focus_session`, `get_output`,
 `poll_output`, `send_message`, `archive_session`, `answer_prompt`,
 `start_session`, and `check_updates`. `archive_session` is withheld unless the
@@ -205,6 +208,14 @@ the old behavior with `--omit-action-invariant`, or replace the base prompt with
 they can include transcripts, session output, and proposed tool arguments;
 never commit them.
 
+Use `npm run eval -- --api-key-file <private-key-file>` to run the sanitized
+ASR-style corpus in `evals/cases.json`. It uses the same production conversation
+and MCP path with a frozen coordinator per case. `--case <id>` selects a case,
+`--runs <n>` measures stability, and prompt override flags match replay. HTTP
+rate limits and transport failures are invalid trials excluded from the quality
+rate; empty model turns remain real failures. Add sanitized held-out paraphrases
+before promoting a targeted change.
+
 The Discord voice channel is currently part of the MVP trust boundary. Before
 using a channel with more than one trusted human, configure
 `ALLOWED_DISCORD_USER_ID`; do not rely on Celeris to authenticate callers.
@@ -216,6 +227,7 @@ npm ci
 npm run check
 npm test
 npm run build
+npm run eval -- --api-key-file /private/path/celeris-key
 npm run dev
 npm run mcp
 podman build -t omnigent-voice:dev .

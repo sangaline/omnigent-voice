@@ -36,7 +36,8 @@ COPY package.json package-lock.json tsconfig.json ./
 RUN npm ci
 COPY src ./src
 RUN npm run build \
-    && find dist -type f -name '*.test.js' -delete
+    && find dist -type f -name '*.test.js' -delete \
+    && rm dist/eval.js dist/evaluation.js dist/replay.js
 
 FROM node:24-bookworm-slim AS dependencies
 

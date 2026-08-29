@@ -6,12 +6,9 @@ import {
   currentTurnActionInvariant,
   systemPrompt,
 } from "./celeris.js";
+import { FrozenCoordinatorExecutor } from "./evaluation.js";
 import { Logger } from "./log.js";
-import {
-  CoordinatorExecutor,
-  CoordinatorMcpClient,
-} from "./mcp.js";
-import { JsonObject } from "./omnigent.js";
+import { CoordinatorMcpClient } from "./mcp.js";
 
 interface AuditRecord {
   time?: string;
@@ -34,9 +31,6 @@ const required = (value: string | undefined, description: string): string => {
   if (!value) throw new Error(`Missing ${description}`);
   return value;
 };
-
-const isJsonObject = (value: unknown): value is JsonObject =>
-  Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 const logPath = required(option("--log"), "--log PATH");
 const apiKeyFile = option("--api-key-file");
@@ -114,51 +108,6 @@ const toolResultsPath = option("--tool-results-file");
 const toolResults = toolResultsPath
   ? (JSON.parse(readFileSync(toolResultsPath, "utf8")) as Record<string, unknown>)
   : {};
-const resultQueues = new Map<string, unknown[]>();
-for (const [name, value] of Object.entries(toolResults)) {
-  resultQueues.set(name, Array.isArray(value) ? [...value] : [value]);
-}
-
-class FrozenReplayCoordinator implements CoordinatorExecutor {
-  public readonly calls: Array<{
-    name: string;
-    arguments: Record<string, unknown>;
-    afterEventId?: number | undefined;
-  }> = [];
-
-  public async execute(
-    name: string,
-    args: Record<string, unknown>,
-    afterEventId?: number,
-  ): Promise<JsonObject> {
-    this.calls.push({ name, arguments: args, afterEventId });
-    const state = {
-      focused_session: {
-        id: focusedSessionId,
-        name: focusedName,
-        status: "idle",
-      },
-      recent_actions: actions,
-      updates: [],
-      update_cursor: 0,
-    };
-    if (name === "check_updates") {
-      return {
-        ...state,
-        output_delta: { changed: false, output: "" },
-      };
-    }
-    const supplied = resultQueues.get(name)?.shift();
-    if (isJsonObject(supplied)) {
-      return { ...supplied, ...state };
-    }
-    return {
-      ...state,
-      error: `Replay has no supplied result for ${name}`,
-    };
-  }
-}
-
 const promptPath = option("--system-prompt-file");
 const promptSuffixPath = option("--system-prompt-suffix-file");
 const invariantPath = option("--action-invariant-file");
@@ -169,7 +118,21 @@ const selectedActionInvariant = invariantPath
   ? readFileSync(invariantPath, "utf8").trim()
   : currentTurnActionInvariant;
 
-const coordinator = new FrozenReplayCoordinator();
+const coordinator = new FrozenCoordinatorExecutor(
+  {
+    focused_session: {
+      id: focusedSessionId,
+      name: focusedName,
+      status: "idle",
+    },
+    recent_actions: actions,
+    output_delta: { changed: false, output: "" },
+    updates: [],
+    update_cursor: 0,
+    update_cursor_expired: false,
+  },
+  toolResults,
+);
 const tools = await CoordinatorMcpClient.create(coordinator);
 const trace: CelerisTraceEvent[] = [];
 const started = performance.now();
