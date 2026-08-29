@@ -152,6 +152,15 @@ unsafe, expired, concurrent-update, or longer results return to Celeris. This is
 voice-layer convenience only: standalone MCP clients continue passing their
 own explicit cursors and therefore degrade cleanly without process-local voice
 state.
+Events consumed by `check_updates` or returned by a later tool call during a
+successful human turn are also retained as structured notification history,
+deduplicated by event ID, and their output cursors are committed with the spoken
+turn. They are not retained on a failed or superseded turn. This preserves an
+exact session target for one subsequent “that one” reference even when the
+event arrived while the human or tool workflow had priority. An explicit “what
+just came in?” request with one safe short event voices that event directly in
+zero model rounds; unrelated compound speech still lets Celeris combine the
+event with the requested work.
 When the channel runtime is idle and at least one trusted non-bot human is
 actually present in the voice channel, those real events are spoken
 proactively; joining the channel schedules any waiting update. Never play into
@@ -293,8 +302,13 @@ harness injects that target without changing focus. If the human gives a clear,
 separate instruction to each of several known destinations, the voice schema
 exposes only those names as a required enum and the harness resolves each to a
 server-owned ID, deduplicates attempts, and requires every destination before
-speech. Merely mentioning several sessions without one clear instruction per
-target still fails closed. `queue` is message-action language too: ASR phrasing
+speech. Per-destination delivery is also harness-owned in this form: a target's
+explicit queue, wait, or after-current-turn clause forces `queued`, while every
+other target is forced to the normal `immediate` default. Clause boundaries
+prevent one destination's after-turn language from leaking onto another, and
+Celeris cannot silently omit or invert the requested timing. Merely mentioning
+several sessions without one clear instruction per target still fails closed.
+`queue` is message-action language too: ASR phrasing
 such as “when Side Worker wraps this one, queue it to …” receives the same named
 ID injection instead of silently defaulting to sticky focus. When a message
 depends on another session's output,

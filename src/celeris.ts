@@ -729,6 +729,40 @@ export const voiceMessageRouting = (
   };
 };
 
+const explicitlyQueuedMessageTargets = (
+  input: string,
+  targets: readonly VoiceSessionTarget[],
+): Set<string> => {
+  const normalized = words(input).join(" ");
+  if (
+    /\bqueue (?:both|all|each)(?: messages?| of them)?\b/.test(normalized) ||
+    /\bwait to send (?:both|all|each)\b/.test(normalized)
+  ) {
+    return new Set(targets.map(({ id }) => id));
+  }
+  const queued = new Set<string>();
+  for (const target of targets) {
+    const phrase = words(target.name).join(" ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const targetClause = normalized
+      .split(/\b(?:and|then)\b/)
+      .find((clause) => new RegExp(`\\b${phrase}\\b`).test(clause)) ?? normalized;
+    if (
+      new RegExp(
+        `\\bqueue(?: (?:a|the) message (?:to|for))?(?: the)? ${phrase}\\b`,
+      ).test(normalized) ||
+      new RegExp(
+        `\\b(?:wait(?: to)? send|hold)(?: (?:a|the) message)?(?: (?:to|for))?(?: the)? ${phrase}\\b`,
+      ).test(normalized) ||
+      new RegExp(
+        `\\b${phrase}\\b.{0,100}\\b(?:after (?:this|the|its) (?:current )?turn|once (?:its|the) (?:current )?turn (?:finishes|ends)|when (?:it|that session) (?:finishes|is idle))\\b`,
+      ).test(targetClause)
+    ) {
+      queued.add(target.id);
+    }
+  }
+  return queued;
+};
+
 export const voiceFocusRouting = (
   input: string,
   knownSessions: unknown,
@@ -1110,6 +1144,39 @@ const objectValue = (value: unknown): JsonObject | undefined =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonObject)
     : undefined;
+
+const coordinatorUpdates = (value: unknown): CoordinatorUpdate[] => {
+  if (!Array.isArray(value)) return [];
+  const allowedTypes = new Set([
+    "session_completed",
+    "session_output",
+    "decision_needed",
+    "session_failed",
+    "message_delivered",
+  ]);
+  return value.flatMap((candidate) => {
+    const update = objectValue(candidate);
+    if (
+      !update ||
+      typeof update.event_id !== "number" ||
+      !Number.isFinite(update.event_id) ||
+      typeof update.type !== "string" ||
+      !allowedTypes.has(update.type) ||
+      typeof update.session_id !== "string" ||
+      !update.session_id ||
+      typeof update.name !== "string" ||
+      !update.name
+    ) {
+      return [];
+    }
+    return [update as CoordinatorUpdate];
+  });
+};
+
+const asksForIncomingUpdate = (input: string): boolean =>
+  /\b(?:anything\s+(?:new\s+)?(?:just\s+)?(?:come|came|arrive|arrived)|what\s+(?:just\s+)?(?:came|arrived)\s+in|what\s+(?:new\s+)?(?:update|notification)\s+(?:just\s+)?(?:came|arrived))\b/i.test(
+    input,
+  );
 
 const resultSessionName = (value: unknown): string | undefined => {
   const object = objectValue(value);
@@ -1926,6 +1993,15 @@ export class CelerisConversation {
       this.options.logger.error("coordinator.updates.failed", error);
       return { updates: [] } as JsonObject;
     });
+    const consumedTurnUpdates = new Map<number, CoordinatorUpdate>();
+    const retainTurnUpdates = (value: unknown): void => {
+      for (const update of coordinatorUpdates(value)) {
+        consumedTurnUpdates.set(update.event_id, update);
+      }
+    };
+    const retainedTurnUpdates = (): CoordinatorUpdate[] =>
+      [...consumedTurnUpdates.values()].sort((left, right) => left.event_id - right.event_id);
+    retainTurnUpdates(updates.updates);
     if (typeof updates.update_cursor === "number") {
       turnUpdateCursor = Math.max(turnUpdateCursor, updates.update_cursor);
     }
@@ -1940,6 +2016,15 @@ export class CelerisConversation {
       this.remember(input, speech);
       return speech;
     }
+    const directIncomingUpdate = asksForIncomingUpdate(input)
+      ? directCoordinatorUpdateSpeech(retainedTurnUpdates())
+      : undefined;
+    if (directIncomingUpdate) {
+      const speech = sanitizeForSpeech(directIncomingUpdate, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
     const exactMessage =
       (!Array.isArray(updates.updates) || updates.updates.length === 0)
         ? verifiedExactMessageSpeech(
@@ -1951,7 +2036,7 @@ export class CelerisConversation {
     if (exactMessage) {
       const speech = sanitizeForSpeech(exactMessage, 300);
       this.updateCursor = turnUpdateCursor;
-      this.remember(input, speech);
+      this.remember(input, speech, retainedTurnUpdates());
       return speech;
     }
     const verifiedFollowup = verifiedActionFollowupSpeech(
@@ -1963,7 +2048,7 @@ export class CelerisConversation {
     if (verifiedFollowup) {
       const speech = sanitizeForSpeech(verifiedFollowup, 300);
       this.updateCursor = turnUpdateCursor;
-      this.remember(input, speech);
+      this.remember(input, speech, retainedTurnUpdates());
       return speech;
     }
     const queuedDelivery =
@@ -1977,7 +2062,7 @@ export class CelerisConversation {
     if (queuedDelivery) {
       const speech = sanitizeForSpeech(queuedDelivery, 300);
       this.updateCursor = turnUpdateCursor;
-      this.remember(input, speech);
+      this.remember(input, speech, retainedTurnUpdates());
       return speech;
     }
     const focusedAtTurn = objectValue(updates.focused_session);
@@ -1992,14 +2077,14 @@ export class CelerisConversation {
     ) {
       const speech = sanitizeForSpeech(`You're already in ${focusedName}.`, 300);
       this.updateCursor = turnUpdateCursor;
-      this.remember(input, speech);
+      this.remember(input, speech, retainedTurnUpdates());
       return speech;
     }
     const directOutput = directFocusedOutputSpeech(input, updates);
     if (directOutput) {
       const speech = sanitizeForSpeech(directOutput, 300);
       this.updateCursor = turnUpdateCursor;
-      this.remember(input, speech);
+      this.remember(input, speech, retainedTurnUpdates());
       return speech;
     }
     const notificationTargets = immediateNotificationTargets(
@@ -2035,7 +2120,7 @@ export class CelerisConversation {
         300,
       );
       this.updateCursor = turnUpdateCursor;
-      this.remember(input, speech);
+      this.remember(input, speech, retainedTurnUpdates());
       return speech;
     }
     const incrementalPoll =
@@ -2115,6 +2200,10 @@ export class CelerisConversation {
     const requiredMessageTargets = messageRouting.mode === "multiple"
       ? (messageRouting.targets ?? [])
       : [];
+    const queuedMessageTargets = explicitlyQueuedMessageTargets(
+      input,
+      requiredMessageTargets,
+    );
     const needsFocusLookup =
       requestsPositiveFocusAction(input) &&
       focusRouting.mode === "model" &&
@@ -2193,7 +2282,7 @@ export class CelerisConversation {
           }
           this.rememberPollOutputCursors(executedAcrossRounds);
           this.updateCursor = turnUpdateCursor;
-          this.remember(input, speech);
+          this.remember(input, speech, retainedTurnUpdates());
           return speech;
         }
 
@@ -2248,7 +2337,13 @@ export class CelerisConversation {
             );
             const { target: _target, session_id: _sessionId, ...safeArgs } = args;
             args = resolvedMultipleMessageTarget
-              ? { ...safeArgs, session_id: resolvedMultipleMessageTarget.id }
+              ? {
+                  ...safeArgs,
+                  session_id: resolvedMultipleMessageTarget.id,
+                  delivery: queuedMessageTargets.has(resolvedMultipleMessageTarget.id)
+                    ? "queued"
+                    : "immediate",
+                }
               : safeArgs;
           }
           if (
@@ -2427,6 +2522,7 @@ export class CelerisConversation {
           if (typeof result.update_cursor === "number") {
             turnUpdateCursor = Math.max(turnUpdateCursor, result.update_cursor);
           }
+          retainTurnUpdates(result.updates);
           this.options.trace?.({
             type: "tool",
             name: call.function.name,
@@ -2543,7 +2639,7 @@ export class CelerisConversation {
           this.lastVerifiedActionCount = successfulReceipts.length + failedTools.length;
           this.rememberPollOutputCursors(executedAcrossRounds);
           this.updateCursor = turnUpdateCursor;
-          this.remember(input, speech);
+          this.remember(input, speech, retainedTurnUpdates());
           return speech;
         }
         const actionReceipts = executedAcrossRounds
@@ -2572,7 +2668,7 @@ export class CelerisConversation {
             this.lastVerifiedActionCount = actionReceipts.length;
             this.rememberPollOutputCursors(executedAcrossRounds);
             this.updateCursor = turnUpdateCursor;
-            this.remember(input, speech);
+            this.remember(input, speech, retainedTurnUpdates());
             return speech;
           }
         }
@@ -2588,7 +2684,7 @@ export class CelerisConversation {
             const speech = sanitizeForSpeech(directPollSpeech, 300);
             this.rememberPollOutputCursors(executedAcrossRounds);
             this.updateCursor = turnUpdateCursor;
-            this.remember(input, speech);
+            this.remember(input, speech, retainedTurnUpdates());
             return speech;
           }
         }
@@ -2616,7 +2712,7 @@ export class CelerisConversation {
             const speech = sanitizeForSpeech(directReadSpeech, 300);
             this.rememberPollOutputCursors(executedAcrossRounds);
             this.updateCursor = turnUpdateCursor;
-            this.remember(input, speech);
+            this.remember(input, speech, retainedTurnUpdates());
             return speech;
           }
           const visibilitySpeech = verifiedDeliveryVisibilitySpeech(
@@ -2627,7 +2723,7 @@ export class CelerisConversation {
             const speech = sanitizeForSpeech(visibilitySpeech, 300);
             this.rememberPollOutputCursors(executedAcrossRounds);
             this.updateCursor = turnUpdateCursor;
-            this.remember(input, speech);
+            this.remember(input, speech, retainedTurnUpdates());
             return speech;
           }
         }
@@ -2646,7 +2742,7 @@ export class CelerisConversation {
           this.lastVerifiedActionCount = successfulReceipts.length;
           this.rememberPollOutputCursors(executedAcrossRounds);
           this.updateCursor = turnUpdateCursor;
-          this.remember(input, speech);
+          this.remember(input, speech, retainedTurnUpdates());
           return speech;
         }
       }
@@ -2849,11 +2945,20 @@ export class CelerisConversation {
     }
   }
 
-  private remember(user: string, assistant: string): void {
-    this.history.push(
-      { role: "user", content: user },
-      { role: "assistant", content: assistant },
-    );
+  private remember(
+    user: string,
+    assistant: string,
+    consumedUpdates: readonly CoordinatorUpdate[] = [],
+  ): void {
+    this.history.push({ role: "user", content: user });
+    if (consumedUpdates.length > 0) {
+      this.rememberUpdateOutputCursors(consumedUpdates);
+      this.history.push({
+        role: "system",
+        content: `${backgroundUpdatePrefix}${JSON.stringify(consumedUpdates)}`,
+      });
+    }
+    this.history.push({ role: "assistant", content: assistant });
     this.scheduleCompaction();
   }
 

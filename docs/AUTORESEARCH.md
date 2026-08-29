@@ -1228,3 +1228,57 @@ tests, clean typecheck and build, 32 of 32 isolated trials, and all 28 stateful
 scenarios across 95 linked turns. All coordinator interactions remained frozen;
 no live Omnigent session, including the excluded ESPN session, was read or
 mutated.
+
+### 2026-08-29 — Human-turn event continuity
+
+Hypothesis H43: events returned by the atomic `check_updates` call at speech
+finalization remained usable on the next spoken turn just like proactively
+announced events. A held-out two-turn flow disproved this. The human asked what
+had arrived while they were talking; Side Audit's typed `session_output` and
+`item-24` cursor were present in the turn context. Four of five runs spoke the
+event, but every next “anything newer from that one” used `get_output` and lost
+chronological continuity. One run unnecessarily called `get_output` on the
+first turn too. The unchanged harness passed zero of five scenarios.
+
+Every successful human turn now retains typed events from both its initial
+`check_updates` result and later coordinator tool results. Events are
+deduplicated by event ID, recorded after the human message as authoritative
+notification history, and their per-session output cursor is committed with the
+spoken response. A failed or superseded turn commits neither. For the narrow
+question “what just came in?”, one safe short event uses the existing exact
+zero-round renderer instead of asking Celeris to rediscover data already in
+context. Compound turns remain model-composed.
+
+The target moved to ten of ten runs. The arriving event took zero model rounds,
+and each follow-up forced one `poll_output` from `item-24` with 85–341 ms model
+and tool latency. Production-path tests separately prove the same retention
+when a concurrent event first appears inside an action tool result. The prior
+proactive-cursor flow stayed five of five, the incremental/action-priority flow
+stayed five of five, and the existing decision-during-human flow passed five of
+five on a sequential rerun. Parallel test invocations had produced four HTTP
+429 invalidations; no quality result was inferred from them, and subsequent
+model gates remained sequential.
+
+### 2026-08-29 — Deterministic multi-destination delivery timing
+
+Hypothesis H44: Celeris reliably preserved different delivery modes when one
+spoken turn addressed multiple sessions. A broad sweep caught one Build Worker
+send without `delivery: queued`; a twenty-run targeted sample measured eighteen
+passes and two identical omissions. This is mechanical routing state, not a
+language-generation judgment: the coordinator already defines immediate as the
+default and queueing requires explicit human language.
+
+The first deterministic attempt associated any nearby “after this turn” phrase
+with a target. It was rejected after zero of twenty runs because that proximity
+rule leaked Build Worker's timing backward onto Docs Worker and queued both.
+The accepted implementation bounds timing language to the target's conjunction
+clause. In a multi-destination turn, explicit queue, wait, or after-current-turn
+language forces that target to `queued`; every other target is forced to
+`immediate`. A production-path test deliberately gives the harness inverted and
+missing model delivery fields and verifies the correct coordinator calls.
+
+The repaired mixed-delivery scenario passed ten of ten runs, its all-immediate
+neighbor passed ten of ten, and the final linked sweep passed all 29 scenarios
+and all 97 turns. The conventional gate is 97 unit tests, clean typecheck and
+build, and 32 of 32 isolated cases. No live Omnigent session was used by H43 or
+H44; the excluded ESPN session remained untouched.

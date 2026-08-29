@@ -1333,7 +1333,7 @@ describe("Celeris coordinator conversation", () => {
               arguments: JSON.stringify({
                 target: "Build Worker",
                 message: "rerun phone audio",
-                delivery: "immediate",
+                delivery: "queued",
               }),
             },
           },
@@ -1345,7 +1345,6 @@ describe("Celeris coordinator conversation", () => {
               arguments: JSON.stringify({
                 target: "Docs Worker",
                 message: "record first audio",
-                delivery: "queued",
               }),
             },
           },
@@ -1377,7 +1376,7 @@ describe("Celeris coordinator conversation", () => {
 
     await expect(
       conversation("test-key", tools).respond(
-        "tell build worker to rerun phone audio and queue docs worker a message to record first audio don't switch",
+        "tell build worker to rerun phone audio now and tell docs worker to record first audio after this turn don't switch",
       ),
     ).resolves.toBe("I sent that to Build Worker. I queued that for Docs Worker.");
     expect(tools.callTool).toHaveBeenNthCalledWith(2, "send_message", {
@@ -1708,6 +1707,188 @@ describe("Celeris coordinator conversation", () => {
     );
     expect(poll?.function?.parameters?.properties).not.toHaveProperty("session_id");
     expect(poll?.function?.parameters?.properties).not.toHaveProperty("cursor");
+  });
+
+  it("retains an output event consumed alongside a human turn", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-poll-after-human-turn",
+            type: "function",
+            function: { name: "poll_output", arguments: "{}" },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    let checkCount = 0;
+    vi.mocked(tools.callTool).mockImplementation((name: string) => {
+      if (name === "check_updates") {
+        checkCount += 1;
+        return Promise.resolve(
+          checkCount === 1
+            ? {
+                focused_session: { id: "session-release", name: "Release Work" },
+                known_sessions: [
+                  { id: "session-release", name: "Release Work" },
+                  { id: "session-side", name: "Side Audit" },
+                ],
+                updates: [
+                  {
+                    event_id: 620,
+                    type: "session_output",
+                    session_id: "session-side",
+                    name: "Side Audit",
+                    output_delta: {
+                      changed: true,
+                      output: "assistant: The retry passed all 24 checks.",
+                      cursor: "item-24",
+                    },
+                  },
+                ],
+                update_cursor: 620,
+              }
+            : {
+                focused_session: { id: "session-release", name: "Release Work" },
+                known_sessions: [
+                  { id: "session-release", name: "Release Work" },
+                  { id: "session-side", name: "Side Audit" },
+                ],
+                updates: [],
+                update_cursor: 620,
+              },
+        );
+      }
+      return Promise.resolve({
+        target_session: { id: "session-side", name: "Side Audit" },
+        changed: true,
+        output: "assistant: A final phone run passed all 25 checks.",
+        cursor: "item-25",
+        cursor_expired: false,
+        updates: [],
+      });
+    });
+    const subject = conversation("test-key", tools);
+
+    await expect(
+      subject.respond("uh while i was talking did anything new just come in"),
+    ).resolves.toBe("Side Audit update: The retry passed all 24 checks.");
+    await expect(
+      subject.respond("okay uh anything newer from that one since then"),
+    ).resolves.toBe("Side Audit update: A final phone run passed all 25 checks.");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(tools.callTool).toHaveBeenNthCalledWith(1, "check_updates", {
+      after_event_id: 0,
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "check_updates", {
+      after_event_id: 620,
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(3, "poll_output", {
+      session_id: "session-side",
+      cursor: "item-24",
+    });
+  });
+
+  it("retains a concurrent output event returned by an action tool", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-send-with-update",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({ message: "rerun the build" }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content:
+            "I sent that to Release Work. Side Audit update: The packet check passed.",
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-poll-after-action",
+              type: "function",
+              function: { name: "poll_output", arguments: "{}" },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    let checkCount = 0;
+    vi.mocked(tools.callTool).mockImplementation((name: string) => {
+      if (name === "check_updates") {
+        checkCount += 1;
+        return Promise.resolve({
+          focused_session: { id: "session-release", name: "Release Work" },
+          known_sessions: [
+            { id: "session-release", name: "Release Work" },
+            { id: "session-side", name: "Side Audit" },
+          ],
+          updates: [],
+          update_cursor: checkCount === 1 ? 0 : 630,
+        });
+      }
+      if (name === "send_message") {
+        return Promise.resolve({
+          accepted: true,
+          delivery: "immediate",
+          target_session: { id: "session-release", name: "Release Work" },
+          updates: [
+            {
+              event_id: 630,
+              type: "session_output",
+              session_id: "session-side",
+              name: "Side Audit",
+              output_delta: {
+                changed: true,
+                output: "assistant: The packet check passed.",
+                cursor: "item-30",
+              },
+            },
+          ],
+          update_cursor: 630,
+        });
+      }
+      return Promise.resolve({
+        target_session: { id: "session-side", name: "Side Audit" },
+        changed: false,
+        output: "",
+        cursor: "item-30",
+        cursor_expired: false,
+        updates: [],
+      });
+    });
+    const subject = conversation("test-key", tools);
+
+    await expect(subject.respond("tell it to rerun the build")).resolves.toBe(
+      "I sent that to Release Work. Side Audit update: The packet check passed.",
+    );
+    await expect(
+      subject.respond("anything newer from that one since then"),
+    ).resolves.toBe("Side Audit has no new stable output since the last update.");
+
+    expect(tools.callTool).toHaveBeenNthCalledWith(4, "poll_output", {
+      session_id: "session-side",
+      cursor: "item-30",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("clarifies an ambiguous notification read without invoking the model", async () => {

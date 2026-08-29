@@ -4318,5 +4318,101 @@
         }
       }
     ]
+  },
+  {
+    "id": "human_turn_notification_retains_cursor",
+    "description": "Retain a background session's structured identity and output cursor when its event is consumed alongside a human turn, then continue that session from the exact cursor on a deictic follow-up.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+        { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "uh while i was talking did anything new just come in",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+            { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [
+            {
+              "event_id": 620,
+              "type": "session_output",
+              "session_id": "session-side-audit",
+              "name": "Side Audit",
+              "status": "running",
+              "output_delta": {
+                "changed": true,
+                "output": "assistant: The retry passed all 24 checks without reconnect errors.",
+                "cursor": "item-24"
+              }
+            }
+          ],
+          "update_cursor": 620
+        },
+        "checkUpdatesAfter": 0,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session"],
+          "speechTerms": ["side audit", "24", "passed"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay uh anything newer from that one since then",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true },
+            { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 620
+        },
+        "toolResults": {
+          "poll_output": {
+            "target_session": { "id": "session-side-audit", "name": "Side Audit", "status": "running" },
+            "focus_changed": false,
+            "changed": true,
+            "output": "assistant: A final phone run passed all 25 checks.",
+            "cursor": "item-25",
+            "cursor_expired": false
+          }
+        },
+        "checkUpdatesAfter": 620,
+        "expected": {
+          "toolSequence": ["poll_output"],
+          "forbiddenTools": ["get_output", "focus_session", "send_message"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "poll_output",
+              "sessionId": "session-side-audit",
+              "argumentEquals": { "cursor": "item-24" }
+            }
+          ],
+          "speechTerms": ["side audit", "25", "passed"],
+          "maxRounds": 2
+        }
+      }
+    ]
   }
 ]
