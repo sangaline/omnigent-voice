@@ -402,10 +402,17 @@
       "updates": [
         {
           "event_id": 12,
-          "type": "session_waiting_for_input",
+          "type": "decision_needed",
           "session_id": "session-primary",
           "name": "Primary Work",
-          "prompt": { "prompt_id": "prompt-deploy", "message": "Allow the deployment to run?" }
+          "prompts": [
+            {
+              "prompt_id": "prompt-deploy",
+              "message": "Allow the deployment to run?",
+              "mode": "confirmation",
+              "schema": null
+            }
+          ]
         }
       ],
       "update_cursor": 12

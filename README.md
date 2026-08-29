@@ -35,6 +35,10 @@ them for other clients.
 Every result also repeats a bounded recent-action ledger with preformatted
 summaries. This lets a small model accurately recall message delivery targets
 and focus transitions after conversational history has been compacted.
+Unresolved structured prompts are likewise repeated in `pending_decisions`
+with their exact session and prompt identifiers until resolution. This lets an
+approval arriving on a later utterance target the real prompt without relying
+on the model to remember or reconstruct opaque IDs.
 The same server can run over stdio with `npm run mcp`; the voice process uses an
 in-memory MCP transport to avoid network latency.
 

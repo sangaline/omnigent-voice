@@ -4,8 +4,10 @@ import { JsonObject } from "./omnigent.js";
 
 export interface VoiceEvalExpectation {
   toolSequence: Array<string>;
+  alternativeToolSequences?: Array<Array<string>> | undefined;
   forbiddenTools?: Array<string> | undefined;
   sessionId?: string | undefined;
+  sessionIdIfTool?: string | undefined;
   messageTerms?: Array<string> | undefined;
   argumentTerms?: Record<string, Array<string>> | undefined;
   delivery?: "immediate" | "queued" | "not_queued" | undefined;
@@ -57,6 +59,7 @@ const lowerIncludes = (value: string, term: string): boolean =>
 
 const authoritativeEnvelope = (state: JsonObject): JsonObject => ({
   focused_session: state.focused_session ?? null,
+  pending_decisions: state.pending_decisions ?? [],
   recent_actions: state.recent_actions ?? [],
   updates: state.updates ?? [],
   update_cursor: state.update_cursor ?? 0,
@@ -105,6 +108,7 @@ export class FrozenCoordinatorExecutor implements CoordinatorExecutor {
       const result = { ...envelope, ...supplied };
       for (const key of [
         "focused_session",
+        "pending_decisions",
         "recent_actions",
         "updates",
         "update_cursor",
@@ -170,9 +174,15 @@ export const scoreVoiceEval = (
     if (!condition) failures.push(failure);
   };
   const observedSequence = observation.toolCalls.map(({ name }) => name);
+  const allowedSequences = [
+    testCase.expected.toolSequence,
+    ...(testCase.expected.alternativeToolSequences ?? []),
+  ];
   check(
-    JSON.stringify(observedSequence) === JSON.stringify(testCase.expected.toolSequence),
-    `tool sequence ${JSON.stringify(observedSequence)} != ${JSON.stringify(testCase.expected.toolSequence)}`,
+    allowedSequences.some(
+      (sequence) => JSON.stringify(observedSequence) === JSON.stringify(sequence),
+    ),
+    `tool sequence ${JSON.stringify(observedSequence)} not in ${JSON.stringify(allowedSequences)}`,
   );
   for (const forbidden of testCase.expected.forbiddenTools ?? []) {
     check(!observedSequence.includes(forbidden), `called forbidden tool ${forbidden}`);
@@ -182,6 +192,12 @@ export const scoreVoiceEval = (
     check(
       first?.arguments.session_id === testCase.expected.sessionId,
       `session_id ${String(first?.arguments.session_id)} != ${testCase.expected.sessionId}`,
+    );
+  }
+  if (testCase.expected.sessionIdIfTool && first) {
+    check(
+      first.arguments.session_id === testCase.expected.sessionIdIfTool,
+      `session_id ${String(first.arguments.session_id)} != ${testCase.expected.sessionIdIfTool}`,
     );
   }
   if (testCase.expected.messageTerms) {

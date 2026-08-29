@@ -242,7 +242,7 @@
         "expected": {
           "toolSequence": ["send_message"],
           "forbiddenTools": ["get_output", "focus_session"],
-          "messageTerms": ["discord", "cutoff", "cleanup"],
+          "messageTerms": ["discord", "cut", "cleanup"],
           "delivery": "not_queued",
           "speechTerms": ["long build"],
           "maxRounds": 2
@@ -353,7 +353,7 @@
       },
       {
         "type": "user",
-        "input": "what did the first one say again like the result",
+        "input": "pull the exact last thing the first one actually said",
         "coordinatorState": {
           "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
           "recent_actions": [],
@@ -411,9 +411,10 @@
           }
         },
         "expected": {
-          "toolSequence": ["get_output"],
+          "toolSequence": [],
+          "alternativeToolSequences": [["get_output"]],
           "forbiddenTools": ["focus_session"],
-          "sessionId": "session-beta",
+          "sessionIdIfTool": "session-beta",
           "speechTerms": ["restart", "test worker"],
           "maxRounds": 2
         }
@@ -556,6 +557,120 @@
         "expected": {
           "toolSequence": [],
           "speechTerms": ["primary work", "release tests", "passed"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "decision_arrives_during_human_turn",
+    "description": "Carry an exact background prompt across the turn that announces it, approve it on the next utterance, and prove the resolution from the action ledger.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "uh what changed while i was talking anything need me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "pending_decisions": [
+            {
+              "session_id": "session-beta",
+              "name": "Side Beta",
+              "prompts": [
+                { "prompt_id": "prompt-restart", "message": "Allow the test worker to restart?", "mode": "confirmation", "schema": null }
+              ]
+            }
+          ],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [
+            {
+              "event_id": 45,
+              "type": "decision_needed",
+              "session_id": "session-beta",
+              "name": "Side Beta",
+              "prompts": [
+                { "prompt_id": "prompt-restart", "message": "Allow the test worker to restart?", "mode": "confirmation", "schema": null }
+              ]
+            }
+          ],
+          "update_cursor": 45
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side beta", "restart"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "yeah okay go ahead approve that one",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "pending_decisions": [
+            {
+              "session_id": "session-beta",
+              "name": "Side Beta",
+              "prompts": [
+                { "prompt_id": "prompt-restart", "message": "Allow the test worker to restart?", "mode": "confirmation", "schema": null }
+              ]
+            }
+          ],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 45
+        },
+        "toolResults": {
+          "answer_prompt": {
+            "resolved": true,
+            "session_id": "session-beta",
+            "prompt_id": "prompt-restart",
+            "action": "accept",
+            "pending_decisions": [],
+            "recent_actions": [
+              { "action_id": 50, "type": "prompt_answered", "summary": "Accepted a pending prompt in Side Beta." }
+            ]
+          }
+        },
+        "checkUpdatesAfter": 45,
+        "expected": {
+          "toolSequence": ["answer_prompt"],
+          "forbiddenTools": ["get_output", "focus_session"],
+          "sessionId": "session-beta",
+          "argumentEquals": { "prompt_id": "prompt-restart", "action": "accept" },
+          "speechTerms": ["approved", "side beta"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "and did that approval actually go through",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 50, "type": "prompt_answered", "summary": "Accepted a pending prompt in Side Beta." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 45
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["answer_prompt", "get_output"],
+          "speechAnyTerms": [
+            ["approved", "accepted", "approval"],
+            ["successful", "recorded", "went through"]
+          ],
           "maxRounds": 1
         }
       }

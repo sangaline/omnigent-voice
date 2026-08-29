@@ -158,7 +158,14 @@ complete items are admitted to the bounded result. The voice client preserves
 tool results as valid JSON and structurally compacts oversized strings/arrays
 rather than slicing serialized JSON in the middle. Structured MCP
 elicitations resolve through their dedicated endpoint and may target a child
-session. A stdio MCP entry point is
+session. The coordinator maintains a server-owned `pending_decisions` registry
+across all watched sessions. Every snapshot and tool result repeats unresolved
+prompts with exact session IDs, prompt IDs, natural-language messages, modes,
+and schemas until successful resolution; the decision event carries the same
+prompt data. Celeris must copy these opaque IDs, never recreate them from a
+spoken name. Successful resolution removes the prompt before the result is
+returned and the action ledger becomes authoritative for later verification.
+A stdio MCP entry point is
 available with `npm run mcp`; authenticated remote HTTP transport is deliberately
 deferred.
 

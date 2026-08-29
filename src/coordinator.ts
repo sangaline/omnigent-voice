@@ -251,6 +251,22 @@ const summary = (session: JsonObject): JsonObject => ({
   pending_prompts: pendingCount(session),
 });
 
+const voicePrompts = (snapshot: JsonObject): JsonObject[] =>
+  (Array.isArray(snapshot.pending_elicitations)
+    ? snapshot.pending_elicitations
+    : [])
+    .filter(isObject)
+    .map((prompt) => {
+      const params = isObject(prompt.params) ? prompt.params : {};
+      return {
+        prompt_id: stringValue(prompt.elicitation_id) ?? "",
+        message: stringValue(params.message) ?? "Input is needed.",
+        mode: stringValue(params.mode) ?? "form",
+        schema: params.requestedSchema ?? null,
+      };
+    })
+    .filter((prompt) => Boolean(prompt.prompt_id));
+
 const findPrompt = (snapshot: JsonObject, promptId: string): JsonObject | undefined =>
   (Array.isArray(snapshot.pending_elicitations) ? snapshot.pending_elicitations : [])
     .filter(isObject)
@@ -293,6 +309,7 @@ export class OmnigentCoordinator {
   private readonly updates: CoordinatorUpdate[] = [];
   private actionSequence = 0;
   private readonly recentActions: CoordinatorAction[] = [];
+  private readonly pendingDecisions = new Map<string, JsonObject>();
   private timer: NodeJS.Timeout | undefined;
   private polling: Promise<void> | undefined;
 
@@ -301,6 +318,7 @@ export class OmnigentCoordinator {
   public async start(): Promise<void> {
     const sessions = await this.options.omnigent.listSessions(30);
     this.seed(sessions);
+    await this.refreshPendingDecisions(sessions);
     this.focusedSessionId = sessionId(sessions[0] ?? {});
     this.focusedSession = this.focusedSessionId
       ? this.sessionSummaries.get(this.focusedSessionId)
@@ -382,6 +400,7 @@ export class OmnigentCoordinator {
     return {
       ...result,
       focused_session: this.focusedSession ?? null,
+      pending_decisions: [...this.pendingDecisions.values()],
       recent_actions: this.recentActions.slice(-5),
       ...this.updatesAfter(afterEventId),
     };
@@ -430,19 +449,7 @@ export class OmnigentCoordinator {
       });
     }
     await this.ensureOutputMonitor(id);
-    const prompts = (Array.isArray(snapshot.pending_elicitations)
-      ? snapshot.pending_elicitations
-      : [])
-      .filter(isObject)
-      .map((prompt) => {
-        const params = isObject(prompt.params) ? prompt.params : {};
-        return {
-          prompt_id: stringValue(prompt.elicitation_id) ?? "",
-          message: stringValue(params.message) ?? "Input is needed.",
-          mode: stringValue(params.mode) ?? "form",
-          schema: params.requestedSchema ?? null,
-        };
-      });
+    const prompts = voicePrompts(snapshot);
     return {
       focused_session: summary(snapshot),
       focus_changed: !alreadyFocused,
@@ -608,6 +615,14 @@ export class OmnigentCoordinator {
     const targetId = stringValue(params.target_session_id) ?? focusedId;
     const answers = isObject(args.answers) ? args.answers : undefined;
     await this.options.omnigent.resolveElicitation(targetId, promptId, action, answers);
+    const pending = this.pendingDecisions.get(focusedId);
+    if (pending && Array.isArray(pending.prompts)) {
+      const prompts = pending.prompts.filter(
+        (entry) => !isObject(entry) || entry.prompt_id !== promptId,
+      );
+      if (prompts.length > 0) this.pendingDecisions.set(focusedId, { ...pending, prompts });
+      else this.pendingDecisions.delete(focusedId);
+    }
     this.recordAction({
       type: "prompt_answered",
       session_id: targetId,
@@ -734,6 +749,7 @@ export class OmnigentCoordinator {
   private async poll(): Promise<void> {
     const sessions = await this.options.omnigent.listSessions(30);
     this.rememberSessions(sessions);
+    await this.refreshPendingDecisions(sessions);
     await this.dispatchDeferredMessages(sessions);
     await Promise.all([...this.outputStates.keys()].map((id) => this.captureOutput(id)));
     for (const session of sessions) {
@@ -777,9 +793,47 @@ export class OmnigentCoordinator {
           session_id: id,
           name,
           pending_prompts: pendingCount(session),
+          prompts: this.pendingDecisions.get(id)?.prompts ?? [],
           output_delta: this.readOutput(id, "notificationIndex"),
         });
       }
+    }
+  }
+
+  private async refreshPendingDecisions(sessions: JsonObject[]): Promise<void> {
+    const present = new Set<string>();
+    await Promise.all(
+      sessions.map(async (session) => {
+        const id = sessionId(session);
+        if (!id) return;
+        present.add(id);
+        if (pendingCount(session) === 0) {
+          this.pendingDecisions.delete(id);
+          return;
+        }
+        let snapshot = session;
+        if (voicePrompts(snapshot).length === 0) {
+          try {
+            snapshot = await this.options.omnigent.getSession(id);
+          } catch (error) {
+            this.options.logger.warn("coordinator.pending_prompt.failed", {
+              session: sessionName(session),
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return;
+          }
+        }
+        const prompts = voicePrompts(snapshot);
+        if (prompts.length === 0) return;
+        this.pendingDecisions.set(id, {
+          session_id: id,
+          name: sessionName(snapshot),
+          prompts,
+        });
+      }),
+    );
+    for (const id of this.pendingDecisions.keys()) {
+      if (!present.has(id)) this.pendingDecisions.delete(id);
     }
   }
 

@@ -217,3 +217,29 @@ scenario, test, and research artifacts. The local cluster rollout reached
 speech-model, coordinator, and Discord-voice readiness in about 1.2 seconds,
 reported zero restarts, and retained the existing private JSONL audit log.
 Hermes remained inactive throughout the handoff of the shared Discord identity.
+
+### 2026-08-28 — Structured decisions across human turns
+
+Hypothesis H7: a decision event consumed inside a human turn loses the opaque
+prompt metadata needed for approval on the next utterance because spoken
+history retains only the natural response, not transient coordinator context.
+
+Result: confirmed. A new three-turn background-decision scenario initially
+failed all three turns. Celeris explained the decision, then invented both a
+session ID and prompt ID when the human approved it, and finally attempted an
+output read when asked whether approval succeeded. More prompt text cannot
+make unavailable opaque identifiers reliable.
+
+The coordinator now maintains `pending_decisions` as authoritative typed state
+across all watched sessions. Exact prompt and session identifiers recur in every
+snapshot and tool result until successful resolution, the decision event
+contains the same prompt metadata, and resolution removes the prompt before
+returning its action receipt. The late invariant requires copying these IDs and
+uses `recent_actions` rather than output reads to verify prior approval.
+
+The repaired flow passed all 15 turns across five complete runs. Conventional
+tests increased to 31, including an end-to-end coordinator/MCP lifecycle test.
+The unchanged isolated model corpus passed 27 of 27. Full linked sweeps retained
+correct tools, targets, focus, and actions; one 26-turn run had a single
+speech-only omission of the word “reconnect,” which passed three immediate
+reruns and remains recorded as model-output variance.

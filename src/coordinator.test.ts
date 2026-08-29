@@ -382,4 +382,112 @@ describe("Omnigent coordinator", () => {
       await client.close();
     }
   });
+
+  it("retains exact pending decision identifiers until the prompt is resolved", async () => {
+    const now = new Date().toISOString();
+    const primary = {
+      id: "session-primary",
+      title: "Primary Work",
+      status: "running",
+      updated_at: now,
+    };
+    const betaIdle = {
+      id: "session-beta",
+      title: "Side Beta",
+      status: "waiting",
+      updated_at: now,
+      pending_elicitations_count: 0,
+    };
+    const betaPending = {
+      ...betaIdle,
+      pending_elicitations_count: 1,
+    };
+    const betaSnapshot = {
+      ...betaPending,
+      pending_elicitations: [
+        {
+          elicitation_id: "prompt-restart",
+          params: {
+            message: "Allow the test worker to restart?",
+            mode: "confirmation",
+          },
+        },
+      ],
+    };
+    const resolveElicitation = vi.fn();
+    const omnigent = {
+      listSessions: vi
+        .fn()
+        .mockResolvedValueOnce([primary, betaIdle])
+        .mockResolvedValue([primary, betaPending]),
+      getSession: vi.fn().mockImplementation((id: string) =>
+        Promise.resolve(id === betaPending.id ? betaSnapshot : primary),
+      ),
+      listItems: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
+      sendMessage: vi.fn(),
+      resolveElicitation,
+      createSession: vi.fn(),
+      archiveSession: vi.fn(),
+      interruptSession: vi.fn(),
+    } as unknown as OmnigentClient;
+    const coordinator = new OmnigentCoordinator({
+      omnigent,
+      logger: new Logger("error"),
+      pollIntervalMs: 60_000,
+    });
+    await coordinator.start();
+    const client = await CoordinatorMcpClient.create(coordinator);
+    try {
+      await expect(
+        client.callTool("check_updates", { after_event_id: 0 }),
+      ).resolves.toMatchObject({
+        pending_decisions: [
+          {
+            session_id: "session-beta",
+            name: "Side Beta",
+            prompts: [
+              {
+                prompt_id: "prompt-restart",
+                message: "Allow the test worker to restart?",
+                mode: "confirmation",
+              },
+            ],
+          },
+        ],
+        updates: [
+          {
+            event_id: 1,
+            type: "decision_needed",
+            session_id: "session-beta",
+            prompts: [{ prompt_id: "prompt-restart" }],
+          },
+        ],
+      });
+      await expect(
+        client.callTool("answer_prompt", {
+          session_id: "session-beta",
+          prompt_id: "prompt-restart",
+          action: "accept",
+        }),
+      ).resolves.toMatchObject({
+        resolved: true,
+        session_id: "session-beta",
+        prompt_id: "prompt-restart",
+        action: "accept",
+        pending_decisions: [],
+        recent_actions: [
+          { type: "prompt_answered", name: "Side Beta", action: "accept" },
+        ],
+      });
+      expect(resolveElicitation).toHaveBeenCalledWith(
+        "session-beta",
+        "prompt-restart",
+        "accept",
+        undefined,
+      );
+    } finally {
+      coordinator.stop();
+      await client.close();
+    }
+  });
 });

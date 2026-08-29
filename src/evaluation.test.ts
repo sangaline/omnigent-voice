@@ -134,4 +134,39 @@ describe("voice harness evaluation", () => {
       modelError: "Celeris returned HTTP 429",
     });
   });
+
+  it("accepts a safe optional read while still checking its target", () => {
+    const optionalRead: VoiceEvalCase = {
+      ...testCase,
+      expected: {
+        toolSequence: [],
+        alternativeToolSequences: [["get_output"]],
+        sessionIdIfTool: "session-side",
+      },
+    };
+    expect(
+      scoreVoiceEval(optionalRead, {
+        ...observation,
+        toolCalls: [
+          {
+            name: "get_output",
+            arguments: { session_id: "session-side" },
+            result: {},
+          },
+        ],
+      }).passed,
+    ).toBe(true);
+    expect(
+      scoreVoiceEval(optionalRead, {
+        ...observation,
+        toolCalls: [
+          {
+            name: "get_output",
+            arguments: { session_id: "session-primary" },
+            result: {},
+          },
+        ],
+      }).failures,
+    ).toContain("session_id session-primary != session-side");
+  });
 });
