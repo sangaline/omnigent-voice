@@ -97,6 +97,12 @@ status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
 
 Celeris owns the low-latency conversation and uses its OpenAI-compatible native
 tool-call shape to invoke a real MCP client/server pair connected in memory.
+Immediately before every human message, the harness inserts a short current-turn
+action invariant: no coordinator mutation has happened yet, requested actions
+must use a tool before speech, and promises or success claims without a later
+successful tool result are forbidden. Keep this reminder adjacent to the human
+turn; the same rule in the longer base prompt was not salient enough when the
+model copied a prior send acknowledgement instead of making a second tool call.
 The voice harness removes `send_message.session_id` from the model-visible
 schema so messages can only target the focused session. It also withholds and
 rejects `focus_session` unless the current transcript explicitly requests a

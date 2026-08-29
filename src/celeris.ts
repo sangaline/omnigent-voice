@@ -220,6 +220,15 @@ export class CelerisConversation {
       { role: "system", content: systemPrompt },
       ...this.rememberedMessages(),
       coordinatorContext(updates, this.memoryPolicy, Boolean(this.memorySummary)),
+      {
+        role: "system",
+        content:
+          "Current-turn action invariant: no coordinator action has happened during this human " +
+          "turn yet. If the human requests an action, call the appropriate tool now, before " +
+          "speaking. Never say or imply that an action was sent, started, queued, switched, " +
+          "answered, or archived until a successful tool result for that action is present later " +
+          "in this turn. Never promise to perform a tool action after speaking.",
+      },
       { role: "user", content: input },
     ];
     const tools = (await this.tools())

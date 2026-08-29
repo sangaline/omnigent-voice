@@ -110,6 +110,13 @@ describe("Celeris coordinator conversation", () => {
     expect(
       request.messages?.some((message) => message.content?.includes('"recent_actions":[]')),
     ).toBe(true);
+    expect(request.messages?.slice(-2)).toEqual([
+      expect.objectContaining({
+        role: "system",
+        content: expect.stringContaining("no coordinator action has happened"),
+      }),
+      { role: "user", content: "Hello" },
+    ]);
   });
 
   it("offers focus mutation only on an explicit switch turn", async () => {
