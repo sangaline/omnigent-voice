@@ -151,6 +151,15 @@ describe("Omnigent coordinator", () => {
         delivery: "immediate",
         target_session: { id: "session-1", name: "Voice MVP" },
         backend_async_accepted: true,
+        recent_actions: [
+          {
+            action_id: 1,
+            type: "message_sent",
+            name: "Voice MVP",
+            delivery: "immediate",
+            message: "Continue.",
+          },
+        ],
       });
       expect(immediate).not.toHaveProperty("queued");
       await expect(
@@ -213,6 +222,14 @@ describe("Omnigent coordinator", () => {
         archived_session: { id: temporary.id, name: "Temporary side task" },
         focus_reason: "previous_focus",
         focused_session: { id: primary.id, name: "Primary work" },
+        recent_actions: [
+          { type: "focus_changed", name: "Temporary side task" },
+          {
+            type: "session_archived",
+            name: "Temporary side task",
+            next_focus: { id: primary.id, name: "Primary work" },
+          },
+        ],
       });
       expect(archiveSession).toHaveBeenCalledWith(temporary.id);
     } finally {

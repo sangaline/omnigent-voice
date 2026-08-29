@@ -32,6 +32,9 @@ Background events are retained in a bounded log and every result carries an
 event cursor. Clients without server notifications can safely poll
 `check_updates` with their last cursor; one client reading events does not drain
 them for other clients.
+Every result also repeats a bounded recent-action ledger with preformatted
+summaries. This lets a small model accurately recall message delivery targets
+and focus transitions after its short conversational history has been trimmed.
 The same server can run over stdio with `npm run mcp`; the voice process uses an
 in-memory MCP transport to avoid network latency.
 

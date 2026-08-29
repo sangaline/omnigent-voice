@@ -22,6 +22,24 @@ interface CoordinatorUpdateInput extends JsonObject {
   name: string;
 }
 
+interface CoordinatorAction extends JsonObject {
+  action_id: number;
+  type:
+    | "focus_changed"
+    | "message_queued"
+    | "message_sent"
+    | "prompt_answered"
+    | "session_archived"
+    | "session_started";
+  occurred_at: string;
+  summary: string;
+}
+
+interface CoordinatorActionInput extends JsonObject {
+  type: CoordinatorAction["type"];
+  summary: string;
+}
+
 interface OutputEntry {
   id: string;
   text: string;
@@ -181,6 +199,8 @@ export class OmnigentCoordinator {
   private updateSequence = 0;
   private readonly fingerprints = new Map<string, string>();
   private readonly updates: CoordinatorUpdate[] = [];
+  private actionSequence = 0;
+  private readonly recentActions: CoordinatorAction[] = [];
   private timer: NodeJS.Timeout | undefined;
   private polling: Promise<void> | undefined;
 
@@ -270,6 +290,7 @@ export class OmnigentCoordinator {
     return {
       ...result,
       focused_session: this.focusedSession ?? null,
+      recent_actions: this.recentActions.slice(-5),
       ...this.updatesAfter(afterEventId),
     };
   }
@@ -305,6 +326,13 @@ export class OmnigentCoordinator {
     this.options.logger.info("coordinator.focus.changed", {
       from: previousName,
       to: sessionName(snapshot),
+    });
+    this.recordAction({
+      type: "focus_changed",
+      session_id: id,
+      name: sessionName(snapshot),
+      previous_session: previousName,
+      summary: `Focused ${sessionName(snapshot)}; previous focus was ${previousName}.`,
     });
     await this.ensureOutputMonitor(id);
     const prompts = (Array.isArray(snapshot.pending_elicitations)
@@ -378,6 +406,14 @@ export class OmnigentCoordinator {
         target: sessionName(snapshot),
         characters: message.length,
       });
+      this.recordAction({
+        type: "message_queued",
+        session_id: id,
+        name: sessionName(snapshot),
+        delivery: "queued",
+        message: message.slice(0, 500),
+        summary: `Queued for ${sessionName(snapshot)} after its current turn: ${message.slice(0, 300)}`,
+      });
       return {
         accepted: true,
         delivery: "queued",
@@ -390,6 +426,14 @@ export class OmnigentCoordinator {
       target: sessionName(snapshot),
       delivery: "immediate",
       characters: message.length,
+    });
+    this.recordAction({
+      type: "message_sent",
+      session_id: id,
+      name: sessionName(snapshot),
+      delivery: "immediate",
+      message: message.slice(0, 500),
+      summary: `Sent immediately to ${sessionName(snapshot)}: ${message.slice(0, 300)}`,
     });
     return {
       accepted: true,
@@ -433,6 +477,15 @@ export class OmnigentCoordinator {
       nextFocus: stringValue(this.focusedSession?.name) ?? "none",
       focusReason,
     });
+    this.recordAction({
+      type: "session_archived",
+      session_id: id,
+      name: sessionName(snapshot),
+      next_focus: this.focusedSession ?? null,
+      summary: this.focusedSession
+        ? `Archived ${sessionName(snapshot)}; focus returned to ${stringValue(this.focusedSession.name) ?? "the previous session"}.`
+        : `Archived ${sessionName(snapshot)}; no active session remains.`,
+    });
     return {
       archived: true,
       archived_session: archived,
@@ -451,6 +504,14 @@ export class OmnigentCoordinator {
     const targetId = stringValue(params.target_session_id) ?? focusedId;
     const answers = isObject(args.answers) ? args.answers : undefined;
     await this.options.omnigent.resolveElicitation(targetId, promptId, action, answers);
+    this.recordAction({
+      type: "prompt_answered",
+      session_id: targetId,
+      name: stringValue(this.sessionSummaries.get(targetId)?.name) ?? "focused session",
+      prompt_id: promptId,
+      action,
+      summary: `${action === "accept" ? "Accepted" : action === "decline" ? "Declined" : "Cancelled"} a pending prompt in ${stringValue(this.sessionSummaries.get(targetId)?.name) ?? "the focused session"}.`,
+    });
     return { resolved: true, session_id: targetId, prompt_id: promptId, action };
   }
 
@@ -473,6 +534,13 @@ export class OmnigentCoordinator {
     this.sessionSummaries.set(id, this.focusedSession);
     await this.ensureOutputMonitor(id);
     this.fingerprints.set(id, this.fingerprint(created));
+    this.recordAction({
+      type: "session_started",
+      session_id: id,
+      name: sessionName(created),
+      instruction: instruction.slice(0, 500),
+      summary: `Started and focused ${sessionName(created)}: ${instruction.slice(0, 300)}`,
+    });
     return { started: true, focused_session: summary(created) };
   }
 
@@ -489,6 +557,23 @@ export class OmnigentCoordinator {
     if (existing >= 0) this.focusHistory.splice(existing, 1);
     this.focusHistory.push(previous);
     if (this.focusHistory.length > 20) this.focusHistory.splice(0, this.focusHistory.length - 20);
+  }
+
+  private recordAction(action: CoordinatorActionInput): void {
+    const recorded: CoordinatorAction = {
+      ...action,
+      action_id: ++this.actionSequence,
+      occurred_at: new Date().toISOString(),
+    };
+    this.recentActions.push(recorded);
+    if (this.recentActions.length > 20) {
+      this.recentActions.splice(0, this.recentActions.length - 20);
+    }
+    this.options.logger.info("coordinator.action.recorded", {
+      actionId: recorded.action_id,
+      type: recorded.type,
+      summary: recorded.summary,
+    });
   }
 
   private sessionFrom(args: Record<string, unknown>): string {
@@ -693,6 +778,14 @@ export class OmnigentCoordinator {
           target: pending.sessionName,
           delivery: "queued_after_turn",
           characters: pending.message.length,
+        });
+        this.recordAction({
+          type: "message_sent",
+          session_id: id,
+          name: pending.sessionName,
+          delivery: "queued_after_turn",
+          message: pending.message.slice(0, 500),
+          summary: `Sent queued message to ${pending.sessionName}: ${pending.message.slice(0, 300)}`,
         });
       } catch (error) {
         this.deferredMessages.splice(index, 0, pending);

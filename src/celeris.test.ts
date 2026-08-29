@@ -99,6 +99,9 @@ describe("Celeris coordinator conversation", () => {
         message.content?.includes('"context_measurement":"No token or page-count introspection'),
       ),
     ).toBe(true);
+    expect(
+      request.messages?.some((message) => message.content?.includes('"recent_actions":[]')),
+    ).toBe(true);
   });
 
   it("offers focus mutation only on an explicit switch turn", async () => {

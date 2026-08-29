@@ -60,6 +60,12 @@ server-owned stack. Archiving the focused session restores the newest still-vali
 prior focus, falling back to the most recently active unarchived session. The
 archive result identifies both the archived and newly focused sessions, and the
 voice layer must speak that transition rather than relying on model memory.
+Every result also includes the last five entries from a bounded server-owned
+`recent_actions` ledger. It records exact outbound message text and target,
+delivery mode, focus changes, starts, archives, and prompt resolutions with a
+preformatted summary. This is authoritative after Celeris history compaction;
+absence from short spoken history is never evidence that an action did not
+happen. Action summaries are retained in the private JSONL audit log.
 
 The coordinator polls recent session summaries and stable conversation items
 every two seconds, including while the human is speaking. At ASR finalization,
@@ -118,7 +124,10 @@ Logs are newline-delimited JSON on stdout and, when `LOG_FILE` is configured,
 appended to that runtime file. `conversation.user.recognized` contains each ASR
 transcript. `conversation.assistant.generated` records the response and whether
 it was superseded before playback. `conversation.assistant.playback_started`
-records the exact text whose audio actually began and its retry number. This is
+records the exact text whose audio actually began and its retry number.
+`coordinator.action.recorded` records the exact action summary, including
+outbound message text, so delivery claims can be audited after model history is
+trimmed. This is
 an intentional conversation audit trail and is sensitive private data. Keep the
 file on private runtime storage, never add it to an image or repository, and
 never log tool arguments, tokens, environment values, or credentials. The
