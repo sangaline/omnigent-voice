@@ -611,4 +611,7 @@ link or deployment metadata.
   credentials.
 - The Docker Hub image is public but intentionally has no Hub description,
   README sync, source link, author label, or deployment-specific metadata.
+- Keep `**/__pycache__/**` and `**/*.pyc` excluded from the container context.
+  Python bytecode embeds the absolute compilation path; the pre-rollout image
+  scan must reject personal paths even when no credential value is present.
 - Update this file when runtime assumptions or operational procedures change.
