@@ -77,6 +77,7 @@ const endpoint = config.semanticEndpointing
       bridgePath: config.smartTurnBridgePath,
       modelPath: config.smartTurnModelPath,
       threads: config.smartTurnThreads,
+      completeThreshold: config.smartTurnCompleteThreshold,
       vadModelPath: config.sileroVadModelPath,
       vadThreshold: config.sileroVadThreshold,
       vadSilenceMs: config.sileroVadSilenceMs,

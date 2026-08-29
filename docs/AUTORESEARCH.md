@@ -1586,3 +1586,26 @@ rounds after the change.
 Current promotion evidence is 115 passing unit tests, clean typecheck and build,
 41 of 41 isolated trials, and all 33 stateful scenarios across 110 linked turns.
 No test touched the excluded ESPN session.
+
+### 2026-08-29 — Marginal semantic-endpoint decisions
+
+Hypothesis H57: Smart Turn's raw 0.5 decision boundary was precise enough to
+commit every positive result without continuation latency. The live trace
+disproved it. It classified “Why would the scientists be up in the” as complete
+at probability 0.6067, immediately finalized the fragment, and forced the human
+to restate the question after the unrelated response began.
+
+The retained private telemetry contained 119 predictions: 66 exceeded 0.5,
+with 0.9486 median probability, and only seven fell below 0.65. The configurable
+completion floor is now 0.65. Marginal predictions remain on the existing 700 ms
+incomplete-turn fallback, while the other 59 historical positives retain the
+zero-merge-delay path. This avoids transcript-grammar heuristics and changes the
+historical immediate-decision set by only 10.6 percent. A pure production helper
+regression pins the observed 0.6067 failure below the floor and preserves an
+immediate decision at the exact boundary and at the historical median.
+
+The promotion gate passed 119 unit tests, clean typecheck, and a clean build.
+This change does not alter the Celeris prompt, tool schemas, conversation state,
+or coordinator behavior, so the immediately preceding 41-of-41 isolated and
+33-of-33 linked scenario model gates remain the relevant model evidence rather
+than being needlessly rerun.

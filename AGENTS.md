@@ -105,15 +105,17 @@ real speech arriving on it can still activate the existing ASR and barge-in
 path. Semantic endpointing is enabled by default. Silero VAD
 observes the live 16 kHz stream and proposes an endpoint after 180 ms of
 silence; Smart Turn v3.2 classifies up to the latest eight seconds of the raw
-current-turn waveform. A complete decision closes the live ASR stream
-immediately, while an incomplete or failed decision keeps listening until the
-700 ms hard fallback. New speech invalidates an in-flight decision and the
+current-turn waveform. A decision is accepted as complete only at the
+configurable `SMART_TURN_COMPLETE_THRESHOLD` (default `0.65`); lower-confidence
+predictions keep listening until the 700 ms hard fallback. This is deliberately
+above the model's raw `0.5` decision boundary after a live dangling fragment
+scored `0.6067`. New speech invalidates an in-flight decision and the
 full updated turn is classified after the next pause. This replaces the staged
 450 ms capture stop plus 350 ms transcript merge; when semantic endpointing is
 disabled, those legacy settings remain available. Only explicit cancel
 language interrupts the focused running Omnigent session.
-Only a positive Smart Turn classification commits with no transcript merge
-delay. A semantic or hard fallback does not prove the thought is complete, so
+Only a Smart Turn classification above that confidence floor commits with no
+transcript merge delay. A semantic or hard fallback does not prove the thought is complete, so
 it retains the configured 350 ms continuation grace; a new Discord receive
 stream cancels that timer and joins the next transcript. Confirmed new speech
 also aborts the superseded Celeris request. The conversation checks that abort
@@ -125,9 +127,11 @@ Smart Turn runs as a persistent local Python bridge inside the same container,
 using its 8.7 MB int8 ONNX model and Pipecat's NumPy-only Whisper feature
 extraction. The exact container measured 37.7 ms mean, 47.1 ms p95, and 47.7 ms
 maximum across twenty complete decisions on the host. A full fixture scored
-0.957 complete while a mid-sentence cut scored 0.490. Silero and Smart Turn
-model downloads are checksum-pinned in the image build. Never log retained raw
-endpoint audio.
+0.957 complete while a fixture mid-sentence cut scored 0.490. In the first 119
+live predictions, the old 0.5 boundary accepted 66, with median probability
+0.9486; only seven were below the new 0.65 floor. Silero and Smart Turn model
+downloads are checksum-pinned in the image build. Never log retained raw endpoint
+audio.
 
 Omnigent auth uses a runtime refresh token. At boot, the coordinator focuses the
 most recently active native session but does not create one. Focus is sticky:

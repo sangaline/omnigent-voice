@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { TailAudioBuffer } from "./endpoint.js";
+import { isSmartTurnComplete, TailAudioBuffer } from "./endpoint.js";
+
+describe("Smart Turn completion confidence", () => {
+  it("keeps marginal endpoint predictions on the incomplete-turn fallback", () => {
+    expect(isSmartTurnComplete(0.6067, 0.65)).toBe(false);
+    expect(isSmartTurnComplete(0.65, 0.65)).toBe(true);
+    expect(isSmartTurnComplete(0.9486, 0.65)).toBe(true);
+  });
+});
 
 describe("tail audio buffer", () => {
   it("retains samples chronologically up to its capacity", () => {

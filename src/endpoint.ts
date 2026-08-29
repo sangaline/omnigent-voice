@@ -12,6 +12,7 @@ interface SmartTurnOptions {
   bridgePath: string;
   modelPath: string;
   threads: number;
+  completeThreshold: number;
   logger: Logger;
 }
 
@@ -25,6 +26,11 @@ export interface SmartTurnResult {
   probability: number;
   durationMs: number;
 }
+
+export const isSmartTurnComplete = (
+  probability: number,
+  threshold: number,
+): boolean => probability >= threshold;
 
 export class TailAudioBuffer {
   private readonly chunks: Float32Array[] = [];
@@ -100,6 +106,7 @@ export class SmartTurnRuntime {
     this.options.logger.info("endpoint.smart_turn.ready", {
       startupMs: Math.round(performance.now() - started),
       warmupMs: Math.round(warmup.durationMs),
+      completeThreshold: this.options.completeThreshold,
     });
   }
 
@@ -140,7 +147,11 @@ export class SmartTurnRuntime {
       const pending = this.pending.get(id);
       if (!pending) continue;
       this.pending.delete(id);
-      pending.resolve({ complete: probability > 0.5, probability, durationMs });
+      pending.resolve({
+        complete: isSmartTurnComplete(probability, this.options.completeThreshold),
+        probability,
+        durationMs,
+      });
     }
   }
 

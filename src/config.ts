@@ -18,6 +18,7 @@ export interface Config {
   smartTurnBridgePath: string;
   smartTurnModelPath: string;
   smartTurnThreads: number;
+  smartTurnCompleteThreshold: number;
   omnigentBaseUrl: string;
   omnigentRefreshToken: string;
   omnigentAgentName: string;
@@ -82,6 +83,20 @@ const positiveNumber = (
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(`${name} must be a positive number`);
+  }
+  return value;
+};
+
+const probability = (
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number,
+): number => {
+  const raw = optional(env, name);
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${name} must be a number between 0 and 1`);
   }
   return value;
 };
@@ -191,6 +206,11 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
       optional(env, "SMART_TURN_MODEL_PATH") ??
       "/opt/models/endpoint/smart-turn-v3.2-cpu.onnx",
     smartTurnThreads: positiveInteger(env, "SMART_TURN_THREADS", 1),
+    smartTurnCompleteThreshold: probability(
+      env,
+      "SMART_TURN_COMPLETE_THRESHOLD",
+      0.65,
+    ),
     omnigentBaseUrl: required(env, "OMNIGENT_BASE_URL").replace(/\/$/, ""),
     omnigentRefreshToken: required(env, "OMNIGENT_REFRESH_TOKEN"),
     omnigentAgentName: optional(env, "OMNIGENT_AGENT_NAME") ?? "codex-native-ui",
