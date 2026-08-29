@@ -28,17 +28,16 @@ describe("Omnigent coordinator", () => {
 
   it("exposes the focused coordinator tools over an in-memory MCP transport", async () => {
     const now = new Date().toISOString();
+    const session = {
+      id: "session-1",
+      title: "Voice MVP",
+      status: "running",
+      updated_at: now,
+      pending_elicitations_count: 1,
+    };
     const omnigent = {
-      listSessions: vi.fn().mockResolvedValue([
-        {
-          id: "session-1",
-          title: "Voice MVP",
-          status: "running",
-          updated_at: now,
-          pending_elicitations_count: 1,
-        },
-      ]),
-      getSession: vi.fn(),
+      listSessions: vi.fn().mockResolvedValue([session]),
+      getSession: vi.fn().mockResolvedValue(session),
       listItems: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
       sendMessage: vi.fn(),
       resolveElicitation: vi.fn(),
@@ -74,6 +73,14 @@ describe("Omnigent coordinator", () => {
         ],
         focused_session: { id: "session-1", name: "Voice MVP" },
         updates: [],
+      });
+      await expect(
+        client.callTool("focus_session", { session_id: "session-1" }),
+      ).resolves.toMatchObject({
+        focused_session: { id: "session-1", name: "Voice MVP" },
+        focus_changed: false,
+        already_focused: true,
+        recent_actions: [],
       });
     } finally {
       coordinator.stop();

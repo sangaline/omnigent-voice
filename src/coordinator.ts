@@ -319,21 +319,24 @@ export class OmnigentCoordinator {
     const id = this.requiredString(args, "session_id");
     const snapshot = await this.options.omnigent.getSession(id);
     const previousName = stringValue(this.focusedSession?.name) ?? "none";
-    this.rememberPreviousFocus(id);
+    const alreadyFocused = id === this.focusedSessionId;
+    if (!alreadyFocused) this.rememberPreviousFocus(id);
     this.focusedSessionId = id;
     this.focusedSession = summary(snapshot);
     this.sessionSummaries.set(id, this.focusedSession);
-    this.options.logger.info("coordinator.focus.changed", {
-      from: previousName,
-      to: sessionName(snapshot),
-    });
-    this.recordAction({
-      type: "focus_changed",
-      session_id: id,
-      name: sessionName(snapshot),
-      previous_session: previousName,
-      summary: `Focused ${sessionName(snapshot)}; previous focus was ${previousName}.`,
-    });
+    if (!alreadyFocused) {
+      this.options.logger.info("coordinator.focus.changed", {
+        from: previousName,
+        to: sessionName(snapshot),
+      });
+      this.recordAction({
+        type: "focus_changed",
+        session_id: id,
+        name: sessionName(snapshot),
+        previous_session: previousName,
+        summary: `Focused ${sessionName(snapshot)}; previous focus was ${previousName}.`,
+      });
+    }
     await this.ensureOutputMonitor(id);
     const prompts = (Array.isArray(snapshot.pending_elicitations)
       ? snapshot.pending_elicitations
@@ -348,7 +351,12 @@ export class OmnigentCoordinator {
           schema: params.requestedSchema ?? null,
         };
       });
-    return { focused_session: summary(snapshot), prompts };
+    return {
+      focused_session: summary(snapshot),
+      focus_changed: !alreadyFocused,
+      already_focused: alreadyFocused,
+      prompts,
+    };
   }
 
   private async getOutput(args: Record<string, unknown>): Promise<JsonObject> {

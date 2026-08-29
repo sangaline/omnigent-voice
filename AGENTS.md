@@ -97,12 +97,17 @@ status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
 
 Celeris owns the low-latency conversation and uses its OpenAI-compatible native
 tool-call shape to invoke a real MCP client/server pair connected in memory.
-Immediately before every human message, the harness inserts a short current-turn
-action invariant: no coordinator mutation has happened yet, requested actions
-must use a tool before speech, and promises or success claims without a later
-successful tool result are forbidden. Keep this reminder adjacent to the human
-turn; the same rule in the longer base prompt was not salient enough when the
-model copied a prior send acknowledgement instead of making a second tool call.
+Immediately before every human message, the harness inserts a current-turn
+action invariant: no coordinator action has happened yet, requested actions and
+required reads must use a tool before speech, prior ledger entries do not satisfy
+new/retry requests, and promises or success claims without a later successful
+tool result are forbidden. Keep this reminder adjacent to the human turn; the
+same rule in the longer base prompt was not salient enough when the model copied
+a prior send acknowledgement instead of making a second tool call. Celeris runs
+at temperature 0 with seed 7 so prompt replay and action selection are stable.
+The base prompt also resolves replies to proactive notifications against the
+notified session and requires an immediate read when a prior answer was empty or
+incorrect.
 The voice harness removes `send_message.session_id` from the model-visible
 schema so messages can only target the focused session. It also withholds and
 rejects `focus_session` unless the current transcript explicitly requests a
@@ -166,6 +171,14 @@ file on private runtime storage, never add it to an image or repository, and
 never log tool arguments, tokens, environment values, or credentials. The
 Kubernetes chart mounts a retained PVC at `/var/lib/omnigent-voice` and sets
 `LOG_FILE=/var/lib/omnigent-voice/events.jsonl`.
+
+Use `npm run replay -- --log <private-jsonl> --target-time <recognized-event-time>`
+to reproduce the first Celeris decision for a late logged turn without touching
+Omnigent. The replay restores up to 80 dialogue messages since the last process
+startup and supplies fake coordinator state plus the voice-facing tool schemas.
+Compare the old behavior with `--omit-action-invariant`, or replace the base
+prompt with `--system-prompt-file`. Replay output is private because it includes
+transcripts and proposed tool arguments; never commit it.
 
 The Discord voice channel is currently part of the MVP trust boundary. Before
 using a channel with more than one trusted human, configure

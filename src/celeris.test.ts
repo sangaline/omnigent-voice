@@ -113,7 +113,7 @@ describe("Celeris coordinator conversation", () => {
     expect(request.messages?.slice(-2)).toEqual([
       expect.objectContaining({
         role: "system",
-        content: expect.stringContaining("no coordinator action has happened"),
+        content: expect.stringContaining("No coordinator action has happened"),
       }),
       { role: "user", content: "Hello" },
     ]);

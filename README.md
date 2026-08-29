@@ -91,3 +91,23 @@ podman run --rm --env-file .env omnigent-voice:dev
 The image has no embedded deployment configuration or credentials. See
 `.env.example` for the runtime interface. Set `LOG_FILE` to a writable runtime
 path to retain the JSONL event log across process restarts.
+
+## Prompt replay
+
+The private audit log can replay a recognized turn against Celeris without
+calling Omnigent or mutating any session. This restores the preceding spoken
+dialogue, supplies a fake coordinator snapshot and real tool schemas, then
+reports whether the first model response chose speech or a tool. Use
+`--omit-action-invariant`, `--action-invariant-file`,
+`--system-prompt-file`, or `--system-prompt-suffix-file` to compare prompt
+variants. Replay defaults to the runtime's temperature 0 and seed 7;
+`--temperature` and `--seed` can compare alternatives.
+
+```bash
+CELERIS_API_KEY=... npm run replay -- \
+  --log /private/path/events.jsonl \
+  --target-time 2026-01-01T00:00:00.000Z
+```
+
+Replay output can contain private transcript text and tool arguments. Keep it
+local and never commit copied logs or reports.

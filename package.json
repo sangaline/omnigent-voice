@@ -11,6 +11,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/index.ts",
     "mcp": "node dist/mcp-server.js",
+    "replay": "tsx src/replay.ts",
     "start": "node dist/index.js",
     "test": "vitest run"
   },
