@@ -97,7 +97,10 @@ path to retain the JSONL event log across process restarts.
 The private audit log can replay a recognized turn against Celeris without
 calling Omnigent or mutating any session. This restores the preceding spoken
 dialogue, supplies a fake coordinator snapshot and real tool schemas, then
-reports whether the first model response chose speech or a tool. Use
+reports whether the first model response chose speech or a tool. A private
+`--tool-results-file` can map tool names to synthetic or previously captured
+result objects; when supplied, replay continues through the tool loop and also
+reports the final spoken answer. Use
 `--omit-action-invariant`, `--action-invariant-file`,
 `--system-prompt-file`, or `--system-prompt-suffix-file` to compare prompt
 variants. Replay defaults to the runtime's temperature 0 and seed 7;
@@ -106,8 +109,12 @@ variants. Replay defaults to the runtime's temperature 0 and seed 7;
 ```bash
 CELERIS_API_KEY=... npm run replay -- \
   --log /private/path/events.jsonl \
-  --target-time 2026-01-01T00:00:00.000Z
+  --target-time 2026-01-01T00:00:00.000Z \
+  --tool-results-file /private/path/tool-results.json
 ```
 
-Replay output can contain private transcript text and tool arguments. Keep it
-local and never commit copied logs or reports.
+The optional result file is a JSON object such as
+`{"get_output":{"order":"newest_first","items":[]}}`; use an array when the
+same tool is called more than once. Replay output and supplied tool results can
+contain private transcript or session text and tool arguments. Keep them local
+and never commit copied logs, result fixtures, or reports.

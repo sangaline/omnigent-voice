@@ -45,6 +45,17 @@ interface OutputEntry {
   text: string;
 }
 
+interface ConversationOutputItemData extends JsonObject {
+  occurred_at: string | null;
+  time_ago: string;
+  kind: string;
+  text: string;
+}
+
+interface ConversationOutputItem extends ConversationOutputItemData {
+  position: number;
+}
+
 interface OutputState {
   seenIds: Set<string>;
   seenOrder: string[];
@@ -84,6 +95,16 @@ const timestampMs = (value: unknown): number | undefined => {
   if (typeof value !== "string") return undefined;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const timestampIso = (value: unknown): string | null => {
+  const timestamp = timestampMs(value);
+  if (timestamp === undefined) return null;
+  try {
+    return new Date(timestamp).toISOString();
+  } catch {
+    return null;
+  }
 };
 
 export const timeAgo = (value: unknown, now = Date.now()): string => {
@@ -149,6 +170,77 @@ export const formatConversationItem = (raw: JsonObject): string => {
   }
   const text = contentText(item.content).trim();
   return text ? `${type}: ${text}` : "";
+};
+
+const clipItemText = (
+  text: string,
+  maximum = 6_000,
+): { text: string; text_truncated: boolean } => {
+  if (text.length <= maximum) return { text, text_truncated: false };
+  const marker = "\n[item text shortened]\n";
+  const remaining = maximum - marker.length;
+  const head = Math.ceil(remaining * 0.7);
+  const tail = Math.max(0, remaining - head);
+  return {
+    text: `${text.slice(0, head)}${marker}${text.slice(-tail)}`,
+    text_truncated: true,
+  };
+};
+
+const conversationOutputItem = (
+  raw: JsonObject,
+  now = Date.now(),
+): ConversationOutputItemData | undefined => {
+  const item = isObject(raw.data) ? raw.data : raw;
+  const type = stringValue(raw.type) ?? stringValue(item.type) ?? "item";
+  const role = stringValue(item.role);
+  const occurred = raw.created_at ?? item.created_at ?? raw.updated_at ?? item.updated_at;
+  let kind = type;
+  let text = "";
+  if (role) {
+    kind = "message";
+    text = contentText(item.content).trim();
+  } else {
+    kind =
+      type === "terminal_command"
+        ? "terminal_command"
+        : type === "function_call"
+          ? "tool_call"
+          : type === "function_call_output"
+            ? "tool_result"
+            : type;
+    text = formatConversationItem(raw).trim();
+  }
+  if (!text) return undefined;
+  const clipped = clipItemText(text);
+  return {
+    occurred_at: timestampIso(occurred),
+    time_ago: timeAgo(occurred, now),
+    kind,
+    ...(role ? { role } : {}),
+    ...(kind === "tool_call" && stringValue(item.name)
+      ? { tool_name: stringValue(item.name) }
+      : {}),
+    ...clipped,
+  };
+};
+
+export const formatConversationItems = (
+  rawItems: JsonObject[],
+  now = Date.now(),
+  maximumJsonCharacters = 18_000,
+): { items: ConversationOutputItem[]; omitted: number } => {
+  const formatted = rawItems
+    .map((raw) => conversationOutputItem(raw, now))
+    .filter((item): item is ConversationOutputItemData => item !== undefined)
+    .map((item, index) => ({ ...item, position: index + 1 }));
+  const items: ConversationOutputItem[] = [];
+  for (const item of formatted) {
+    const candidate = [...items, item];
+    if (JSON.stringify(candidate).length > maximumJsonCharacters) break;
+    items.push(item);
+  }
+  return { items, omitted: formatted.length - items.length };
 };
 
 const summary = (session: JsonObject): JsonObject => ({
@@ -370,16 +462,17 @@ export class OmnigentCoordinator {
       if (current < page && (!listing.hasMore || !listing.lastId)) break;
       cursor = listing.lastId;
     }
-    const text = (listing?.data ?? [])
-      .map(formatConversationItem)
-      .filter(Boolean)
-      .join("\n\n");
+    const { items, omitted } = formatConversationItems(listing?.data ?? []);
+    const latestMessage = items.find((item) => item.kind === "message") ?? null;
     return {
       session_id: id,
       target_session: this.sessionSummaries.get(id) ?? null,
       focus_changed: false,
       page,
-      output: text.length > 16_000 ? `${text.slice(0, 16_000)}\n[output shortened]` : text,
+      order: "newest_first",
+      latest_message: page === 1 ? latestMessage : null,
+      items,
+      items_omitted: omitted,
       has_more: listing?.hasMore ?? false,
     };
   }

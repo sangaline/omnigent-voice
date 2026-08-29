@@ -5,6 +5,7 @@ import {
   CelerisConversation,
   CelerisMemoryPolicy,
   CoordinatorToolClient,
+  serializeToolResult,
 } from "./celeris.js";
 import { Logger } from "./log.js";
 
@@ -73,6 +74,28 @@ const conversation = (
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Celeris coordinator conversation", () => {
+  it("keeps oversized tool results as valid structured JSON", () => {
+    const serialized = serializeToolResult({
+      focused_session: { id: "session-1", name: "Voice MVP" },
+      latest_message: { kind: "message", text: `latest ${"x".repeat(10_000)}` },
+      items: Array.from({ length: 40 }, (_, index) => ({
+        position: index + 1,
+        kind: index === 0 ? "message" : "tool_result",
+        text: `${index} ${"y".repeat(10_000)}`,
+      })),
+    });
+    expect(serialized.length).toBeLessThanOrEqual(32_000);
+    const parsed = JSON.parse(serialized) as {
+      tool_result_compacted?: boolean;
+      latest_message?: { text?: string };
+      items?: Array<{ text?: string } | { omitted_items?: number }>;
+    };
+    expect(parsed.tool_result_compacted).toBe(true);
+    expect(parsed.latest_message?.text).toContain("latest ");
+    expect(parsed.items?.[0]).toMatchObject({ position: 1, kind: "message" });
+    expect(parsed.items?.at(-1)).toHaveProperty("omitted_items");
+  });
+
   it("only allows focus mutation for an explicit session switch", () => {
     expect(allowsFocusChange("Use the second one you mentioned.")).toBe(true);
     expect(allowsFocusChange("Switch to the voice agent session.")).toBe(true);

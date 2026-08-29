@@ -107,7 +107,13 @@ a prior send acknowledgement instead of making a second tool call. Celeris runs
 at temperature 0 with seed 7 so prompt replay and action selection are stable.
 The base prompt also resolves replies to proactive notifications against the
 notified session and requires an immediate read when a prior answer was empty or
-incorrect.
+incorrect. The adjacent current-turn reminder makes two additional semantics
+explicit for the small fast model: a follow-up to a spoken notification reads
+the session id embedded in that notification without changing sticky focus, and
+a correction that a requested send was missing repeats `send_message` rather
+than substituting an output read. Celeris must not invent missing context or
+access as the cause of a prior bad answer; when no exact cause is established it
+states only that it misinterpreted the available data.
 The voice harness removes `send_message.session_id` from the model-visible
 schema so messages can only target the focused session. It also withholds and
 rejects `focus_session` unless the current transcript explicitly requests a
@@ -127,7 +133,17 @@ window. `send_message` defaults to
 and is exposed as such. `delivery: queued` is an explicit coordinator-managed
 wait until the current session turn becomes idle.
 `get_output` reads `/v1/sessions/{id}/items`; arbitrary tmux scrollback is not
-available through the Omnigent HTTP API and must not be implied. Structured MCP
+available through the Omnigent HTTP API and must not be implied. It returns a
+JSON array in explicit `newest_first` order instead of flattening the page into
+text. Every retained item has a one-based position, normalized timestamp,
+preformatted age, kind, text, and message role or tool name where applicable.
+`latest_message` is the newest conversation message on the newest page; it is
+generic and may be from either role, so consumers must still inspect `role`.
+Internal terminal/tool activity remains separate from conversation messages.
+Item text is shortened by preserving both its beginning and end, and only
+complete items are admitted to the bounded result. The voice client preserves
+tool results as valid JSON and structurally compacts oversized strings/arrays
+rather than slicing serialized JSON in the middle. Structured MCP
 elicitations resolve through their dedicated endpoint and may target a child
 session. A stdio MCP entry point is
 available with `npm run mcp`; authenticated remote HTTP transport is deliberately
@@ -176,9 +192,13 @@ Use `npm run replay -- --log <private-jsonl> --target-time <recognized-event-tim
 to reproduce the first Celeris decision for a late logged turn without touching
 Omnigent. The replay restores up to 80 dialogue messages since the last process
 startup and supplies fake coordinator state plus the voice-facing tool schemas.
-Compare the old behavior with `--omit-action-invariant`, or replace the base
-prompt with `--system-prompt-file`. Replay output is private because it includes
-transcripts and proposed tool arguments; never commit it.
+Pass `--tool-results-file <private-json>` to continue through as many as five
+tool rounds and inspect the final spoken response; the JSON object maps each
+tool name to one result object or an ordered array of results. Compare the old
+behavior with `--omit-action-invariant`, or replace the base prompt with
+`--system-prompt-file`. Replay output and supplied results are private because
+they can include transcripts, session output, and proposed tool arguments;
+never commit them.
 
 The Discord voice channel is currently part of the MVP trust boundary. Before
 using a channel with more than one trusted human, configure

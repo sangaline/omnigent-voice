@@ -80,7 +80,7 @@ export const createCoordinatorMcpServer = (
     "get_output",
     {
       description:
-        "Read recent conversation and captured terminal output from a session, newest page first.",
+        "Read recent typed conversation and internal activity from a session. The result explicitly uses newest_first order, gives each item a position and timestamp, distinguishes messages from tool and terminal activity, and identifies the latest conversation message on page 1.",
       inputSchema: {
         session_id: z.string().min(1).optional().describe("Defaults to the focused session."),
         page: z.number().int().min(1).max(10).optional().describe("Page 1 is newest."),

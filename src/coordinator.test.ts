@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { formatConversationItem, OmnigentCoordinator, timeAgo } from "./coordinator.js";
+import {
+  formatConversationItem,
+  formatConversationItems,
+  OmnigentCoordinator,
+  timeAgo,
+} from "./coordinator.js";
 import { Logger } from "./log.js";
 import { CoordinatorMcpClient } from "./mcp.js";
 import { OmnigentClient } from "./omnigent.js";
@@ -24,6 +29,47 @@ describe("Omnigent coordinator", () => {
         stderr: "",
       }),
     ).toContain("voice 1/1 Running");
+
+    const structured = formatConversationItems(
+      [
+        {
+          type: "function_call",
+          created_at: "2026-08-28T12:02:30Z",
+          name: "exec_command",
+          arguments: '{"cmd":"npm test"}',
+        },
+        {
+          type: "message",
+          created_at: "2026-08-28T12:02:00Z",
+          role: "assistant",
+          content: [{ type: "output_text", text: "All tests pass." }],
+        },
+      ],
+      Date.parse("2026-08-28T12:03:00Z"),
+    );
+    expect(structured).toEqual({
+      items: [
+        {
+          position: 1,
+          occurred_at: "2026-08-28T12:02:30.000Z",
+          time_ago: "30 seconds ago",
+          kind: "tool_call",
+          tool_name: "exec_command",
+          text: 'tool call exec_command: {"cmd":"npm test"}',
+          text_truncated: false,
+        },
+        {
+          position: 2,
+          occurred_at: "2026-08-28T12:02:00.000Z",
+          time_ago: "1 minute ago",
+          kind: "message",
+          role: "assistant",
+          text: "All tests pass.",
+          text_truncated: false,
+        },
+      ],
+      omitted: 0,
+    });
   });
 
   it("exposes the focused coordinator tools over an in-memory MCP transport", async () => {
@@ -38,7 +84,25 @@ describe("Omnigent coordinator", () => {
     const omnigent = {
       listSessions: vi.fn().mockResolvedValue([session]),
       getSession: vi.fn().mockResolvedValue(session),
-      listItems: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
+      listItems: vi.fn().mockResolvedValue({
+        data: [
+          {
+            id: "tool-newest",
+            type: "function_call",
+            created_at: now,
+            name: "exec_command",
+            arguments: '{"cmd":"npm test"}',
+          },
+          {
+            id: "message-latest",
+            type: "message",
+            created_at: now,
+            role: "assistant",
+            content: "The replay harness is ready.",
+          },
+        ],
+        hasMore: false,
+      }),
       sendMessage: vi.fn(),
       resolveElicitation: vi.fn(),
       createSession: vi.fn(),
@@ -81,6 +145,25 @@ describe("Omnigent coordinator", () => {
         focus_changed: false,
         already_focused: true,
         recent_actions: [],
+      });
+      await expect(client.callTool("get_output", {})).resolves.toMatchObject({
+        order: "newest_first",
+        latest_message: {
+          position: 2,
+          kind: "message",
+          role: "assistant",
+          text: "The replay harness is ready.",
+        },
+        items: [
+          { position: 1, kind: "tool_call", tool_name: "exec_command" },
+          {
+            position: 2,
+            kind: "message",
+            role: "assistant",
+            text: "The replay harness is ready.",
+          },
+        ],
+        items_omitted: 0,
       });
     } finally {
       coordinator.stop();

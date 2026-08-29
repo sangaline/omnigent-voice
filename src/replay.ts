@@ -11,10 +11,19 @@ interface AuditRecord {
   summary?: string;
 }
 
-interface ReplayMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
+interface ReplayToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
 }
+
+type ReplayMessage =
+  | { role: "system" | "user"; content: string }
+  | { role: "assistant"; content: string | null; tool_calls?: ReplayToolCall[] }
+  | { role: "tool"; content: string; tool_call_id: string };
 
 interface ReplayTool {
   type: "function";
@@ -78,7 +87,7 @@ const replayTools = (input: string): ReplayTool[] => {
       function: {
         name: "get_output",
         description:
-          "Read recent conversation and captured terminal output from a session, newest page first.",
+          "Read recent typed conversation and internal activity from a session. The result explicitly uses newest_first order, gives each item a position and timestamp, distinguishes messages from tool and terminal activity, and identifies the latest conversation message on page 1.",
         parameters: objectSchema({
           session_id: { type: "string" },
           page: { type: "number", minimum: 1, maximum: 10 },
@@ -196,6 +205,7 @@ const selected = targetTime
 if (!selected?.record.text || !selected.record.time) {
   throw new Error("Could not resolve a recognized target turn");
 }
+const targetText = selected.record.text;
 
 let startupIndex = -1;
 for (let index = 0; index < selected.recordIndex; index += 1) {
@@ -243,6 +253,14 @@ const actions = preceding
 const promptPath = option("--system-prompt-file");
 const promptSuffixPath = option("--system-prompt-suffix-file");
 const invariantPath = option("--action-invariant-file");
+const toolResultsPath = option("--tool-results-file");
+const toolResults = toolResultsPath
+  ? (JSON.parse(readFileSync(toolResultsPath, "utf8")) as Record<string, unknown>)
+  : undefined;
+const resultQueues = new Map<string, unknown[]>();
+for (const [name, value] of Object.entries(toolResults ?? {})) {
+  resultQueues.set(name, Array.isArray(value) ? [...value] : [value]);
+}
 const selectedSystemPrompt =
   (promptPath ? readFileSync(promptPath, "utf8").trim() : systemPrompt) +
   (promptSuffixPath ? `\n${readFileSync(promptSuffixPath, "utf8").trim()}` : "");
@@ -267,46 +285,82 @@ const messages: ReplayMessage[] = [
   { role: "user", content: selected.record.text },
 ];
 const started = performance.now();
-const response = await fetch(
-  `${process.env.CELERIS_BASE_URL?.replace(/\/$/, "") ?? "https://inference.celeris.ai/celeris-1/v1"}/chat/completions`,
-  {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: process.env.CELERIS_MODEL ?? "celeris-1",
-      max_tokens: 256,
-      temperature: Number(option("--temperature") ?? "0"),
-      seed: Number(option("--seed") ?? "7"),
-      messages,
-      tools: replayTools(selected.record.text),
-      tool_choice: "auto",
-    }),
-    signal: AbortSignal.timeout(10_000),
-  },
-);
-const payload = (await response.json()) as {
+interface ReplayPayload {
   choices?: Array<{
     finish_reason?: unknown;
-    message?: { content?: unknown; tool_calls?: unknown };
+    message?: { content?: unknown; tool_calls?: ReplayToolCall[] };
   }>;
   usage?: unknown;
+}
+
+const complete = async (): Promise<{
+  finishReason: unknown;
+  message: { content?: unknown; tool_calls?: ReplayToolCall[] } | null;
+  usage: unknown;
+}> => {
+  const response = await fetch(
+    `${process.env.CELERIS_BASE_URL?.replace(/\/$/, "") ?? "https://inference.celeris.ai/celeris-1/v1"}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.CELERIS_MODEL ?? "celeris-1",
+        max_tokens: 256,
+        temperature: Number(option("--temperature") ?? "0"),
+        seed: Number(option("--seed") ?? "7"),
+        messages,
+        tools: replayTools(targetText),
+        tool_choice: "auto",
+      }),
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  const payload = (await response.json()) as ReplayPayload;
+  if (!response.ok) throw new Error(`Celeris replay returned HTTP ${response.status}`);
+  const choice = payload.choices?.[0];
+  return {
+    finishReason: choice?.finish_reason ?? null,
+    message: choice?.message ?? null,
+    usage: payload.usage ?? null,
+  };
 };
-if (!response.ok) throw new Error(`Celeris replay returned HTTP ${response.status}`);
-const choice = payload.choices?.[0];
+
+const rounds: Array<Awaited<ReturnType<typeof complete>>> = [];
+for (let round = 0; round < 5; round += 1) {
+  const result = await complete();
+  rounds.push(result);
+  const calls = Array.isArray(result.message?.tool_calls) ? result.message.tool_calls : [];
+  if (calls.length === 0 || !toolResults) break;
+  messages.push({ role: "assistant", content: null, tool_calls: calls });
+  for (const call of calls) {
+    const queue = resultQueues.get(call.function.name) ?? [];
+    const supplied = queue.shift() ?? {
+      error: `Replay has no supplied result for ${call.function.name}`,
+    };
+    messages.push({
+      role: "tool",
+      tool_call_id: call.id,
+      content: JSON.stringify(supplied),
+    });
+  }
+}
+const initial = rounds[0];
+const final = rounds.at(-1);
 console.log(
   JSON.stringify(
     {
       targetTime: selected.record.time,
-      targetText: selected.record.text,
+      targetText,
       restoredDialogueMessages: dialogue.length,
       actionInvariant: !hasOption("--omit-action-invariant"),
       durationMs: Math.round(performance.now() - started),
-      finishReason: choice?.finish_reason ?? null,
-      response: choice?.message ?? null,
-      usage: payload.usage ?? null,
+      completedToolLoop: Boolean(toolResults),
+      initialResponse: initial?.message ?? null,
+      response: final?.message ?? null,
+      rounds,
     },
     null,
     2,
