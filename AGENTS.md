@@ -314,8 +314,21 @@ and gated model authentication enter through shell variables consumed by
 Use public `kyutai/moshiko-pytorch-bf16` as the architecture-equivalent runtime
 control before gated PersonaPlex weights. PersonaPlex requires the human to
 accept the model terms and authenticate the local Hugging Face cache. Do not
-request or print their token. See `docs/PERSONAPLEX-EXPERIMENT.md` for the
-decision thresholds and current measurements.
+request or print their token. The benchmark auto-detects current Kyutai versus
+NVIDIA's vendored PersonaPlex Moshi API; point `PERSONAPLEX_MOSHI_SOURCE` at the
+matching official checkout and use `--runtime personaplex` for the gated model.
+See `docs/PERSONAPLEX-EXPERIMENT.md` for the decision thresholds and current
+measurements.
+
+Measured on the target Radeon 8060S, PyTorch BF16 is 195.969 ms/frame, its best
+experimental AOTriton path is 145.876 ms/frame, and PyTorch Q8 is 198.464
+ms/frame; none can meet Moshi's 80 ms cadence. Native Vulkan Q4 completes the
+full PersonaPlex encode/model/decode loop at 14.871 fps (67.25 ms/frame mean)
+and about 7.31 GiB device memory. Tail instrumentation remains required. The
+current native backend cannot load cached BF16 voice embeddings on `gfx1151`,
+but a WAV voice prompt works. Build the guided S2S experiment on native Q4 and
+keep the existing staged voice pipeline selectable until the new Discord loop
+is verified end to end.
 
 ## Commands
 
