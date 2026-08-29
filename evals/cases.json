@@ -1660,5 +1660,92 @@
       ],
       "maxRounds": 1
     }
+  },
+  {
+    "id": "incomplete_new_send_does_not_reuse_old_receipt",
+    "description": "Do not answer a verification of an interrupted, content-free send request using an older successful action receipt.",
+    "history": [
+      {
+        "role": "user",
+        "content": "ask release work how long until the first version can be tested"
+      },
+      {
+        "role": "assistant",
+        "content": "I sent that to Release Work."
+      },
+      {
+        "role": "user",
+        "content": "okay can you send a message for me"
+      }
+    ],
+    "input": "did you send the message i just asked you to",
+    "coordinatorState": {
+      "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-release", "name": "Release Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [
+        {
+          "action_id": 1001,
+          "type": "message_sent",
+          "session_id": "session-release",
+          "name": "Release Work",
+          "message": "How long until the first version can be tested?",
+          "summary": "Sent immediately to Release Work: How long until the first version can be tested?"
+        }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 1002
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["send_message", "get_output", "poll_output", "focus_session"],
+      "speechAnyTerms": [
+        ["no", "not yet", "didn't", "did not"],
+        ["what message", "what to send", "message content", "hadn't said", "had not said", "didn't say", "did not say"]
+      ],
+      "speechForbiddenTerms": ["yes, i sent", "yes i sent", "sent that message"],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "continued_send_preamble_relays_full_correction",
+    "description": "After the audio layer joins a content-free send preamble to its continuation, relay the full correction instead of treating it as a separate conversational turn.",
+    "history": [
+      {
+        "role": "assistant",
+        "content": "Release Work is building the image now."
+      }
+    ],
+    "input": "okay can you send a message for me it says the voice agent claims it never got the estimate but the coding agent already said thirty to forty minutes if the image build and routing behave normally",
+    "coordinatorState": {
+      "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-release", "name": "Release Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 1002
+    },
+    "toolResults": {
+      "send_message": {
+        "accepted": true,
+        "delivery": "immediate",
+        "target_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+        "updates": [],
+        "update_cursor": 1002
+      }
+    },
+    "expected": {
+      "toolSequence": ["send_message"],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session"],
+      "messageTerms": ["voice coordinator", "thirty", "forty", "image", "routing"],
+      "speechTerms": ["release work"],
+      "maxRounds": 1
+    }
   }
 ]

@@ -536,6 +536,8 @@ export class DiscordVoiceBot {
     this.pendingTranscriptDelayMs = transcriptMergeDelay(
       endpointReason,
       this.options.utteranceMergeMs,
+      this.pendingTranscript,
+      this.options.endpointFallbackMs,
     );
     this.scheduleTranscriptFlush();
   }

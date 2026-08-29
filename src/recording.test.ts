@@ -46,4 +46,23 @@ describe("confirmed Discord recording tracking", () => {
     expect(transcriptMergeDelay("hard_fallback", 350)).toBe(350);
     expect(transcriptMergeDelay("discord_silence", 350)).toBe(350);
   });
+
+  it("holds a content-free send preamble for the dictated message", () => {
+    expect(
+      transcriptMergeDelay(
+        "smart_turn",
+        350,
+        "Okay, can you send a message for me",
+        700,
+      ),
+    ).toBe(700);
+    expect(
+      transcriptMergeDelay(
+        "smart_turn",
+        350,
+        "send a message saying the deployment is ready",
+        700,
+      ),
+    ).toBe(0);
+  });
 });

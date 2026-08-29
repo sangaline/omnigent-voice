@@ -5022,7 +5022,159 @@
           "toolSequence": [],
           "speechTerms": ["yes", "notifications", "polling fallback"],
           "speechForbiddenTerms": ["hasn't responded", "has not responded", "keep an eye", "monitor"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "human_correction_replaces_stale_waiting_assumption",
+    "description": "Do not treat unrelated progress as an answer to a sent question, then accept a concrete human-supplied correction and preserve its conditions across a follow-up.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-release", "name": "Release Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "can you ask release work how long until the first version can be tested",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+            "recent_actions": [
+              {
+                "action_id": 1001,
+                "type": "message_sent",
+                "session_id": "session-release",
+                "name": "Release Work",
+                "message": "How long until the first version can be tested?"
+              }
+            ],
+            "updates": [],
+            "update_cursor": 0
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "sessionId": "session-release",
+          "messageTerms": ["how long", "tested"],
+          "speechTerms": ["release work"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 1002,
+            "type": "session_output",
+            "session_id": "session-release",
+            "name": "Release Work",
+            "status": "running",
+            "output_delta": {
+              "changed": true,
+              "output": "assistant: I finished validating the deployment templates and I am building the image now.",
+              "cursor": "release-1002"
+            }
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["release work", "building", "image"],
+          "speechForbiddenTerms": ["minutes", "estimate"],
           "maxRounds": 0
+        }
+      },
+      {
+        "type": "user",
+        "input": "so it didn't say how long then when you asked about the timing",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1001, "type": "message_sent", "session_id": "session-release", "name": "Release Work" }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 1002
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechAnyTerms": [
+            ["image", "building"]
+          ],
+          "speechForbiddenTerms": ["thirty", "forty", "i'll let you know", "keep an eye", "monitor"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "no the coding agent already said about thirty to forty minutes if the image build and routing behave normally",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1001, "type": "message_sent", "session_id": "session-release", "name": "Release Work" }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 1002
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["thirty", "forty", "image", "routing"],
+          "speechForbiddenTerms": ["didn't actually", "did not actually", "hasn't responded", "has not responded", "still waiting", "i'll let you know"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay so what was that estimate again",
+        "coordinatorState": {
+          "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-release", "name": "Release Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1001, "type": "message_sent", "session_id": "session-release", "name": "Release Work" }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 1002
+        },
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["thirty", "forty", "image", "routing"],
+          "speechForbiddenTerms": ["still waiting", "hasn't responded", "has not responded"],
+          "maxRounds": 1
         }
       }
     ]

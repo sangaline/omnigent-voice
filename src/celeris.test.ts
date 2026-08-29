@@ -10,6 +10,8 @@ import {
   directCoordinatorUpdateSpeech,
   directFocusedOutputSpeech,
   directGetOutputResultSpeech,
+  directHumanSuppliedCorrectionSpeech,
+  directInterruptedSendVerificationSpeech,
   directNoIncomingUpdateSpeech,
   directOutputVisibilityCapabilitySpeech,
   directRepetitionCorrectionSpeech,
@@ -38,6 +40,7 @@ import {
   voiceAttributionRelayMessage,
   voiceMessageInstruction,
   voiceMessageRouting,
+  voiceSelfReportRelayMessage,
   voiceReadRouting,
   voiceRetryReadRouting,
   voiceStartInstruction,
@@ -188,6 +191,58 @@ describe("Celeris coordinator conversation", () => {
       ),
     ).toContain("doesn't make sense");
     expect(directRepetitionCorrectionSpeech("please explain that again")).toBeUndefined();
+  });
+
+  it("does not reuse an older send receipt for an interrupted content-free request", () => {
+    expect(
+      directInterruptedSendVerificationSpeech(
+        "did you send the message I just asked you to",
+        [
+          { role: "user", content: "send the release question" },
+          { role: "assistant", content: "I sent that to Release Work." },
+          { role: "user", content: "okay can you send a message for me" },
+          {
+            role: "system",
+            content: "The preceding human turn was interrupted before a spoken result.",
+          },
+        ],
+      ),
+    ).toBe("No. You hadn't told me what message to send yet. What should I send?");
+    expect(
+      directInterruptedSendVerificationSpeech(
+        "did you send the message I just asked you to",
+        [
+          { role: "user", content: "send the release question" },
+          { role: "assistant", content: "I sent that to Release Work." },
+        ],
+      ),
+    ).toBeUndefined();
+  });
+
+  it("attributes a merged voice-interface correction to the coordinator", () => {
+    expect(
+      voiceSelfReportRelayMessage(
+        "okay can you send a message for me it says the voice agent claims it never got the estimate but the coding agent already said thirty to forty minutes if the image build and routing behave normally",
+      ),
+    ).toBe(
+      "The human reports that the voice coordinator claims it never got the estimate but the coding agent already said thirty to forty minutes if the image build and routing behave normally.",
+    );
+    expect(
+      voiceSelfReportRelayMessage("send a message for me saying the deployment is ready"),
+    ).toBeUndefined();
+  });
+
+  it("preserves a human-supplied numeric correction and its condition without a model", () => {
+    expect(
+      directHumanSuppliedCorrectionSpeech(
+        "no the coding agent already said about thirty to forty minutes if the image build and routing behave normally",
+      ),
+    ).toBe(
+      "You're right. The estimate you reported was about thirty to forty minutes if the image build and routing behave normally.",
+    );
+    expect(
+      directHumanSuppliedCorrectionSpeech("no I meant the other deployment"),
+    ).toBeUndefined();
   });
 
   it("segments generated text at natural boundaries with a hard speech limit", () => {
@@ -1368,18 +1423,26 @@ describe("Celeris coordinator conversation", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const tools = toolClient();
+    const subject = conversation("test-key", tools);
 
     await expect(
-      conversation("test-key", tools).respond(
-        "Tell it only the first fragment",
+      subject.respond(
+        "Can you send a message for me",
         undefined,
         controller.signal,
       ),
     ).rejects.toMatchObject({ name: "AbortError" });
-    expect(tools.callTool).toHaveBeenCalledTimes(1);
-    expect(tools.callTool).toHaveBeenCalledWith("check_updates", {
+    await expect(
+      subject.respond("did you send the message I just asked you to"),
+    ).resolves.toBe("No. You hadn't told me what message to send yet. What should I send?");
+    expect(tools.callTool).toHaveBeenCalledTimes(2);
+    expect(tools.callTool).toHaveBeenNthCalledWith(1, "check_updates", {
       after_event_id: 0,
     });
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "check_updates", {
+      after_event_id: 0,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("routes an explicitly named send without exposing its session id to the model", async () => {
@@ -1832,21 +1895,33 @@ describe("Celeris coordinator conversation", () => {
   });
 
   it("treats a spoken backend notification as authoritative when asked whether the agent responded", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      response({
-        content: null,
-        tool_calls: [
-          {
-            id: "call-send-question",
-            type: "function",
-            function: {
-              name: "send_message",
-              arguments: JSON.stringify({ message: "Does the integration support notifications?" }),
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-send-question",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({ message: "Does the integration support notifications?" }),
+              },
             },
-          },
-        ],
-      }),
-    );
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: "Yes. Voice Work says it supports notifications with polling fallback.",
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: "Yes. Voice Work says it supports notifications with polling fallback.",
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     const tools = toolClient();
     vi.mocked(tools.callTool).mockImplementation((name: string) =>
@@ -1897,7 +1972,7 @@ describe("Celeris coordinator conversation", () => {
     ).resolves.toBe(
       "Yes. Voice Work says it supports notifications with polling fallback.",
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("retains an output event consumed alongside a human turn", async () => {

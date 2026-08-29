@@ -8,7 +8,18 @@ export const MIN_RECORDING_PEAK = 0.002;
 export const transcriptMergeDelay = (
   endpointReason: string,
   utteranceMergeMs: number,
-): number => endpointReason === "smart_turn" ? 0 : utteranceMergeMs;
+  transcript = "",
+  continuationMs = 700,
+): number => {
+  const semanticDelay = endpointReason === "smart_turn" ? 0 : utteranceMergeMs;
+  const contentFreeActionPreamble =
+    /^(?:(?:okay|ok|uh|um|hey|please)[,!.]?\s+)*(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?send\s+(?:a\s+)?message(?:\s+for\s+me)?[?.!\s]*$/i.test(
+      transcript.trim(),
+    );
+  return contentFreeActionPreamble
+    ? Math.max(semanticDelay, continuationMs)
+    : semanticDelay;
+};
 
 export interface RecordingLease {
   confirm(): boolean;

@@ -143,6 +143,13 @@ also aborts the superseded Celeris request. The conversation checks that abort
 after model completion and again immediately before every coordinator tool
 invocation, so a stale partial transcript cannot mutate a session merely
 because Celeris already selected a tool.
+One positive Smart Turn result is intentionally overridden: a content-free
+preamble such as “can you send a message for me” retains the full 700 ms
+endpoint fallback window. A continuation during that window is merged before
+Celeris runs, so a short phone pause cannot separate the action from its
+dictated content. If a model turn is nevertheless interrupted, its human input
+and an explicit interrupted marker remain in dialogue memory; a later
+verification cannot reuse an older action receipt for that newer request.
 
 Smart Turn runs as a persistent local Python bridge inside the same container,
 using its 8.7 MB int8 ONNX model and Pipecat's NumPy-only Whisper feature
@@ -338,6 +345,17 @@ authentication or security question, the same adjacent evidence rule preserves
 every source-stated credential mechanism, reachability boundary, and whether a
 remote authentication layer actually exists; a generic claim that something is
 local is not sufficient.
+Concrete numeric corrections supplied by the human are direct dialogue
+evidence when current typed coordinator state does not contradict them. The
+harness deterministically preserves their value, unit, and complete conditional
+clause instead of asking the small model to rediscover those facts in a long
+history. A merged relay about the voice interface deterministically names “the
+voice coordinator” and the human so the destination cannot reverse attribution.
+For a simple question about whether an agent responded, retained backend
+notifications remain model-interpreted evidence: tools are withheld and the
+model must decide whether the notification actually answers the earlier
+question. Never restore the removed shortcut that treated any newer output from
+the same session as an answer; unrelated progress is not correlated evidence.
 `send_message` creates a user-role item in Omnigent. For normal relays Celeris
 preserves the human's intent, but a report about the voice interface's own
 mistake must explicitly name “the voice coordinator” and distinguish the human;

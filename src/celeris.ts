@@ -334,6 +334,7 @@ Resolve short replies against the immediately preceding spoken exchange. When th
 export const currentTurnActionInvariant = `CURRENT TURN EXECUTION RULES:
 Recent dialogue can contain system records beginning “Omnigent background update.” These records are authoritative for notification references and contain exact session names and session IDs. Resolve “that one,” “the first one,” “the other one,” and similar follow-ups against the referenced notification record, then copy that record's session_id literally into the requested tool. Never substitute the focused_session ID for a referenced background session. Reading or resolving a prompt in a background session never changes sticky focus.
 An Omnigent background-update record or typed tool result outranks your prior assistant speech. Prior assistant speech is a fallible interpretation, not source evidence or a quotation. When the human asks whether a source established one layer or another, name both sides: state what the source establishes and what it does not establish. Preserve its actor, positive capability, negative capability, and causal direction exactly; a downstream client not consuming events never means the upstream backend cannot emit them, and vice versa. For an authentication or security question, preserve every source-stated credential mechanism, reachability boundary, and whether remote authentication exists; “local” alone is not enough.
+The current human turn is evidence for concrete facts the human explicitly reports seeing, hearing, or being told. When a correction supplies an answer, value, condition, or quotation and no current typed coordinator evidence directly contradicts it, acknowledge and preserve that supplied content; do not deny it because it was absent from an older update, reinterpret the correction as a send request, or fetch old output. Qualify it as human-reported when provenance matters. Keep its conditions with the value in later follow-ups.
 If the immediately preceding assistant speech announced a different session, answer a follow-up directly when that notification already contains the requested fact. If the human asks for exact output, the last thing it said, or detail absent from the notification, call the read tool with the notification's session_id. If the human clearly approves, declines, or cancels an announced decision, call answer_prompt with the exact prompt_id and session_id from pending_decisions instead. Never invent an identifier from the session name.
 If the human states that a requested message was missing, not sent, or not received, repeat send_message with the intended message. A declarative correction such as “I don't see the message” after you claimed to send it is a missed-action complaint and requires send_message. An actual question asking whether a message is visible or recent, or explicitly asking to inspect or verify output, is instead a read request: use get_output and never send a message for that question.
 No coordinator action has happened in this human turn yet. If the human asks for an action, or if answering requires current coordinator data, your next output must be the appropriate tool call, not prose. Only a successful tool result later in this turn proves the action happened. The recent_actions ledger describes prior turns and never satisfies a new request. “Another,” “again,” “retry,” “now,” and corrections that an action was missed require a new tool call. Execute tools before speaking. Never say that you will need to pull or check data, offer to check it, ask permission for a read-only check, or promise to perform a tool action after the response; call the tool now.
@@ -349,6 +350,7 @@ When the human explicitly asks for exact numbers, counts, or metrics in a ground
 The coordinator snapshot immediately above is already current data for this turn. output_delta is the chronological stable output newly available since the prior human snapshot. When output_delta.changed is true and its content answers “latest,” “current,” “what's new,” or “since then,” answer directly from it and do not call get_output. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.
 A short output_delta is already a voice-sized update. When it directly answers the human, preserve every concrete condition, count, outcome, and still-running or blocked clause instead of shortening away one of its facts.
 A question about whether any prior coordinator action succeeded, including prompt approval, is answered directly from recent_actions. Do not repeat the action and do not read session output merely to verify a ledger entry.
+Resolve “just asked” and similar recency language against the newest human request in dialogue, not merely the newest retained action. If that newer request was incomplete or interrupted and has no later successful tool receipt, say it was not performed and ask for the missing content; never reuse an older recent_actions receipt as proof for the newer request.
 When the human asks what exact message was sent, answer from the newest matching message_sent entry in recent_actions. Its typed message and summary are authoritative. Do not call get_output because session output cannot establish the exact outbound message. When the human asks whether reads preceded a send, answer from last_verified_tool_workflow; a new read cannot prove prior ordering.
 Renaming is a coordinator action. Only call rename_session for an explicit rename request that includes the new title, copy that requested title into title, and describe the old-to-new transition only after its successful tool result. If the human asks to rename a session but supplies no new title, ask what they want to call it and do not invent a name or call the tool. Renaming never changes sticky focus.
 send_message delivery is immediate unless the human clearly requests queueing until the current agent turn finishes. ASR discourse such as “wait,” “no wait,” “hold on,” or a mid-sentence correction does not request queued delivery. Use queued only for explicit timing such as “queue this,” “send after the current turn,” or “when it finishes.”
@@ -568,22 +570,97 @@ interface VoiceSessionTarget {
   name: string;
 }
 
-interface SpokenCoordinatorResponse {
-  sequence: number;
-  speech: string;
-}
-
-interface SentMessageExpectation extends VoiceSessionTarget {
-  notificationBaseline: number;
-}
-
 const backgroundUpdatePrefix = "Omnigent background update: ";
 
 const asksWhetherAgentResponded = (input: string): boolean =>
-  /\b(?:did|has|have|didn't|hasn't|haven't|did\s+not|has\s+not|have\s+not)\b[^?.!]{0,90}\b(?:respond(?:ed)?|repl(?:y|ied)|get\s+back|got\s+back|response)\b/i.test(
+  (/(?:\b(?:did|has|have|didn't|hasn't|haven't|did\s+not|has\s+not|have\s+not)\b[^?.!]{0,90}\b(?:respond(?:ed)?|repl(?:y|ied)|get\s+back|got\s+back|response)\b)|(?:\b(?:no|without)\s+(?:response|reply)\b)/i.test(
     input,
-  ) ||
-  /\b(?:no|without)\s+(?:response|reply)\b/i.test(input);
+  ) &&
+    !/\b(?:exact|verbatim|read|show|inspect|latest output|full output)\b/i.test(input));
+
+const hasRetainedBackendNotification = (history: readonly ChatMessage[]): boolean =>
+  history.some(
+    (message) =>
+      message.role === "system" &&
+      typeof message.content === "string" &&
+      message.content.startsWith(backgroundUpdatePrefix),
+  );
+
+const bareSendRequest = (input: string): boolean =>
+  /^(?:(?:okay|ok|uh|um|hey|please)[,!.]?\s+)*(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?send\s+(?:a\s+)?message(?:\s+for\s+me)?[?.!\s]*$/i.test(
+    input.trim(),
+  );
+
+export const directInterruptedSendVerificationSpeech = (
+  input: string,
+  history: readonly ChatMessage[],
+): string | undefined => {
+  if (
+    !/\b(?:did|have|has)\s+(?:you|we)\b[^?.!]{0,80}\bsend\b[^?.!]{0,80}\b(?:just|last)\s+asked\b/i.test(
+      input,
+    )
+  ) {
+    return undefined;
+  }
+  let lastBareSendIndex = -1;
+  for (let index = 0; index < history.length; index += 1) {
+    const message = history[index];
+    if (
+      message?.role === "user" &&
+      typeof message.content === "string" &&
+      bareSendRequest(message.content)
+    ) {
+      lastBareSendIndex = index;
+    }
+  }
+  if (lastBareSendIndex < 0) return undefined;
+  const laterSendReceipt = history.slice(lastBareSendIndex + 1).some(
+    (message) =>
+      message.role === "assistant" &&
+      typeof message.content === "string" &&
+      /\b(?:sent|queued)\b[^.!?]{0,100}\b(?:message|to)\b/i.test(message.content),
+  );
+  if (laterSendReceipt) return undefined;
+  return "No. You hadn't told me what message to send yet. What should I send?";
+};
+
+const concreteHumanCorrection = (input: string): boolean => {
+  const correction =
+    /^(?:\s*(?:no|wait|actually|but)\b)/i.test(input) ||
+    /\b(?:already|you|i|we|the\s+(?:coding\s+)?agent)\s+(?:said|reported|showed|gave)\b/i.test(
+      input,
+    );
+  const concrete =
+    /\b\d+(?:\.\d+)?\b/.test(input) ||
+    /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|minutes?|hours?|percent|if|unless|provided|because)\b/i.test(
+      input,
+    );
+  const actionRequest =
+    /\b(?:send|message|ask|tell|check|read|show|inspect|switch|focus|archive|rename|start|make|create|approve|accept|decline|deny|reject|cancel|interrupt|stop|queue|rerun|retry)\b/i.test(
+      input,
+    );
+  return correction && concrete && !actionRequest;
+};
+
+export const directHumanSuppliedCorrectionSpeech = (
+  input: string,
+): string | undefined => {
+  if (!concreteHumanCorrection(input)) return undefined;
+  const supplied = /\b(?:(?:about|around|roughly|approximately)\s+)?(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b[\s\S]*$/i.exec(
+    input,
+  )?.[0]?.trim();
+  if (
+    !supplied ||
+    !/\b(?:minutes?|hours?|seconds?|days?|percent|if|unless|provided)\b/i.test(supplied)
+  ) {
+    return undefined;
+  }
+  const fact = supplied.replace(/[.!?]+$/, "").trim();
+  if (!fact || fact.length > 235) return undefined;
+  return /\b(?:minutes?|hours?|seconds?|days?)\b/i.test(fact)
+    ? `You're right. The estimate you reported was ${fact}.`
+    : `You're right. The value you reported was ${fact}.`;
+};
 
 export const directOutputVisibilityCapabilitySpeech = (
   input: string,
@@ -1052,6 +1129,26 @@ export const voiceMessageInstruction = (
     .replace(/[.!?]+$/, "")
     .trim();
   return instruction || undefined;
+};
+
+export const voiceSelfReportRelayMessage = (input: string): string | undefined => {
+  const captured =
+    /\bsend\s+(?:a\s+)?message(?:\s+for\s+me)?\s+(.+)$/i.exec(input)?.[1]?.trim();
+  if (
+    !captured ||
+    !/\bvoice\s+(?:agent|assistant|coordinator|interface)\b/i.test(captured) ||
+    !/\b(?:claim(?:s|ed)?|said|told|miss(?:ed|ing)?|wrong|incorrect|fail(?:ed|ing)?|never|didn't|did\s+not|hasn't|has\s+not)\b/i.test(
+      captured,
+    )
+  ) {
+    return undefined;
+  }
+  const report = captured
+    .replace(/^it\s+says\s+/i, "")
+    .replace(/\bvoice\s+(?:agent|assistant|interface)\b/gi, "voice coordinator")
+    .replace(/[.!?]+$/, "")
+    .trim();
+  return report ? `The human reports that ${report}.` : undefined;
 };
 
 const voiceSafeTool = (
@@ -2131,9 +2228,6 @@ export class CelerisConversation {
   private lastVerifiedActionCount = 0;
   private lastVerifiedToolWorkflow: VerifiedToolWorkflowOutcome | undefined;
   private readonly outputCursors = new Map<string, string>();
-  private notificationSequence = 0;
-  private lastSentMessage: SentMessageExpectation | undefined;
-  private readonly latestSpokenResponses = new Map<string, SpokenCoordinatorResponse>();
   private compactionTimer: ReturnType<typeof setTimeout> | undefined;
   private compactionController: AbortController | undefined;
   private compactionPromise: Promise<void> | undefined;
@@ -2175,28 +2269,6 @@ export class CelerisConversation {
         this.outputCursors.set(sessionId, cursor);
       }
     }
-  }
-
-  private rememberSentMessage(result: JsonObject): void {
-    if (result.accepted !== true || typeof result.error === "string") return;
-    const target = objectValue(result.target_session);
-    const id = typeof target?.id === "string" ? target.id.trim() : "";
-    const name = typeof target?.name === "string" ? target.name.trim() : "";
-    if (!id || !name) return;
-    this.lastSentMessage = {
-      id,
-      name,
-      notificationBaseline: this.notificationSequence,
-    };
-  }
-
-  private verifiedRecentResponseSpeech(input: string): string | undefined {
-    if (!asksWhetherAgentResponded(input) || !this.lastSentMessage) return undefined;
-    const response = this.latestSpokenResponses.get(this.lastSentMessage.id);
-    if (!response || response.sequence <= this.lastSentMessage.notificationBaseline) {
-      return undefined;
-    }
-    return `Yes. ${response.speech}`;
   }
 
   public restoreHistory(messages: readonly CelerisHistoryMessage[]): void {
@@ -2265,6 +2337,23 @@ export class CelerisConversation {
     const previousAssistantSpeech = [...this.history]
       .reverse()
       .find((message) => message.role === "assistant")?.content;
+    const interruptedSendVerification = directInterruptedSendVerificationSpeech(
+      input,
+      this.history,
+    );
+    if (interruptedSendVerification) {
+      const speech = sanitizeForSpeech(interruptedSendVerification, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
+    const humanSuppliedCorrection = directHumanSuppliedCorrectionSpeech(input);
+    if (humanSuppliedCorrection) {
+      const speech = sanitizeForSpeech(humanSuppliedCorrection, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
     if (previousAssistantSpeech && isSimpleRepeatRequest(input)) {
       const speech = sanitizeForSpeech(previousAssistantSpeech, 300);
       if (!Array.isArray(updates.updates) || updates.updates.length === 0) {
@@ -2280,15 +2369,6 @@ export class CelerisConversation {
         this.updateCursor = turnUpdateCursor;
       }
       this.remember(input, speech, retainedTurnUpdates());
-      return speech;
-    }
-    const verifiedRecentResponse = this.verifiedRecentResponseSpeech(input);
-    if (verifiedRecentResponse) {
-      const speech = sanitizeForSpeech(verifiedRecentResponse, 300);
-      if (!Array.isArray(updates.updates) || updates.updates.length === 0) {
-        this.updateCursor = turnUpdateCursor;
-      }
-      this.remember(input, speech);
       return speech;
     }
     const incomingUpdateQuestion = asksForIncomingUpdate(input);
@@ -2470,16 +2550,21 @@ export class CelerisConversation {
       input,
       messageRouting.target?.name,
     );
-    const attributionRelayMessage = voiceAttributionRelayMessage(
-      input,
-      this.history,
-      updates.recent_actions,
-    );
+    const attributionRelayMessage =
+      voiceSelfReportRelayMessage(input) ??
+      voiceAttributionRelayMessage(
+        input,
+        this.history,
+        updates.recent_actions,
+      );
     const missedSendCorrection = isDeclarativeMissedSend(
       input,
       updates.recent_actions,
       previousAssistantSpeech,
     );
+    const humanEvidenceCorrection = concreteHumanCorrection(input);
+    const retainedResponseEvidence =
+      asksWhetherAgentResponded(input) && hasRetainedBackendNotification(this.history);
     const actionInvariant =
       this.options.actionInvariantOverride ?? currentTurnActionInvariant;
     const messages: ChatMessage[] = [
@@ -2500,9 +2585,27 @@ export class CelerisConversation {
       ...(actionInvariant
         ? [{ role: "system" as const, content: actionInvariant }]
         : []),
+      ...(humanEvidenceCorrection
+        ? [{
+            role: "system" as const,
+            content:
+              "CURRENT HUMAN EVIDENCE: This turn is a factual correction, not a coordinator-action request. " +
+              "Acknowledge it without tools. Restate every supplied number and unit, and copy each complete condition phrase introduced by if, unless, or provided without dropping its concrete nouns. " +
+              "Then stop. Do not mention waiting, a missing response, or an older absence claim. Retain the corrected facts and conditions for the next follow-up.",
+          }]
+        : []),
+      ...(retainedResponseEvidence
+        ? [{
+            role: "system" as const,
+            content:
+              "CURRENT RESPONSE EVIDENCE: Answer from the retained Omnigent background-update records without tools. " +
+              "Determine whether their actual content answers the earlier question; never label unrelated progress as that answer. " +
+              "If it does answer, preserve the concrete answer. If it does not, distinguish the progress received from the answer still absent.",
+          }]
+        : []),
       { role: "user", content: input },
     ];
-    const tools = (await this.tools())
+    const tools = (humanEvidenceCorrection || retainedResponseEvidence ? [] : await this.tools())
       .filter(
         (tool) => {
           const name = tool.function.name;
@@ -2700,7 +2803,7 @@ export class CelerisConversation {
           }
           if (
             call.function.name === "send_message" &&
-            (messageInstruction || attributionRelayMessage) &&
+            (attributionRelayMessage || messageInstruction) &&
             !readsInSameCompletion &&
             !executedAcrossRounds.some(
               ({ name }) => name === "get_output" || name === "poll_output",
@@ -2708,7 +2811,7 @@ export class CelerisConversation {
           ) {
             args = {
               ...args,
-              message: messageInstruction ?? attributionRelayMessage,
+              message: attributionRelayMessage ?? messageInstruction,
             };
           }
           if (
@@ -2879,7 +2982,6 @@ export class CelerisConversation {
           if (typeof result.update_cursor === "number") {
             turnUpdateCursor = Math.max(turnUpdateCursor, result.update_cursor);
           }
-          if (call.function.name === "send_message") this.rememberSentMessage(result);
           retainTurnUpdates(result.updates);
           this.options.trace?.({
             type: "tool",
@@ -3142,7 +3244,10 @@ export class CelerisConversation {
       }
       throw new Error("Celeris exceeded the coordinator tool-call limit");
     } catch (error) {
-      if (signal?.aborted) throw error;
+      if (signal?.aborted) {
+        this.rememberInterrupted(input);
+        throw error;
+      }
       this.options.trace?.({
         type: "error",
         phase: "turn",
@@ -3196,21 +3301,6 @@ export class CelerisConversation {
     );
     this.updateCursor = lastEventId;
     this.rememberUpdateOutputCursors(updates);
-    this.notificationSequence += 1;
-    for (const update of updates) {
-      if (
-        typeof update.session_id === "string" &&
-        (update.type === "session_output" ||
-          update.type === "session_completed" ||
-          update.type === "session_failed" ||
-          update.type === "decision_needed")
-      ) {
-        this.latestSpokenResponses.set(update.session_id, {
-          sequence: this.notificationSequence,
-          speech,
-        });
-      }
-    }
     this.history.push(
       { role: "system", content: `Omnigent background update: ${JSON.stringify(updates)}` },
       { role: "assistant", content: speech },
@@ -3369,6 +3459,29 @@ export class CelerisConversation {
       });
     }
     this.history.push({ role: "assistant", content: assistant });
+    this.scheduleCompaction();
+  }
+
+  private rememberInterrupted(user: string): void {
+    const last = this.history.at(-1);
+    const previous = this.history.at(-2);
+    if (
+      last?.role === "system" &&
+      last.content?.includes("interrupted before a spoken result") &&
+      previous?.role === "user" &&
+      previous.content === user
+    ) {
+      return;
+    }
+    this.history.push(
+      { role: "user", content: user },
+      {
+        role: "system",
+        content:
+          "The preceding human turn was interrupted before a spoken result. Its wording remains the newest request. " +
+          "Do not infer that an action ran; only current recent_actions or a typed tool receipt can prove it.",
+      },
+    );
     this.scheduleCompaction();
   }
 

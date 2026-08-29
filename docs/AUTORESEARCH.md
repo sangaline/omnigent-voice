@@ -1705,3 +1705,52 @@ points in the exchange so a change must generalize across initial update checks,
 repeated stale-state questions, explicit human correction, and action
 verification. The private source trace remains outside git and no live or
 excluded session was read or mutated during this capture.
+
+### 2026-08-29 — ETA denial root cause and continuation repair
+
+Exact production replay reproduced both live failures before the change. The
+human's concrete ETA correction was denied in 1,066 ms and one model round, and
+the later action-verification turn reused the older ETA-question receipt in 929
+ms. The first sanitized stale-receipt case failed three of three baseline trials
+and then ten of ten; the linked correction scenario failed all three initial
+runs. These were independent of the earlier backend-capability source test.
+
+The retained backend evidence separated visibility from interpretation. The
+outbound ETA question was accepted in 666 ms. Subsequent coordinator events
+contained implementation progress but not the estimate, so the early claim
+that no ETA answer was visible was supportable. Omnigent did not persist the
+assistant item containing the numeric estimate until about seven minutes later;
+the coordinator detected and began announcing that item roughly two seconds
+after persistence. The remaining gap is access to authenticated live assistant
+text already streamed in the Omnigent UI, not a stable-item cursor miss.
+
+Three harness defects amplified that gap. First, a deterministic shortcut
+treated any newer output from the destination session as the answer to its most
+recent sent question. It attached unrelated deployment progress to the ETA
+question and bypassed the model. The shortcut is removed. Simple response-status
+questions now give Celeris the exact retained notification with no tools and
+explicitly require it to distinguish an answer from unrelated progress.
+
+Second, Smart Turn finalized the content-free preamble “can you send a message
+for me” and launched Celeris 32 ms after recognition. The caller continued 250
+ms later with the actual message, but it became a replacement turn instead of
+one relay. Content-free send preambles now retain the 700 ms endpoint fallback
+window even after a positive semantic decision. The joined request has a
+deterministic self-report transform that names the voice coordinator, preserves
+the human as reporter, and copies the estimate and its conditions into the
+outbound message. Interrupted inputs are also retained with a marker so later
+turns cannot silently lose the newest request.
+
+Third, the small model could still contradict a number explicitly supplied in a
+long corrective turn. Numeric human corrections with a time/value unit or an
+explicit condition now use a zero-model evidence path that repeats the supplied
+value and entire condition. The two original replay cut points consequently
+return grounded answers in about 3 ms and zero model rounds. The merged relay
+and stale-receipt cases each passed ten of ten targeted trials; the linked
+correction flow and the held-out spoken-reply flow each passed five of five.
+
+Promotion evidence is 135 passing unit tests, clean typecheck and build, all 46
+isolated trials, and all 34 stateful scenarios across 115 linked turns. The
+model evaluations used frozen coordinator state. Investigating persistence used
+one read of the explicitly in-scope voice-development session; no message was
+sent, no session was mutated, and the excluded ESPN session remained untouched.

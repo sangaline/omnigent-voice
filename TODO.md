@@ -39,18 +39,15 @@
 - Review the next retained voice sample for missed coordinator updates,
   repetitive explanations, truthfulness, and end-to-end latency; turn any new
   failures into sanitized shared-harness regressions.
-- Convert the retained ETA failure into a linked regression suite at several
-  cut points: after the outbound question, after unrelated progress, after an
-  explicit update check, and after the human correction supplies the missing
-  answer. Assert that the harness reads current-session output instead of
-  repeating stale waiting state, never denies a fact present in the current
-  human turn or authoritative update, and never promises a future report without
-  backend evidence.
-- Reproduce the overlapping-turn failure from the same trace: a superseded
-  partial request must not emit its late completion during the replacement
-  utterance, and no later verification question may claim an action occurred
-  without a matching action-ledger receipt. Determine separately whether the
-  ETA response was absent from Omnigent's stable items or skipped by the
-  coordinator cursor before changing the prompt.
+- Live-test the new content-free send-preamble continuation window using a short
+  phone pause, then verify the merged correction reaches the intended session
+  exactly once and retains its attribution, numbers, and conditions.
+- Investigate an authenticated Omnigent live-event source for assistant text
+  already visible in its UI but not yet persisted in session items. In the ETA
+  trace, the coordinator announced the stable item within roughly two seconds,
+  but the answer itself was not persisted until about seven minutes after the
+  user had seen its streamed form. Preserve stable cursor polling as fallback;
+  never expose terminal or event access outside the existing private trust
+  boundary.
 - Continue the isolated multi-session autoresearch loop without accessing or
   mutating excluded user sessions.
