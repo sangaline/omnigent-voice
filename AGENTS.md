@@ -227,6 +227,9 @@ link or deployment metadata.
 ## Development rules
 
 - Commit coherent milestones; stage only owned files.
+- Maintain the sanitized experiment record in `docs/AUTORESEARCH.md` for
+  continuous harness research. Private transcripts and fixtures remain outside
+  the repository; only generalized cases and aggregate results may be committed.
 - Keep pure state/normalization logic unit tested, but prioritize real voice-loop
   integration.
 - Retain conversation transcripts and assistant speech only in the designated
