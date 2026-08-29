@@ -403,6 +403,10 @@ Proactive KAME output has a five-second speech-start deadline and a separate
 turn produces no speech, retry it once with a fresh hidden input. If both
 attempts fail, retain and requeue the coordinator event; never advance its
 cursor or silently discard it. A human turn may preempt this retry normally.
+Proactive delivery is strictly serialized across hidden-trigger synthesis,
+guidance, output detection, retry, and requeue. Newly arriving updates remain
+pending until the active transaction finishes; neither the KAME settle callback
+nor a queue listener may schedule a second oracle turn while one is in flight.
 
 The first live Discord deployment verified two proactive turns end to end.
 Hidden-trigger synthesis took 90-97 ms, KAME speech began 1.17-1.82 seconds

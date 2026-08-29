@@ -32,6 +32,7 @@ import { CoordinatorUpdate, OmnigentCoordinator } from "./coordinator.js";
 import { isCancelCommand } from "./control.js";
 import { SemanticEndpointRuntime, TailAudioBuffer } from "./endpoint.js";
 import { Logger } from "./log.js";
+import { shouldScheduleCoordinatorNotification } from "./notification.js";
 import { LocalSpeech } from "./speech.js";
 import { KameS2SRuntime } from "./s2s.js";
 
@@ -69,6 +70,7 @@ export class DiscordVoiceBot {
   private pendingTranscriptEpoch = 0;
   private transcriptTimer: NodeJS.Timeout | undefined;
   private notificationTimer: NodeJS.Timeout | undefined;
+  private notificationInFlight = false;
   private notificationAbort: AbortController | undefined;
   private unsubscribeCoordinator?: () => void;
   private unsubscribeS2SAudio?: () => void;
@@ -711,11 +713,12 @@ export class DiscordVoiceBot {
   }
 
   private scheduleCoordinatorNotification(delayMs = 250): void {
-    if (
-      this.shuttingDown ||
-      this.pendingCoordinatorUpdates.length === 0 ||
-      this.notificationTimer
-    ) {
+    if (!shouldScheduleCoordinatorNotification({
+      shuttingDown: this.shuttingDown,
+      pendingUpdates: this.pendingCoordinatorUpdates.length,
+      timerActive: Boolean(this.notificationTimer),
+      deliveryInFlight: this.notificationInFlight,
+    })) {
       return;
     }
     this.notificationTimer = setTimeout(() => {
@@ -725,6 +728,7 @@ export class DiscordVoiceBot {
   }
 
   private async processCoordinatorNotification(): Promise<void> {
+    if (this.notificationInFlight) return;
     if (
       this.shuttingDown ||
       this.recordingUsers.size > 0 ||
@@ -735,10 +739,14 @@ export class DiscordVoiceBot {
       this.scheduleCoordinatorNotification();
       return;
     }
+    this.notificationInFlight = true;
     const updates = this.pendingCoordinatorUpdates.splice(0);
     const controller = new AbortController();
     this.notificationAbort = controller;
     const epoch = this.responseEpoch;
+    this.options.logger.info("coordinator.notification.delivery_started", {
+      updates: updates.length,
+    });
     try {
       const spoken = await this.options.celeris.announceUpdate(updates, controller.signal);
       if (!spoken || controller.signal.aborted || epoch !== this.responseEpoch) return;
@@ -765,6 +773,10 @@ export class DiscordVoiceBot {
       }
     } finally {
       if (this.notificationAbort === controller) this.notificationAbort = undefined;
+      this.notificationInFlight = false;
+      this.options.logger.info("coordinator.notification.delivery_finished", {
+        pendingUpdates: this.pendingCoordinatorUpdates.length,
+      });
       this.scheduleCoordinatorNotification();
     }
   }

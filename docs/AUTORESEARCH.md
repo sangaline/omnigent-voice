@@ -629,3 +629,24 @@ typecheck, 27 of 27 isolated production-harness cases, and all 58 turns across
 one-round action decisions measured roughly 93-175 ms in the final linked
 sweep; grounded reads remained two rounds, and eligible proactive completions
 were deterministic zero-round responses.
+
+### 2026-08-29 — Serialized proactive KAME delivery
+
+Hypothesis H24: the notification timer already serialized proactive KAME turns.
+Sanitized live event timing disproved it. During retained-event replay, a new
+hidden trigger and guidance pair could begin while the prior delivery was still
+waiting, speaking, or entering its retry. In one burst two trigger-complete and
+guidance events landed within milliseconds. The timer prevented duplicate
+scheduled callbacks, but it was cleared before the asynchronous delivery began;
+new updates and the S2S settle callback could therefore schedule another worker
+during hidden-trigger synthesis.
+
+The Discord runtime now owns an explicit notification-in-flight lock spanning
+queue drain, Celeris adaptation, hidden input, guidance, speech detection,
+retry, acknowledgement, and requeue. The scheduler refuses to arm while that
+lock is held. New updates stay queued, and the single `finally` path releases
+the lock and schedules the next batch. Start/finish events expose only counts
+for live verification. A pure scheduling regression proves pending work does
+not start while a timer or delivery is active. The conventional gate is now 57
+tests with clean typecheck and build; live queue-contention verification remains
+the rollout gate.
