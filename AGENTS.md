@@ -114,7 +114,8 @@ available with `npm run mcp`; authenticated remote HTTP transport is deliberatel
 deferred.
 
 Every Celeris turn also receives an explicit context contract: the bounded
-spoken history is not a full transcript, focused-session state is authoritative,
+spoken history retains at most ten exchanges / 8,000 characters rather than a
+full transcript, focused-session state is authoritative,
 `output_delta` is only new stable output through speech finalization, and older
 output is absent until a tool returns it. Celeris has no page/token introspection
 and must never estimate how much context it has or invent an explanation for a

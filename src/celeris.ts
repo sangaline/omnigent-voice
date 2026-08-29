@@ -57,7 +57,7 @@ Tool results may contain background updates. Mention an important completion, fa
 
 const contextContract = {
   spoken_history:
-    "At most five recent user/assistant exchanges and 3500 characters, not the full conversation.",
+    "At most ten recent user/assistant exchanges and 8000 characters, not the full conversation.",
   session_state:
     "focused_session is authoritative and is repeated in every coordinator result.",
   current_output:
@@ -358,8 +358,8 @@ export class CelerisConversation {
 
   private trimHistory(): void {
     while (
-      this.history.length > 10 ||
-      this.history.reduce((total, message) => total + (message.content?.length ?? 0), 0) > 3_500
+      this.history.length > 20 ||
+      this.history.reduce((total, message) => total + (message.content?.length ?? 0), 0) > 8_000
     ) {
       this.history.splice(0, Math.min(2, this.history.length));
     }

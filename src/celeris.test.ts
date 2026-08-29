@@ -100,6 +100,11 @@ describe("Celeris coordinator conversation", () => {
       ),
     ).toBe(true);
     expect(
+      request.messages?.some((message) =>
+        message.content?.includes("At most ten recent user/assistant exchanges and 8000 characters"),
+      ),
+    ).toBe(true);
+    expect(
       request.messages?.some((message) => message.content?.includes('"recent_actions":[]')),
     ).toBe(true);
   });
