@@ -7,9 +7,11 @@ import {
   CelerisTraceEvent,
   CelerisMemoryPolicy,
   CoordinatorToolClient,
+  directCoordinatorUpdateSpeech,
   directSessionOutputSpeech,
   immediateNotificationTargets,
   isDeclarativeMissedSend,
+  requestsPositiveFocusAction,
   serializeToolResult,
   successfulActionSpeech,
   targetsFocusedSession,
@@ -200,6 +202,19 @@ describe("Celeris coordinator conversation", () => {
     expect(allowsRename("Rename this session to Voice Research.")).toBe(true);
     expect(allowsRename("Call this session Voice Research.")).toBe(true);
     expect(allowsRename("What is this session called?")).toBe(false);
+    expect(
+      requestsPositiveFocusAction("tell side beta to rerun it and switch me there"),
+    ).toBe(true);
+    expect(
+      requestsPositiveFocusAction("tell side beta to rerun it but don't switch me"),
+    ).toBe(false);
+    expect(
+      requestsPositiveFocusAction("tell it no wait focus on the discord cutoff first"),
+    ).toBe(false);
+    expect(requestsPositiveFocusAction("tell side beta open the log file")).toBe(
+      false,
+    );
+    expect(requestsPositiveFocusAction("tell it to switch branches first")).toBe(false);
     expect(targetsFocusedSession("Switch back to Primary Work.", "Primary Work")).toBe(true);
     expect(
       targetsFocusedSession(
@@ -264,6 +279,46 @@ describe("Celeris coordinator conversation", () => {
         [{ id: "session-beta", name: "Side Beta" }],
       ),
     ).toEqual([]);
+    const notificationBurst = immediateNotificationTargets(
+      [
+        {
+          role: "system",
+          content:
+            'Omnigent background update: [{"session_id":"session-alpha","name":"Side Alpha"}]',
+        },
+        { role: "assistant", content: "Side Alpha finished." },
+        {
+          role: "system",
+          content:
+            'Omnigent background update: [{"session_id":"session-beta","name":"Side Beta"}]',
+        },
+        { role: "assistant", content: "Side Beta finished." },
+      ],
+      [
+        { id: "session-alpha", name: "Side Alpha" },
+        { id: "session-beta", name: "Side Beta" },
+      ],
+    );
+    expect(notificationBurst).toEqual([
+      { id: "session-alpha", name: "Side Alpha" },
+      { id: "session-beta", name: "Side Beta" },
+    ]);
+    expect(
+      voiceMessageRouting(
+        "tell the first one rerun the packet test",
+        [],
+        notificationBurst,
+      ),
+    ).toEqual({
+      mode: "named",
+      target: { id: "session-alpha", name: "Side Alpha" },
+    });
+    expect(
+      voiceMessageRouting("tell that one rerun the test", [], notificationBurst),
+    ).toEqual({ mode: "ambiguous", candidates: ["Side Alpha", "Side Beta"] });
+    expect(voiceMessageRouting("tell it to rerun the test", [])).toEqual({
+      mode: "focused",
+    });
     expect(
       voiceMessageRouting("tell primary work what side beta found", [
         { id: "session-primary", name: "Primary Work" },
@@ -752,6 +807,90 @@ describe("Celeris coordinator conversation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("forces the missing half of an explicit compound action before speaking", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-focus",
+              type: "function",
+              function: { name: "focus_session", arguments: "{}" },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-send",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({ message: "Rerun the voice worker" }),
+              },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) => {
+      if (name === "check_updates") {
+        return Promise.resolve({
+          focused_session: { id: "session-primary", name: "Primary Work" },
+          known_sessions: [
+            { id: "session-primary", name: "Primary Work" },
+            { id: "session-beta", name: "Side Beta" },
+          ],
+          updates: [],
+        });
+      }
+      if (name === "focus_session") {
+        return Promise.resolve({
+          focus_changed: true,
+          focused_session: { id: "session-beta", name: "Side Beta" },
+          updates: [],
+        });
+      }
+      return Promise.resolve({
+        accepted: true,
+        delivery: "immediate",
+        target_session: { id: "session-beta", name: "Side Beta" },
+        updates: [],
+      });
+    });
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "Tell Side Beta to rerun the voice worker, then switch me over there",
+      ),
+    ).resolves.toBe("I switched to Side Beta. I sent that to Side Beta.");
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "focus_session", {
+      session_id: "session-beta",
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(3, "send_message", {
+      message: "Rerun the voice worker",
+      session_id: "session-beta",
+    });
+    const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      tool_choice?: unknown;
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    expect(secondRequest.tool_choice).toEqual({
+      type: "function",
+      function: { name: "send_message" },
+    });
+    expect(secondRequest.messages).toContainEqual({
+      role: "system",
+      content: expect.stringContaining("explicitly requested multiple coordinator actions"),
+    });
+  });
+
   it("runs restored replay history through the production conversation and MCP path", async () => {
     const fetchMock = vi
       .fn()
@@ -920,6 +1059,26 @@ describe("Celeris coordinator conversation", () => {
       conversation("test-key").announceUpdate([update], new AbortController().signal),
     ).resolves.toBe(
       "Voice MVP update: The decoder passes eight checks; the soak is still running.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("voices one short plain completion without paraphrasing away its facts", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const update = {
+      event_id: 3,
+      type: "session_completed" as const,
+      session_id: "session-beta",
+      name: "Side Beta",
+      summary: "Side Beta finished the check. It found one flaky reconnect test.",
+    };
+
+    expect(directCoordinatorUpdateSpeech([update])).toContain("flaky reconnect");
+    await expect(
+      conversation("test-key").announceUpdate([update], new AbortController().signal),
+    ).resolves.toBe(
+      "Side Beta finished the check. It found one flaky reconnect test.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

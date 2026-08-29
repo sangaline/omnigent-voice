@@ -561,3 +561,71 @@ scenario and all thirteen turns of the compound workday, and the one isolated
 rate-limited case also passed. Conventional tests remain 54 with a clean
 typecheck. The scenario runner now stops a scenario after an invalid transport
 trial, avoiding meaningless downstream failures and unnecessary model calls.
+
+### 2026-08-29 — Ordered notification sends and compound completion
+
+Hypothesis H20: once singular “tell that one” was safe, Celeris could apply the
+prompt's “first one” rule across two spoken notifications. The new four-turn
+held-out scenario failed in the predicted way: it preserved the message and
+selected `send_message`, but emitted no session ID. Without a harness target,
+the production MCP call would have gone to sticky focus. The notification
+resolver now retains the complete ordered burst since the last human turn and
+deterministically maps first, second, third, and last. An unqualified pronoun in
+a multi-session burst is ambiguous and fails closed. Focus remains unchanged.
+
+The first global sweep caught an over-broad candidate: “tell it” with no recent
+notification was treated as ambiguous instead of meaning sticky focus. That
+candidate was rejected immediately. The resolver now activates only when the
+current burst contains at least one authoritative notification target. Both the
+six-turn focused-send regression and the new ordinal scenario then passed.
+
+Hypothesis H21: a successful deterministic receipt was safe after any subset of
+tool calls emitted for a compound turn. Repeated production-harness evaluation
+disproved this: one run of “tell Side Beta … and switch me there” called only
+`focus_session`, then would have spoken a focus-only receipt without sending the
+message. The transaction loop now recognizes a positively requested named send
+plus focus switch, accumulates typed results across rounds, and forces the one
+missing tool before speech. Negated phrases such as “don't switch me” do not
+activate the guard. A deterministic unit test reproduces the exact focus-only
+first round and verifies the forced send plus both receipts.
+
+Result: accepted. Five targeted live-model scenario runs passed all ten turns,
+normally emitting both tools in one 139-347 ms model round. Conventional tests
+are 55 with a clean typecheck. The final promotion sweep passed all 58 turns
+across 14 linked scenarios with no invalid trials. One cross-session grounded
+send needed three short model rounds in that sweep; all other ordinary action
+turns remained one round, while typed proactive and partial-failure follow-ups
+remained zero-round where expected.
+
+Hypothesis H22: explicit switches to a session absent from `known_sessions`
+could remain model-directed because the prompt required a lookup. A full
+isolated sweep disproved this once: Celeris spoke without calling either tool.
+Although five immediate reruns passed, one silent action miss is unacceptable.
+The harness now forces `list_sessions`, resolves the requested name against the
+typed result, injects its exact ID, and requires `focus_session` before speech.
+Three targeted trials passed in two model rounds instead of the previous three.
+
+The first broad version treated any positive word “focus” as navigation. The
+linked sweep caught “tell it … focus on the Discord cutoff” and incorrectly
+forced a session list instead of sending the task instruction. The guard is now
+limited to explicit switch-me/switch-to and “focus me/the session” forms. Bare
+task verbs such as “focus on the cutoff,” “open the log,” and “switch branches”
+stay inside the relayed agent instruction. The existing six-turn
+incremental-output scenario plus pure routing cases cover this distinction.
+Grounded cross-session read-then-send returned to two rounds.
+
+Hypothesis H23: Celeris adaptation was worth using for every lifecycle
+notification. A short completion run dropped the concrete adjective “flaky”
+from an otherwise accurate proactive announcement. Single plain completion
+summaries now share the existing zero-model fast path for short progress: up to
+240 characters and three lines, without URLs or code fences. Decisions,
+multi-event batches, and complex content still use Celeris. Five targeted
+notification scenarios passed all fifteen turns, with every completion taking
+zero model rounds and retaining exact facts.
+
+Final promotion evidence for this candidate is 56 conventional tests, a clean
+typecheck, 27 of 27 isolated production-harness cases, and all 58 turns across
+14 linked scenarios. There were no invalid trials in the final gates. Common
+one-round action decisions measured roughly 93-175 ms in the final linked
+sweep; grounded reads remained two rounds, and eligible proactive completions
+were deterministic zero-round responses.

@@ -252,6 +252,23 @@ export const allowsFocusChange = (input: string): boolean =>
     input,
   );
 
+export const requestsPositiveFocusAction = (input: string): boolean => {
+  const candidates = [
+    ...input.matchAll(
+      /\bswitch(?:\s+(?:me|us)|\s+(?:back|over)|\s+(?:to|into|onto)|\s+(?:the\s+)?(?:session|chat|conversation))\b/gi,
+    ),
+    ...input.matchAll(
+      /\bfocus(?:\s+(?:me|us)|\s+(?:on|to)\s+(?:the\s+)?(?:session|chat|conversation))\b/gi,
+    ),
+  ];
+  return candidates.some((match) => {
+    const prefix = input.slice(Math.max(0, (match.index ?? 0) - 28), match.index);
+    return !/\b(?:do not|don't|never|not|without)(?:\s+\w+){0,2}\s*$/i.test(
+      prefix,
+    );
+  });
+};
+
 export const allowsArchive = (input: string): boolean => /\barchive\b/i.test(input);
 
 export const allowsRename = (input: string): boolean =>
@@ -305,26 +322,14 @@ export const immediateNotificationTargets = (
   history: readonly { role: string; content: unknown }[],
   knownSessions: unknown,
 ): VoiceSessionTarget[] => {
-  const notificationIndex = history.findLastIndex(
+  const lastUserIndex = history.findLastIndex((message) => message.role === "user");
+  const notifications = history.slice(lastUserIndex + 1).filter(
     (message) =>
       message.role === "system" &&
       typeof message.content === "string" &&
       message.content.startsWith(backgroundUpdatePrefix),
   );
-  if (notificationIndex < 0) return [];
-  if (history.slice(notificationIndex + 1).some((message) => message.role === "user")) {
-    return [];
-  }
-
-  const notification = history[notificationIndex]?.content;
-  if (typeof notification !== "string") return [];
-  let updates: unknown;
-  try {
-    updates = JSON.parse(notification.slice(backgroundUpdatePrefix.length));
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(updates)) return [];
+  if (notifications.length === 0) return [];
 
   const knownById = new Map<string, VoiceSessionTarget>();
   for (const candidate of Array.isArray(knownSessions) ? knownSessions : []) {
@@ -337,23 +342,57 @@ export const immediateNotificationTargets = (
   }
 
   const targets = new Map<string, VoiceSessionTarget>();
-  for (const update of updates) {
-    if (!update || typeof update !== "object" || Array.isArray(update)) continue;
-    const id = (update as JsonObject).session_id;
-    if (typeof id !== "string") continue;
-    const known = knownById.get(id);
-    if (known) targets.set(id, known);
+  for (const notification of notifications) {
+    if (typeof notification.content !== "string") continue;
+    let updates: unknown;
+    try {
+      updates = JSON.parse(notification.content.slice(backgroundUpdatePrefix.length));
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(updates)) continue;
+    for (const update of updates) {
+      if (!update || typeof update !== "object" || Array.isArray(update)) continue;
+      const id = (update as JsonObject).session_id;
+      const recordedName = (update as JsonObject).name;
+      if (typeof id !== "string" || !id) continue;
+      const known = knownById.get(id);
+      const name = known?.name ??
+        (typeof recordedName === "string" && recordedName ? recordedName : undefined);
+      if (name) targets.set(id, { id, name });
+    }
   }
   return [...targets.values()];
 };
 
 const hasDeicticMessageTarget = (input: string): boolean =>
-  /\b(?:tell|ask|message|steer|have)\s+(?:that|the)\s+(?:one|session|agent)\b/i.test(
+  /\b(?:tell|ask|message|steer|have)\s+(?:the\s+)?(?:first|second|third|last|other)\s+(?:one|session|agent)\b/i.test(
     input,
   ) ||
+  /\b(?:tell|ask|message|steer|have)\s+(?:that|the)\s+(?:one|session|agent)\b/i.test(input) ||
   /\b(?:tell|ask|message|steer|have)\s+it\b/i.test(input) ||
   /\bsend\b.+\bto\s+(?:it|that|that\s+one|the\s+one)\b/i.test(input) ||
   /\blet\s+(?:it|that\s+one|the\s+one)\s+know\b/i.test(input);
+
+const notificationMessageRouting = (
+  input: string,
+  targets: readonly VoiceSessionTarget[],
+): VoiceMessageRouting | undefined => {
+  if (!hasDeicticMessageTarget(input) || targets.length === 0) return undefined;
+  const ordinal =
+    /\b(?:tell|ask|message|steer|have)\s+(?:the\s+)?(first|second|third|last|other)\s+(?:one|session|agent)\b/i.exec(
+      input,
+    )?.[1]?.toLocaleLowerCase();
+  let target: VoiceSessionTarget | undefined;
+  if (ordinal === "first") target = targets[0];
+  else if (ordinal === "second") target = targets[1];
+  else if (ordinal === "third") target = targets[2];
+  else if (ordinal === "last") target = targets.at(-1);
+  else if (ordinal === "other" && targets.length === 2) target = targets[0];
+  else if (!ordinal && targets.length === 1) target = targets[0];
+  if (target) return { mode: "named", target };
+  return { mode: "ambiguous", candidates: targets.map(({ name }) => name) };
+};
 
 export const isDeclarativeMissedSend = (
   input: string,
@@ -415,15 +454,8 @@ export const voiceMessageRouting = (
     }
   }
   if (matches.size === 0) {
-    if (hasDeicticMessageTarget(input) && notificationTargets.length === 1) {
-      return { mode: "named", target: notificationTargets[0] };
-    }
-    if (hasDeicticMessageTarget(input) && notificationTargets.length > 1) {
-      return {
-        mode: "ambiguous",
-        candidates: notificationTargets.map(({ name }) => name),
-      };
-    }
+    const notificationRouting = notificationMessageRouting(input, notificationTargets);
+    if (notificationRouting) return notificationRouting;
     return { mode: "focused" };
   }
   const normalized = words(input).join(" ");
@@ -743,6 +775,29 @@ export const directSessionOutputSpeech = (
   return `${update.name} update: ${output.replace(/^assistant:\s*/i, "")}`;
 };
 
+export const directCoordinatorUpdateSpeech = (
+  updates: readonly CoordinatorUpdate[],
+): string | undefined => {
+  const outputSpeech = directSessionOutputSpeech(updates);
+  if (outputSpeech) return outputSpeech;
+  if (updates.length !== 1 || updates[0]?.type !== "session_completed") {
+    return undefined;
+  }
+  const summary = typeof updates[0].summary === "string"
+    ? updates[0].summary.trim()
+    : "";
+  if (
+    !summary ||
+    summary.length > 240 ||
+    summary.includes("```") ||
+    /https?:\/\//i.test(summary) ||
+    summary.split("\n").length > 3
+  ) {
+    return undefined;
+  }
+  return summary;
+};
+
 export class CelerisConversation {
   private readonly history: ChatMessage[] = [];
   private readonly memoryPolicy: CelerisMemoryPolicy;
@@ -863,17 +918,38 @@ export class CelerisConversation {
       )
       .map((tool) => voiceSafeTool(tool, messageRouting, focusRouting));
     const allowedTools = new Set(tools.map((tool) => tool.function.name));
+    const requiredCompoundActions =
+      messageRouting.mode === "named" &&
+      requestsPositiveFocusAction(input) &&
+      allowedTools.has("send_message") &&
+      allowedTools.has("focus_session")
+        ? ["send_message", "focus_session"]
+        : [];
+    const needsFocusLookup =
+      requestsPositiveFocusAction(input) &&
+      focusRouting.mode === "model" &&
+      allowedTools.has("list_sessions") &&
+      allowedTools.has("focus_session");
+    let resolvedFocusTarget = focusRouting.target;
 
     try {
       let retriedEmptyCompletion = false;
+      let forcedToolName: string | undefined = needsFocusLookup
+        ? "list_sessions"
+        : undefined;
+      const executedAcrossRounds: Array<{ name: string; result: JsonObject }> = [];
       for (let round = 0; round < 5; round += 1) {
+        const forcedThisRound =
+          forcedToolName ??
+          (round === 0 && missedSendCorrection ? "send_message" : undefined);
+        forcedToolName = undefined;
         const message = await this.complete(
           messages,
           `round_${round + 1}`,
           tools,
           undefined,
           256,
-          round === 0 && missedSendCorrection ? "send_message" : undefined,
+          forcedThisRound,
         );
         const calls = Array.isArray(message.tool_calls)
           ? message.tool_calls.map(extractToolCall).filter((call): call is ToolCall => Boolean(call))
@@ -897,8 +973,7 @@ export class CelerisConversation {
         }
 
         messages.push({ role: "assistant", content: null, tool_calls: calls });
-        let failedTool: string | undefined;
-        const executed: Array<{ name: string; result: JsonObject }> = [];
+        const executedThisRound: Array<{ name: string; result: JsonObject }> = [];
         for (const call of calls) {
           let args: Record<string, unknown> = {};
           try {
@@ -918,10 +993,9 @@ export class CelerisConversation {
           }
           if (
             call.function.name === "focus_session" &&
-            focusRouting.mode === "named" &&
-            focusRouting.target
+            resolvedFocusTarget
           ) {
-            args = { ...args, session_id: focusRouting.target.id };
+            args = { ...args, session_id: resolvedFocusTarget.id };
           }
           if (call.function.name === "start_session" && startInstruction) {
             args = { ...args, instruction: startInstruction };
@@ -957,23 +1031,61 @@ export class CelerisConversation {
             arguments: args,
             result,
           });
-          if (typeof result.error === "string" && !failedTool) {
-            failedTool = call.function.name;
+          if (
+            call.function.name === "list_sessions" &&
+            typeof result.error !== "string"
+          ) {
+            const resolved = voiceFocusRouting(input, result.sessions);
+            if (resolved.mode === "named" && resolved.target) {
+              resolvedFocusTarget = resolved.target;
+            }
           }
-          executed.push({ name: call.function.name, result });
+          executedThisRound.push({ name: call.function.name, result });
+          executedAcrossRounds.push({ name: call.function.name, result });
           messages.push({
             role: "tool",
             tool_call_id: call.id,
             content: serializeToolResult(result),
           });
         }
-        if (failedTool) {
-          const successfulReceipts = executed
+        const attemptedActions = new Set(
+          executedAcrossRounds.map(({ name }) => name),
+        );
+        const requiredActions = new Set(requiredCompoundActions);
+        if (needsFocusLookup && resolvedFocusTarget) {
+          requiredActions.add("focus_session");
+        }
+        const missingCompoundActions = [...requiredActions].filter(
+          (name) => !attemptedActions.has(name),
+        );
+        if (missingCompoundActions.length > 0) {
+          if (missingCompoundActions.length === 1) {
+            forcedToolName = missingCompoundActions[0];
+          }
+          messages.push({
+            role: "system",
+            content:
+              `The human explicitly requested multiple coordinator actions. ` +
+              `Do not answer yet: call the remaining ${missingCompoundActions.join(" and ")} tool now.`,
+          });
+          continue;
+        }
+        const receiptExecutions = requiredCompoundActions.length > 0
+          ? executedAcrossRounds
+          : executedThisRound;
+        const failedTools = receiptExecutions
+          .filter(({ result }) => typeof result.error === "string")
+          .map(({ name }) => name);
+        if (failedTools.length > 0) {
+          const successfulReceipts = receiptExecutions
             .filter(({ result }) => typeof result.error !== "string")
             .map(({ name, result }) => successfulActionSpeech(name, result))
             .filter((receipt): receipt is string => Boolean(receipt));
           const speech = sanitizeForSpeech(
-            [...new Set(successfulReceipts), toolFailureSpeech(failedTool)].join(" "),
+            [
+              ...new Set(successfulReceipts),
+              ...new Set(failedTools.map((name) => toolFailureSpeech(name))),
+            ].join(" "),
             300,
           );
           this.lastVerifiedActionOutcome = speech;
@@ -981,10 +1093,13 @@ export class CelerisConversation {
           this.remember(input, speech);
           return speech;
         }
-        if (executed.length === 1 && executed[0]!.name === "get_output") {
+        if (
+          executedThisRound.length === 1 &&
+          executedThisRound[0]!.name === "get_output"
+        ) {
           const visibilitySpeech = verifiedDeliveryVisibilitySpeech(
             input,
-            executed[0]!.result,
+            executedThisRound[0]!.result,
           );
           if (visibilitySpeech) {
             const speech = sanitizeForSpeech(visibilitySpeech, 300);
@@ -993,7 +1108,7 @@ export class CelerisConversation {
             return speech;
           }
         }
-        const successfulReceipts = executed.map(({ name, result }) =>
+        const successfulReceipts = receiptExecutions.map(({ name, result }) =>
           successfulActionSpeech(name, result),
         );
         if (
@@ -1028,7 +1143,7 @@ export class CelerisConversation {
   ): Promise<string | undefined> {
     if (!this.options.apiKey || updates.length === 0 || signal.aborted) return undefined;
     this.preemptCompaction();
-    const directSpeech = directSessionOutputSpeech(updates);
+    const directSpeech = directCoordinatorUpdateSpeech(updates);
     if (directSpeech) return sanitizeForSpeech(directSpeech, 300);
     const messages: ChatMessage[] = [
       {

@@ -1507,7 +1507,7 @@
           ],
           "speechTerms": ["side beta"],
           "speechAnyTerms": [["sent", "told"], ["switched", "focused", "now in"]],
-          "maxRounds": 1
+          "maxRounds": 2
         }
       },
       {
@@ -1718,6 +1718,128 @@
           "output_delta": { "changed": false, "output": "" },
           "updates": [],
           "update_cursor": 101
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session", "send_message"],
+          "speechTerms": ["primary work"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "notification_ordinal_send_keeps_focus",
+    "description": "Route an ordinal imperative follow-up across two recent background notifications without sending it to sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-alpha", "name": "Side Alpha", "status": "idle", "focused": false },
+        { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 201,
+            "type": "session_completed",
+            "session_id": "session-alpha",
+            "name": "Side Alpha",
+            "summary": "Side Alpha finished the packet audit. It found one ordering failure."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side alpha", "ordering"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 202,
+            "type": "session_completed",
+            "session_id": "session-beta",
+            "name": "Side Beta",
+            "summary": "Side Beta finished the reconnect audit. All reconnect checks passed."
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side beta", "reconnect", "passed"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay tell the first one rerun that ordering failure with packet logs",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-alpha", "name": "Side Alpha", "status": "idle", "focused": false },
+            { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 202
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-alpha", "name": "Side Alpha", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+              { "id": "session-alpha", "name": "Side Alpha", "status": "running", "focused": false },
+              { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 203, "type": "message_sent", "summary": "Sent immediately to Side Alpha: Rerun the ordering failure with packet logs." }
+            ]
+          }
+        },
+        "checkUpdatesAfter": 202,
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session"],
+          "sessionId": "session-alpha",
+          "messageTerms": ["rerun", "ordering failure", "packet logs"],
+          "delivery": "not_queued",
+          "speechTerms": ["side alpha"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "and just stay in primary okay",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-alpha", "name": "Side Alpha", "status": "running", "focused": false },
+            { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 203, "type": "message_sent", "summary": "Sent immediately to Side Alpha: Rerun the ordering failure with packet logs." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 202
         },
         "expected": {
           "toolSequence": [],

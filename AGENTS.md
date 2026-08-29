@@ -110,9 +110,11 @@ When the channel is idle, those real events are sent to Celeris without tools
 and spoken proactively; a human turn takes priority and receives any unspoken
 event in its frozen context. The voice consumer advances its event cursor only
 after proactive playback completes.
-One plain `session_output` message up to 240 characters and three lines is
-spoken directly with its session name in zero model rounds. URLs, code fences,
-longer output, and multi-event batches still use Celeris adaptation.
+One plain `session_output` message or `session_completed` summary up to 240
+characters and three lines is spoken directly in zero model rounds. This keeps
+short proactive facts exact instead of risking lossy paraphrase. URLs, code
+fences, longer output, decisions, and multi-event batches still use Celeris
+adaptation.
 `waiting_for_input` is a
 voice-facing filter for a nonzero pending-elicitation count, not an Omnigent
 status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
@@ -149,11 +151,13 @@ Notification history records are authoritative for resolving “that one,” “
 first one,” and “the other one”; a read copies the referenced notification's
 session ID rather than substituting sticky focus. A changed `output_delta`
 directly answers “what's new” and “since then” without an older-output read.
-An imperative pronoun follow-up immediately after one session's spoken
-notification is also resolved by the harness: `send_message` receives that
-notification's still-known server-owned session ID, while sticky focus remains
-unchanged. If one notification batch names multiple sessions, the voice route
-fails closed instead of guessing.
+Imperative pronoun follow-ups after a spoken notification burst are also
+resolved by the harness. It preserves notification order since the last human
+turn, maps “first,” “second,” “third,” and “last” to the corresponding
+server-owned session ID, and injects that target into `send_message` while
+sticky focus remains unchanged. An unqualified “that one” after multiple
+sessions fails closed instead of guessing; once another human turn intervenes,
+the narrow deterministic reference expires.
 ASR discourse repairs such as “no wait” do not select queued delivery; only an
 explicit request to queue or wait for the current turn does. For a true output
 visibility check, the response combines the action ledger's delivery evidence
@@ -173,9 +177,18 @@ cannot mutate focus. Conservative name-token matching also withholds
 named focus target is resolved against `known_sessions`; the model-visible
 schema omits the opaque ID and the harness injects the authoritative value even
 if Celeris emits a malformed one. Multiple named targets without a clear
-destination fail closed. The harness
+destination fail closed. A positive switch to a name absent from the fresh map
+forces `list_sessions`; if that result resolves one name, the harness injects
+its ID and requires `focus_session` before speech. Task instructions such as
+“tell it to focus on the cutoff” do not activate this navigation guard. The harness
 withholds `check_updates` from the voice model because it calls that tool
 atomically before constructing every turn and later tool results carry updates.
+When one utterance explicitly asks both to message a named session and to
+switch focus, deterministic speech cannot finish until both actions have been
+attempted. If Celeris emits only one, the next round is forced to the missing
+tool and verified results accumulate across rounds. Negated focus language such
+as “don't switch me” is excluded. This recovery adds a model round only when
+the normal one-round compound call is incomplete.
 When the previous assistant claimed a send, no retained `message_sent` receipt
 exists, and the human makes a declarative correction that the message is
 missing, a narrow evidence guard requires `send_message` for the first model
