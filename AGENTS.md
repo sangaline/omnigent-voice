@@ -31,9 +31,14 @@ The bundled runtime models are the int8 0.6B Nemotron English streaming
 transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the
 public `alba` voice, and Piper US English Lessac medium as a fallback. The public
 image deliberately uses `kyutai/pocket-tts-without-voice-cloning`; it cannot
-clone a new voice. The full gated Pocket checkpoint can condition on a private
-audio prompt, but those weights and any derived voice state must enter through
-private runtime storage rather than the public image. Speech models run on
+derive a new voice state from audio. The full gated Pocket checkpoint can
+condition on a private audio prompt and export that state; the stripped public
+runtime can then load the compatible `.safetensors` state without gated weights
+or Hugging Face credentials. Private prompts and derived states must enter
+through private runtime storage rather than the public image. Production uses
+the generic retained-PVC path
+`/var/lib/omnigent-voice/private-voice-state.safetensors`; never record the
+speaker identity or source filename in public configuration. Speech models run on
 CPU; ASR and Piper use `sherpa-onnx-node`, while Pocket stays warm behind a
 private stdio Python bridge. Model
 archives and checksums belong in the container build, never in git. TTS progress
@@ -46,6 +51,9 @@ Pocket is the staged deployment default because it retains Piper-class first
 audio latency with a substantially more natural voice. The exact stripped
 container loaded and warmed Pocket in about 5.05 seconds, produced first audio
 in 34 ms, and generated 3.28 seconds of audio in 437 ms across 41 chunks.
+The first live private state loaded and warmed in 5.33 seconds. Its offline
+candidate measurement produced first audio in 44.7 ms; startup and state load
+remain outside the live turn path.
 Startup is outside the live turn path. Three 3.28-4.08 second intelligibility
 probes generated in 0.51-0.68 seconds and were independently recognized by the
 bundled Nemotron model with only two minor word omissions. Returning `false`

@@ -144,10 +144,11 @@ The image has no embedded deployment configuration or credentials. See
 path to retain the JSONL event log across process restarts. The Pocket model and
 public `alba` voice state are downloaded without authentication during the
 image build and run with Hugging Face offline mode at runtime. This public
-`pocket-tts-without-voice-cloning` checkpoint cannot clone a new voice. The full
-gated Pocket checkpoint supports audio-prompt conditioning, but gated weights
-and private voice samples or embeddings must be mounted at runtime and must not
-be included in the public image.
+`pocket-tts-without-voice-cloning` checkpoint cannot derive a new voice from an
+audio prompt. The full gated Pocket checkpoint can export a compatible
+conditioning state, which the stripped public runtime can load from a private
+runtime mount without gated weights or Hugging Face credentials. Private voice
+samples and derived states must never be included in the public image.
 
 ## Prompt replay
 

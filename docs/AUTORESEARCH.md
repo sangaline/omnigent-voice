@@ -1413,3 +1413,29 @@ uses one. The final promotion gate passed 102 unit tests, clean typecheck, 35 of
 coordinator interaction remained frozen and local to the eval harness; no live
 Omnigent session was read or mutated, and the excluded ESPN session remained
 untouched.
+
+### 2026-08-29 — Private Pocket conditioning state
+
+Hypothesis H49: a zero-shot Pocket voice conditioned from a short private
+recording could retain the existing staged runtime's low first-audio latency
+without placing gated weights, credentials, or biometric-derived artifacts in
+the public image. Two private prompts, 18.69 and 24.82 seconds long, were tested
+both as recorded and after mono loudness normalization and 24 kHz resampling.
+The originals remained unchanged and every derivative stayed outside git.
+
+The gated checkpoint exported four states. Conditioning took 1.96–3.05 seconds
+offline, while candidate synthesis produced first audio in 41.0–44.7 ms. All
+four states loaded in 0.5–1.2 ms under the public
+`pocket-tts-without-voice-cloning` runtime with network access disabled, proving
+that gated weights and Hugging Face authentication are unnecessary after
+provisioning. Independent local ASR recovered the complete generic probe from
+both normalized candidates; one unnormalized candidate omitted only its initial
+greeting.
+
+The longer normalized candidate was provisioned under a generic filename on
+the retained private PVC. The public GitOps change contains only that runtime
+path and the immutable public-safe image tag. The replacement pod loaded and
+warmed Pocket in 5.33 seconds, selected the state without fallback, reached all
+coordinator and Discord readiness events, and restarted zero times. This is
+zero-shot conditioning rather than weight fine-tuning; subjective speaker
+similarity remains a live-listening evaluation.
