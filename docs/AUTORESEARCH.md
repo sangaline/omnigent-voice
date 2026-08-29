@@ -1679,3 +1679,29 @@ Promotion evidence is 122 passing unit tests, clean typecheck and build, 44 of
 44 isolated trials, and all 33 stateful scenarios across 110 linked turns. The
 evals used a frozen coordinator; no live Omnigent session was read or mutated,
 and the excluded ESPN session remained untouched.
+
+### 2026-08-29 — Captured ETA update denial for replay
+
+A retained live trace exposed a compound regression that is queued for the next
+voice research pass. The coordinator recorded a successful outbound ETA
+question in 666 ms and later delivered unrelated progress from the same focused
+session. Across more than four minutes, the assistant nevertheless made at
+least five unsupported claims that no ETA response had arrived. It also promised
+to report the answer later instead of grounding the claim in a fresh read or an
+authoritative update.
+
+The strongest cut point is independent of whether the coordinator originally
+missed an item: the human correction explicitly supplied the previously spoken
+ETA, but a late completion from an overlapping, superseded turn answered with
+unrelated progress. A subsequent verification question then claimed a message
+had been sent even though the trace contains no corresponding action receipt.
+This therefore needs both a stateful evidence-grounding scenario and a runtime
+turn-cancellation regression, not a narrowly worded prompt patch.
+
+Before changing the harness, replay will establish whether the ETA answer was
+present in stable Omnigent conversation items, retained in a coordinator event,
+or never surfaced through the cursor. Sanitized cases will start at multiple
+points in the exchange so a change must generalize across initial update checks,
+repeated stale-state questions, explicit human correction, and action
+verification. The private source trace remains outside git and no live or
+excluded session was read or mutated during this capture.
