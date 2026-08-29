@@ -4,6 +4,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: ['main']
   push:
@@ -59,4 +60,3 @@ jobs:
             docker.io/sangaline/omnigent-voice:latest
           cache-from: type=gha,scope=omnigent-voice
           cache-to: type=gha,scope=omnigent-voice,mode=max
-
