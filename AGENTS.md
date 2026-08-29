@@ -80,6 +80,17 @@ documented authenticated `/echo` warmup with a five-second best-effort timeout;
 it invokes no model and establishes the network connection before the caller's
 first turn.
 
+The streaming segmenter emits only complete sentence boundaries before the
+provider finishes and accounts for inter-segment spaces in the 300-character
+spoken budget. If a later complete sentence does not fit, it is omitted instead
+of being spoken as a dangling clause with an ellipsis. The returned assistant
+speech, hot dialogue memory, and audit record must equal the exact joined
+segments queued for Discord; never sanitize the full completion into a
+different remembered answer after streaming it. A single first sentence that
+itself exceeds the budget still uses the bounded sanitizer fallback. Replay,
+isolated eval, and scenario eval pass the production streaming callback and
+fail immediately if queued speech diverges from the returned speech.
+
 Nemotron replaced the smaller 80 ms NeMo fast-conformer after the live Discord
 transcript showed severe omissions and substitutions. On the host, the 560 ms
 int8 model loaded in about 1.24 seconds at roughly 951 MiB RSS, decoded bundled
@@ -310,7 +321,13 @@ the session id embedded in that notification without changing sticky focus, and
 a correction that a requested send was missing repeats `send_message` rather
 than substituting an output read. Celeris must not invent missing context or
 access as the cause of a prior bad answer; when no exact cause is established it
-states only that it misinterpreted the available data.
+states only that it misinterpreted the available data. The adjacent rule names
+common false excuses such as not having, not being shown, or being unable to
+access the right output because the base rule alone remained unstable. For an
+authentication or security question, the same adjacent evidence rule preserves
+every source-stated credential mechanism, reachability boundary, and whether a
+remote authentication layer actually exists; a generic claim that something is
+local is not sufficient.
 `send_message` creates a user-role item in Omnigent. For normal relays Celeris
 preserves the human's intent, but a report about the voice interface's own
 mistake must explicitly name “the voice coordinator” and distinguish the human;

@@ -142,7 +142,13 @@ for (const scenario of scenarios) {
           coordinator.replaceState(turn.coordinatorState);
           coordinator.replaceToolResults(turn.toolResults);
           const callStart = coordinator.calls.length;
-          const speech = await conversation.respond(turn.input);
+          const streamedSpeech: string[] = [];
+          const speech = await conversation.respond(turn.input, (segment) => {
+            streamedSpeech.push(segment);
+          });
+          if (streamedSpeech.length > 0 && streamedSpeech.join(" ") !== speech) {
+            throw new Error("Production streaming speech diverged from remembered speech");
+          }
           observation = observationFromTrace(
             trace,
             speech,

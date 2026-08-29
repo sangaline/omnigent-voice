@@ -80,7 +80,13 @@ for (const testCase of cases) {
         trace: (event) => trace.push(event),
       });
       conversation.restoreHistory(testCase.history);
-      const speech = await conversation.respond(testCase.input);
+      const streamedSpeech: string[] = [];
+      const speech = await conversation.respond(testCase.input, (segment) => {
+        streamedSpeech.push(segment);
+      });
+      if (streamedSpeech.length > 0 && streamedSpeech.join(" ") !== speech) {
+        throw new Error("Production streaming speech diverged from remembered speech");
+      }
       const observation = observationFromTrace(
         trace,
         speech,

@@ -99,19 +99,17 @@ export class StreamingSpeechSegmenter {
   private buffer = "";
   private emittedCharacters = 0;
   private closed = false;
+  private limitReached = false;
 
-  public constructor(
-    private readonly maximumCharacters = 300,
-    private readonly preferredChunkCharacters = 120,
-  ) {
-    if (maximumCharacters < 1 || preferredChunkCharacters < 1) {
-      throw new Error("Streaming speech limits must be positive");
+  public constructor(private readonly maximumCharacters = 300) {
+    if (maximumCharacters < 1) {
+      throw new Error("Streaming speech limit must be positive");
     }
   }
 
   public push(fragment: string): string[] {
     if (this.closed) throw new Error("Streaming speech was already finalized");
-    if (!fragment) return [];
+    if (!fragment || this.limitReached) return [];
     this.buffer += fragment;
     return this.drain(false);
   }
@@ -129,17 +127,34 @@ export class StreamingSpeechSegmenter {
 
   private drain(final: boolean): string[] {
     const segments: string[] = [];
-    while (this.buffer && this.emittedCharacters < this.maximumCharacters) {
+    while (
+      this.buffer &&
+      this.emittedCharacters < this.maximumCharacters &&
+      !this.limitReached
+    ) {
       const boundary = this.nextBoundary(final);
       if (boundary === undefined) break;
       const raw = this.buffer.slice(0, boundary);
       this.buffer = this.buffer.slice(boundary).trimStart();
-      const remaining = this.maximumCharacters - this.emittedCharacters;
-      const speech = sanitizeForSpeech(raw, remaining);
+      const separatorCharacters = this.emittedCharacters > 0 ? 1 : 0;
+      const remaining =
+        this.maximumCharacters - this.emittedCharacters - separatorCharacters;
+      const completeSpeech = sanitizeForSpeech(raw, Number.MAX_SAFE_INTEGER);
+      if (completeSpeech.length > remaining) {
+        this.buffer = "";
+        this.limitReached = true;
+        if (this.emittedCharacters > 0) break;
+      }
+      const speech = this.limitReached
+        ? sanitizeForSpeech(completeSpeech, remaining)
+        : completeSpeech;
       if (!speech) continue;
       segments.push(speech);
-      this.emittedCharacters += speech.length;
-      if (this.emittedCharacters >= this.maximumCharacters) this.buffer = "";
+      this.emittedCharacters += separatorCharacters + speech.length;
+      if (this.emittedCharacters >= this.maximumCharacters) {
+        this.buffer = "";
+        this.limitReached = true;
+      }
     }
     return segments;
   }
@@ -151,19 +166,7 @@ export class StreamingSpeechSegmenter {
       if (end >= 12 || final) return end;
     }
     if (final) return this.buffer.length;
-    if (this.buffer.length < this.preferredChunkCharacters) return undefined;
-
-    const window = this.buffer.slice(0, this.preferredChunkCharacters + 24);
-    const softBoundary = Math.max(
-      window.lastIndexOf(", "),
-      window.lastIndexOf("; "),
-      window.lastIndexOf(": "),
-    );
-    if (softBoundary >= Math.floor(this.preferredChunkCharacters / 2)) {
-      return softBoundary + 1;
-    }
-    const whitespace = window.lastIndexOf(" ");
-    return whitespace > 0 ? whitespace : Math.min(this.buffer.length, this.preferredChunkCharacters);
+    return undefined;
   }
 }
 
@@ -330,11 +333,12 @@ Resolve short replies against the immediately preceding spoken exchange. When th
 
 export const currentTurnActionInvariant = `CURRENT TURN EXECUTION RULES:
 Recent dialogue can contain system records beginning “Omnigent background update.” These records are authoritative for notification references and contain exact session names and session IDs. Resolve “that one,” “the first one,” “the other one,” and similar follow-ups against the referenced notification record, then copy that record's session_id literally into the requested tool. Never substitute the focused_session ID for a referenced background session. Reading or resolving a prompt in a background session never changes sticky focus.
-An Omnigent background-update record or typed tool result outranks your prior assistant speech. Prior assistant speech is a fallible interpretation, not source evidence or a quotation. When the human asks whether a source established one layer or another, name both sides: state what the source establishes and what it does not establish. Preserve its actor, positive capability, negative capability, and causal direction exactly; a downstream client not consuming events never means the upstream backend cannot emit them, and vice versa.
+An Omnigent background-update record or typed tool result outranks your prior assistant speech. Prior assistant speech is a fallible interpretation, not source evidence or a quotation. When the human asks whether a source established one layer or another, name both sides: state what the source establishes and what it does not establish. Preserve its actor, positive capability, negative capability, and causal direction exactly; a downstream client not consuming events never means the upstream backend cannot emit them, and vice versa. For an authentication or security question, preserve every source-stated credential mechanism, reachability boundary, and whether remote authentication exists; “local” alone is not enough.
 If the immediately preceding assistant speech announced a different session, answer a follow-up directly when that notification already contains the requested fact. If the human asks for exact output, the last thing it said, or detail absent from the notification, call the read tool with the notification's session_id. If the human clearly approves, declines, or cancels an announced decision, call answer_prompt with the exact prompt_id and session_id from pending_decisions instead. Never invent an identifier from the session name.
 If the human states that a requested message was missing, not sent, or not received, repeat send_message with the intended message. A declarative correction such as “I don't see the message” after you claimed to send it is a missed-action complaint and requires send_message. An actual question asking whether a message is visible or recent, or explicitly asking to inspect or verify output, is instead a read request: use get_output and never send a message for that question.
 No coordinator action has happened in this human turn yet. If the human asks for an action, or if answering requires current coordinator data, your next output must be the appropriate tool call, not prose. Only a successful tool result later in this turn proves the action happened. The recent_actions ledger describes prior turns and never satisfies a new request. “Another,” “again,” “retry,” “now,” and corrections that an action was missed require a new tool call. Execute tools before speaking. Never say that you will need to pull or check data, offer to check it, ask permission for a read-only check, or promise to perform a tool action after the response; call the tool now.
 If the human only corrects your interpretation or asks whether you understand the distinction, acknowledge and explain that distinction, then stop. Do not infer a new send request, volunteer to send a correction, or promise a tool action. A later explicit request to send, tell, ask, message, or flag it is a new action and must call the tool before speech.
+If the human asks why your prior answer was wrong and the evidence does not establish an exact cause, say only that you misread or misinterpreted the available data. Never claim that you did not have, were not shown, could not access, or were missing the correct context or output.
 Every send_message is delivered to Omnigent as a user-role item. Preserve the human's first person only when it really refers to the human. When relaying a correction about your own voice-interface behavior, write “the voice coordinator” rather than “I” and explicitly distinguish the human so the destination cannot reverse who did what.
 An explicit request to switch, focus, or open another session requires focus_session before any speech. Never narrate a focus change from the request alone; only the tool result proves the active session changed.
 voice_message_routing is computed deterministically from this human transcript and known_sessions. When its mode is named, call send_message normally; the harness supplies that exact target without changing focus. When its mode is multiple, call send_message once for each separately addressed destination and select its exact enum name; the harness resolves every name to a server-owned ID and requires all destinations before speech. When its mode is ambiguous, do not claim to send anything and ask the human to name one target.
@@ -2584,9 +2588,11 @@ export class CelerisConversation {
           ? new StreamingSpeechSegmenter(300)
           : undefined;
         let streamedSegments = 0;
+        const streamedSpeech: string[] = [];
         const emitSegments = (segments: readonly string[]): void => {
           for (const segment of segments) {
             streamedSegments += 1;
+            streamedSpeech.push(segment);
             onSpeechSegment?.(segment);
           }
         };
@@ -2618,7 +2624,9 @@ export class CelerisConversation {
             continue;
           }
           if (!content) throw new Error("Celeris returned neither speech nor a tool call twice");
-          const speech = sanitizeForSpeech(content, 300);
+          const speech = streamedSpeech.length > 0
+            ? streamedSpeech.join(" ")
+            : sanitizeForSpeech(content, 300);
           const verifiedOutcome = verifiedActionReceipt();
           if (verifiedOutcome) {
             this.lastVerifiedActionOutcome = verifiedOutcome;

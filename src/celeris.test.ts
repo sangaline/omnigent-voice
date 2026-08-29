@@ -191,15 +191,44 @@ describe("Celeris coordinator conversation", () => {
   });
 
   it("segments generated text at natural boundaries with a hard speech limit", () => {
-    const segmenter = new StreamingSpeechSegmenter(54, 30);
+    const segmenter = new StreamingSpeechSegmenter(54);
     expect(segmenter.push("The first sentence arrives. The second")).toEqual([
       "The first sentence arrives.",
     ]);
-    expect(segmenter.push(" one is long enough, and keeps moving")).toEqual([
-      "The second one is long enou…",
-    ]);
+    expect(segmenter.push(" one is long enough, and keeps moving")).toEqual([]);
     expect(segmenter.finish()).toEqual([]);
     expect(() => segmenter.push("late")).toThrow("already finalized");
+  });
+
+  it("remembers exactly the complete sentences emitted within the speech budget", async () => {
+    const first =
+      "The local coordinator uses runtime credentials and private reachability for its stdio server.";
+    const second =
+      "A remote transport would need authenticated identity and authorization before external clients could safely connect to it across every deployment without exposing coordinator authority, and that work has not been implemented yet.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        streamingResponse(
+          {
+            choices: [{ delta: { content: `${first} ` }, finish_reason: null }],
+          },
+          {
+            choices: [{ delta: { content: second }, finish_reason: "stop" }],
+          },
+          "[DONE]",
+        ),
+      ),
+    );
+    const subject = conversation("test-key");
+    const segments: string[] = [];
+
+    await expect(
+      subject.respond("How does remote authentication work?", (segment) => {
+        segments.push(segment);
+      }),
+    ).resolves.toBe(first);
+    expect(segments).toEqual([first]);
+    await expect(subject.respond("repeat that")).resolves.toBe(first);
   });
 
   it("streams content deltas into speech segments while retaining the full reply", async () => {

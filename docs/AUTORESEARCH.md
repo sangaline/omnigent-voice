@@ -1644,3 +1644,38 @@ distinction correctly in 503 ms and one model round. Promotion evidence is 121
 passing unit tests, clean typecheck and build, 43 of 43 isolated trials, and all
 33 stateful scenarios across 110 linked turns. No eval or replay invoked a live
 coordinator action, and the excluded ESPN session remained untouched.
+
+### 2026-08-29 — Streamed speech and remembered speech are identical
+
+Hypothesis H59: the 300-character speech bound applied consistently to both the
+sentences streamed into Discord and the assistant response retained in dialogue
+memory. The retained voice trace disproved it. Discord queued 302 characters,
+ending the second sentence at “which hasn't…”, while the returned and remembered
+assistant response contained only the complete 154-character first sentence.
+Pocket rendered 19.84 seconds of audio and playback took 19.94 seconds before
+the human asked which clause had trailed off. Production replay reproduced the
+bad follow-up in 479 ms because the model could see only the shorter remembered
+answer.
+
+Streaming now occurs only at complete sentence boundaries before finalization,
+counts the spaces between segments against the aggregate budget, and omits a
+later sentence when it cannot fit instead of emitting a partial clause. The
+speech returned to the conversation, dialogue memory, and audit path is the
+exact concatenation that was queued into Discord. The isolated, scenario, and
+replay runners now exercise the same streaming callback and abort if returned
+speech differs from queued speech; the old runners had missed this production
+path distinction. A focused unit regression verifies both the spoken result and
+the later “repeat that” memory.
+
+The new authentication-detail case was initially nine of ten after its evaluator
+wording was corrected: one response reduced the source's runtime credentials and
+private-reachability facts to merely “local.” An adjacent evidence rule raised it
+to ten of ten while keeping the answer inside a complete spoken budget. The full
+gate also exposed an older honesty-correction case at eight of ten because the
+model sometimes invented that it “didn't have” the correct line. Naming those
+false access excuses in the adjacent rule raised that case to ten of ten.
+
+Promotion evidence is 122 passing unit tests, clean typecheck and build, 44 of
+44 isolated trials, and all 33 stateful scenarios across 110 linked turns. The
+evals used a frozen coordinator; no live Omnigent session was read or mutated,
+and the excluded ESPN session remained untouched.

@@ -1582,6 +1582,45 @@
     }
   },
   {
+    "id": "source_detail_fits_complete_spoken_budget",
+    "description": "Answer an ASR-style authentication follow-up with the decisive local and remote facts in complete concise sentences.",
+    "history": [
+      {
+        "role": "system",
+        "content": "Omnigent background update: [{\"event_id\":38,\"type\":\"session_output\",\"session_id\":\"session-primary\",\"name\":\"Primary Work\",\"output\":\"The current MCP server is stdio-only for local processes and relies on runtime credentials plus private reachability. Remote HTTP access with GitHub OAuth is not implemented; it would require an authenticated transport with identity and authorization.\"}]"
+      },
+      {
+        "role": "assistant",
+        "content": "Primary Work confirmed that MCP remains available through the existing local stdio server."
+      }
+    ],
+    "input": "uh can you tell me a little more how auth works like is github oauth already integrated",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 38
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+      "speechAnyTerms": [
+        ["stdio", "local"],
+        ["runtime credentials", "private reachability"],
+        ["not implemented", "not currently implemented", "hasn't been implemented", "has not been implemented", "not integrated", "not currently integrated", "isn't integrated"],
+        ["oauth", "authenticated transport"]
+      ],
+      "speechForbiddenTerms": ["…", "which hasn't", "which has not"],
+      "maxSpeechWords": 45,
+      "maxRounds": 1
+    }
+  },
+  {
     "id": "source_update_preserves_client_side_limitation",
     "description": "Preserve a source update's client-side limitation even when prior voice speech incorrectly blamed the backend.",
     "history": [

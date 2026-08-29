@@ -159,7 +159,13 @@ try {
     trace: (event) => trace.push(event),
   });
   conversation.restoreHistory(dialogue);
-  const speech = await conversation.respond(targetText);
+  const streamedSpeech: string[] = [];
+  const speech = await conversation.respond(targetText, (segment) => {
+    streamedSpeech.push(segment);
+  });
+  if (streamedSpeech.length > 0 && streamedSpeech.join(" ") !== speech) {
+    throw new Error("Production streaming speech diverged from remembered speech");
+  }
   const rounds = trace
     .filter(
       (event): event is Extract<CelerisTraceEvent, { type: "completion" }> =>
@@ -186,6 +192,7 @@ try {
         initialResponse: rounds[0]?.message ?? null,
         response: rounds.at(-1)?.message ?? null,
         speech,
+        streamedSpeech,
         rounds,
         coordinatorCalls: coordinator.calls,
         toolCalls: trace.filter((event) => event.type === "tool"),
