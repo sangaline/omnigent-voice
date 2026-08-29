@@ -243,10 +243,14 @@ export class KameS2SRuntime {
   public waitForSpeechTurn(options: {
     signal?: AbortSignal | undefined;
     timeoutMs?: number | undefined;
+    startTimeoutMs?: number | undefined;
+    completionTimeoutMs?: number | undefined;
     onStarted?: (() => void) | undefined;
   } = {}): Promise<boolean> {
     if (!this.readyState || options.signal?.aborted) return Promise.resolve(false);
     const timeoutMs = options.timeoutMs ?? 20_000;
+    const startTimeoutMs = options.startTimeoutMs ?? timeoutMs;
+    const completionTimeoutMs = options.completionTimeoutMs;
     return new Promise<boolean>((resolve) => {
       const state: S2SSpeechTurnState = { started: false, silentFrames: 0 };
       const started = performance.now();
@@ -267,10 +271,19 @@ export class KameS2SRuntime {
         resolve(completed);
       };
       const abort = (): void => finish(false);
-      const timer = setTimeout(() => {
-        this.options.logger.warn("s2s.output.speech_timeout", { timeoutMs });
-        finish(false);
-      }, timeoutMs);
+      let timer: NodeJS.Timeout;
+      const armTimeout = (durationMs: number, phase: "start" | "completion"): void => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          this.options.logger.warn("s2s.output.speech_timeout", {
+            timeoutMs: durationMs,
+            phase,
+          });
+          finish(false);
+        }, durationMs);
+      };
+      timer = setTimeout(() => undefined, startTimeoutMs);
+      armTimeout(startTimeoutMs, "start");
       unsubscribe = this.subscribeAudio((audio) => {
         const wasStarted = state.started;
         const completed = acceptS2SSpeechTurnFrame(state, audio);
@@ -279,6 +292,9 @@ export class KameS2SRuntime {
           this.options.logger.info("s2s.output.speech_started", {
             waitMs: Math.round(performance.now() - started),
           });
+          if (completionTimeoutMs !== undefined) {
+            armTimeout(completionTimeoutMs, "completion");
+          }
           options.onStarted?.();
         }
         if (completed) finish(true);

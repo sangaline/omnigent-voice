@@ -559,6 +559,7 @@ export class DiscordVoiceBot {
     epoch: number,
     waitForCompletion: boolean,
     parentSignal?: AbortSignal,
+    timeouts?: { startMs: number; completionMs: number },
   ): Promise<boolean> {
     const s2s = this.options.s2s;
     if (!s2s || !text || epoch !== this.responseEpoch || parentSignal?.aborted) {
@@ -573,6 +574,8 @@ export class DiscordVoiceBot {
     let playbackStarted: number | undefined;
     const completion = s2s.waitForSpeechTurn({
       signal: controller.signal,
+      startTimeoutMs: timeouts?.startMs,
+      completionTimeoutMs: timeouts?.completionMs,
       onStarted: () => {
         playbackStarted = performance.now();
         this.options.logger.info("conversation.assistant.playback_started", {
@@ -645,7 +648,10 @@ export class DiscordVoiceBot {
     this.options.logger.info("s2s.proactive.trigger_complete", {
       audioMs: Math.round((samples / this.options.s2s.ready.sampleRate) * 1_000),
     });
-    return this.guideS2S(text, epoch, true, signal);
+    return this.guideS2S(text, epoch, true, signal, {
+      startMs: 5_000,
+      completionMs: 30_000,
+    });
   }
 
   private async speak(text: string, epoch: number, retry = 0): Promise<boolean> {
@@ -704,7 +710,7 @@ export class DiscordVoiceBot {
     this.scheduleCoordinatorNotification();
   }
 
-  private scheduleCoordinatorNotification(): void {
+  private scheduleCoordinatorNotification(delayMs = 250): void {
     if (
       this.shuttingDown ||
       this.pendingCoordinatorUpdates.length === 0 ||
@@ -715,7 +721,7 @@ export class DiscordVoiceBot {
     this.notificationTimer = setTimeout(() => {
       this.notificationTimer = undefined;
       void this.processCoordinatorNotification();
-    }, 250);
+    }, delayMs);
   }
 
   private async processCoordinatorNotification(): Promise<void> {
@@ -741,8 +747,21 @@ export class DiscordVoiceBot {
         superseded: false,
         source: "background_update",
       });
-      if (await this.deliverProactiveSpeech(spoken, epoch, controller.signal)) {
+      let delivered = await this.deliverProactiveSpeech(spoken, epoch, controller.signal);
+      if (!delivered && !controller.signal.aborted && epoch === this.responseEpoch) {
+        this.options.logger.warn("s2s.proactive.retry", { attempt: 1 });
+        delivered = await this.deliverProactiveSpeech(spoken, epoch, controller.signal);
+      }
+      if (delivered) {
         this.options.celeris.acknowledgeSpokenUpdates(updates, spoken);
+      } else if (!controller.signal.aborted && epoch === this.responseEpoch) {
+        for (const update of updates.toReversed()) {
+          if (!this.pendingCoordinatorUpdates.some((item) => item.event_id === update.event_id)) {
+            this.pendingCoordinatorUpdates.unshift(update);
+          }
+        }
+        this.options.logger.warn("s2s.proactive.requeued", { updates: updates.length });
+        this.scheduleCoordinatorNotification(5_000);
       }
     } finally {
       if (this.notificationAbort === controller) this.notificationAbort = undefined;
