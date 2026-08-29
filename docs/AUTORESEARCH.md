@@ -1356,3 +1356,60 @@ compound turn measured 184–259 ms in this sample. Final evidence is 98 passing
 unit tests, clean typecheck and build, 32 of 32 isolated trials, and all 31
 stateful scenarios across 102 linked turns. No live Omnigent session was read or
 mutated, and the excluded ESPN session remained untouched.
+
+### 2026-08-29 — Atomic empty-arrival receipts
+
+Hypothesis H47: the fast model could answer a common ASR-style “did anything
+else new just come in while I was talking” turn from the already-current
+coordinator snapshot without another tool or model round. The held-out empty
+snapshot disproved the unchanged behavior: zero of five trials passed. Every
+trial selected `get_output` for sticky focus, even though the question asked
+about the event stream rather than older session output, and the frozen
+coordinator correctly rejected that unsupported read. Those failing model
+rounds took 151–413 ms. A companion snapshot containing new stable focused
+output passed five of five and established the fail-closed boundary.
+
+The accepted path expands only the incoming-event grammar needed for the ASR
+phrase. It renders a negative receipt when `updates` is atomically empty,
+`output_delta.changed` is false, and the event cursor has not expired. Missing
+output evidence, a changed focused delta, or additional status/read/action
+language disables the shortcut. A compound focused send plus the same arrival
+question exposed an important first-candidate hazard: the empty receipt could
+have returned before the send. The final implementation instead executes the
+action, strips the voice-only clause from its exact instruction, and composes
+the verified action receipt with the typed empty result when no event appears
+in the action result.
+
+The empty snapshot passed ten of ten at zero model rounds and 0–4 ms. The
+compound action passed ten of ten with the exact outbound message in one model
+round. A four-turn linked flow covering a prior proactive event, an empty
+check, a later event, and a cursor-backed deictic poll passed ten of ten runs
+and all 40 turns. The first broad linked gate then exposed an older unrelated
+attribution variance rather than an H47 regression.
+
+### 2026-08-29 — Deterministic voice-owned attribution
+
+Hypothesis H48: the repeated prompt contract was sufficient to preserve
+human-versus-voice identity in the existing three-turn attribution flow. The
+full gate produced one failure, and a targeted sample passed only seven of ten
+runs. Two failures acknowledged the ambiguity without explicitly naming the
+voice coordinator and the human; another relay dropped the decisive negation
+from its outbound message. This repeated a failure class previously retained
+after a small sample happened to pass, so more prompt repetition was rejected.
+
+The harness now recognizes only a narrow evidence-backed correction: the typed
+recent-action ledger contains a first-person voice-owned mistake, and the human
+explicitly says those words will be attributed to them rather than the voice
+layer while asking whether the distinction is understood. It responds without
+a model round or an action promise. If the next turn explicitly asks to send
+that exact distinction, Celeris still must select the real `send_message` tool,
+but the harness rewrites the ledger's voice-owned predicate into an explicit
+“the voice coordinator …; the human did not” message before execution.
+
+The repaired linked flow passed twenty of twenty runs and all 60 turns; its
+understanding turn and exact-message audit use zero model rounds, while the send
+uses one. The final promotion gate passed 102 unit tests, clean typecheck, 35 of
+35 isolated trials, and all 32 stateful scenarios across 106 turns. Every
+coordinator interaction remained frozen and local to the eval harness; no live
+Omnigent session was read or mutated, and the excluded ESPN session remained
+untouched.

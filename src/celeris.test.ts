@@ -10,6 +10,7 @@ import {
   directCoordinatorUpdateSpeech,
   directFocusedOutputSpeech,
   directGetOutputResultSpeech,
+  directNoIncomingUpdateSpeech,
   directPollOutputResultSpeech,
   directSessionOutputSpeech,
   immediateNotificationTargets,
@@ -23,11 +24,13 @@ import {
   successfulActionSpeech,
   targetsFocusedSession,
   verifiedActionFollowupSpeech,
+  verifiedAttributionClarificationSpeech,
   verifiedDeliveryVisibilitySpeech,
   verifiedExactMessageSpeech,
   verifiedQueuedDeliverySpeech,
   verifiedToolWorkflowOutcome,
   voiceFocusRouting,
+  voiceAttributionRelayMessage,
   voiceMessageInstruction,
   voiceMessageRouting,
   voiceReadRouting,
@@ -3046,6 +3049,140 @@ describe("Celeris coordinator conversation", () => {
       "The cutoff is fixed and every decoder test passes.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("answers an atomically empty incoming-update check without a model round", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockResolvedValue({
+      focused_session: { id: "session-primary", name: "Primary Work", status: "running" },
+      known_sessions: [{ id: "session-primary", name: "Primary Work", status: "running" }],
+      pending_decisions: [],
+      output_delta: { changed: false, output: "" },
+      updates: [],
+      update_cursor: 12,
+    });
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "uh while i was saying all that did anything else new just come in",
+      ),
+    ).resolves.toBe("No new coordinator updates came in while you were talking.");
+    expect(tools.callTool).toHaveBeenCalledTimes(1);
+    expect(tools.callTool).toHaveBeenCalledWith("check_updates", { after_event_id: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not report an empty incoming-update check without complete evidence", () => {
+    const input = "while i was talking did anything new just come in";
+    expect(
+      directNoIncomingUpdateSpeech(input, {
+        updates: [],
+        output_delta: { changed: true, output: "assistant: The check passed." },
+      }),
+    ).toBeUndefined();
+    expect(
+      directNoIncomingUpdateSpeech(input, {
+        updates: [],
+        output_delta: { changed: false, output: "" },
+        update_cursor_expired: true,
+      }),
+    ).toBeUndefined();
+    expect(directNoIncomingUpdateSpeech(input, { updates: [] })).toBeUndefined();
+    expect(
+      directNoIncomingUpdateSpeech(
+        "tell it to rerun the checks and tell me if anything came in",
+        { updates: [], output_delta: { changed: false, output: "" } },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("composes an action receipt with an atomically empty incoming-update check", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({
+        content: null,
+        tool_calls: [
+          {
+            id: "call-send",
+            type: "function",
+            function: {
+              name: "send_message",
+              arguments: JSON.stringify({ message: "Rerun the speech checks." }),
+            },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string, args) =>
+      Promise.resolve(
+        name === "check_updates"
+          ? {
+              focused_session: {
+                id: "session-primary",
+                name: "Primary Work",
+                status: "running",
+              },
+              known_sessions: [
+                { id: "session-primary", name: "Primary Work", status: "running" },
+              ],
+              pending_decisions: [],
+              output_delta: { changed: false, output: "" },
+              updates: [],
+              update_cursor: 0,
+            }
+          : {
+              accepted: true,
+              delivery: "immediate",
+              target_session: {
+                id: String(args.session_id ?? "session-primary"),
+                name: "Primary Work",
+                status: "running",
+              },
+              updates: [],
+              update_cursor: 0,
+            },
+      )
+    );
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "tell it to rerun the speech checks and uh if anything else new came in tell me too",
+      ),
+    ).resolves.toBe(
+      "I sent that to Primary Work. No new coordinator updates came in while you were talking.",
+    );
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "send_message", {
+      message: "rerun the speech checks",
+    });
+  });
+
+  it("keeps a voice-owned correction distinct from the human across a relay", () => {
+    const actions = [
+      {
+        action_id: 1,
+        type: "message_sent",
+        message: "I misunderstood the previous request.",
+      },
+    ];
+    const clarification = verifiedAttributionClarificationSpeech(
+      "it'll think those words came from me and not the voice thing do you get what i mean",
+      actions,
+    );
+    expect(clarification).toBe(
+      "Yes. That wording attributes the mistake to you, but the voice coordinator made the mistake.",
+    );
+    expect(
+      voiceAttributionRelayMessage(
+        "yeah now send it another note making that exact distinction clear",
+        [{ role: "assistant", content: clarification ?? "" }],
+        actions,
+      ),
+    ).toBe(
+      "The voice coordinator misunderstood the previous request; the human did not.",
+    );
   });
 
   it("voices the real coordinator completion shape without model paraphrasing", async () => {

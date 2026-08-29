@@ -1121,7 +1121,7 @@
       "speechAnyTerms": [["voice coordinator", "voice agent", "voice assistant", "voice interface"]],
       "speechTerms": ["you"],
       "speechForbiddenTerms": ["I'll send", "I will send", "I'm sending", "send a message"],
-      "maxRounds": 1
+      "maxRounds": 0
     }
   },
   {
@@ -1229,6 +1229,112 @@
       "sessionId": "session-release",
       "speechTerms": ["release login", "passed", "twelve"],
       "maxRounds": 2
+    }
+  },
+  {
+    "id": "incoming_update_empty_snapshot_reports_none",
+    "description": "Answer an ASR-style question about arrivals during speech from the fresh empty event snapshot without reading a session or implying that focused work finished.",
+    "history": [],
+    "input": "uh while i was saying all that did anything else new just come in",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-audit", "name": "Side Audit", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+      "speechAnyTerms": [["no new", "nothing new", "no additional", "nothing else"]],
+      "speechForbiddenTerms": ["finished", "completed", "stopped", "idle"],
+      "maxRounds": 0
+    }
+  },
+  {
+    "id": "incoming_update_empty_events_preserves_focused_delta",
+    "description": "Do not report an empty arrival snapshot when the same atomic coordinator state contains new stable focused-session output.",
+    "history": [],
+    "input": "okay while i was talking did anything new just come in",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": {
+        "changed": true,
+        "output": "assistant: The deployment smoke test passed all fourteen checks."
+      },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+      "speechTerms": ["passed", "fourteen"],
+      "speechForbiddenTerms": ["nothing new", "no new updates", "no updates"],
+      "maxRounds": 1
+    }
+  },
+  {
+    "id": "focused_action_empty_arrival_composes_receipt",
+    "description": "Execute a focused instruction before answering its compound arrival question, strip the voice-only clause from the outbound message, and report the typed empty snapshot beside the verified receipt.",
+    "history": [],
+    "input": "tell it to rerun the speech checks and uh if anything else new came in tell me too",
+    "coordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "toolResults": {
+      "send_message": {
+        "accepted": true,
+        "delivery": "immediate",
+        "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+        "pending_decisions": [],
+        "recent_actions": [
+          {
+            "action_id": 731,
+            "type": "message_sent",
+            "session_id": "session-primary",
+            "name": "Primary Work",
+            "delivery": "immediate",
+            "message": "rerun the speech checks",
+            "summary": "Sent immediately to Primary Work: rerun the speech checks."
+          }
+        ],
+        "updates": [],
+        "update_cursor": 0
+      }
+    },
+    "expected": {
+      "toolSequence": ["send_message"],
+      "forbiddenTools": ["get_output", "poll_output", "focus_session"],
+      "messageTerms": ["rerun", "speech", "checks"],
+      "callExpectations": [
+        {
+          "index": 0,
+          "name": "send_message",
+          "argumentEquals": { "message": "rerun the speech checks" }
+        }
+      ],
+      "speechTerms": ["primary work"],
+      "speechAnyTerms": [["no new", "nothing new", "no additional", "nothing else"]],
+      "maxRounds": 1
     }
   }
 ]

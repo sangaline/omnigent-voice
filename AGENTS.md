@@ -273,7 +273,13 @@ mistake must explicitly name “the voice coordinator” and distinguish the hum
 an unqualified first-person self-report is forbidden because the destination
 would attribute it to the human. An attribution correction ending in “do you
 get what I mean” is an understanding check, not permission to promise or perform
-another send. A later explicit send request still requires the real tool.
+another send. This narrow identity correction is rendered deterministically
+from the typed prior `message_sent` ledger entry. If the human then explicitly
+asks to send that exact distinction, the harness converts the prior voice-owned
+first-person predicate into an unambiguous “the voice coordinator …; the human
+did not” relay before the real tool call. This protects identity when the small
+model's wording varies. A later explicit send request still requires the real
+tool.
 After a generic coordinator failure, a short “try again” or unique short session
 name inherits the nearest failed read operation and target from recent raw
 dialogue. For that narrow retry turn the harness injects the server-owned read
@@ -290,6 +296,14 @@ emits sticky focus. Ordinals resolve against notification order. An unqualified
 read after multiple notifications returns an immediate zero-round clarification
 that names the candidates; it never guesses or offers a read tool. A changed `output_delta`
 directly answers “what's new” and “since then” without an older-output read.
+For the narrower question “did anything new come in while I was talking,” an
+atomically empty `updates` array plus `output_delta.changed: false` and a valid
+event cursor renders a zero-model-round negative receipt. Missing coordinator
+evidence, an expired cursor, stable focused output, or any concurrent read or
+action request fails closed to the normal harness. Compound action-plus-update
+turns still execute the action first and compose the verified action receipt
+with the typed empty-update result; the event question can never short-circuit
+the requested coordinator action.
 For a plain current/latest/progress question with no concurrent update, pending
 decision, or action language, the harness voices a short safe focused-session
 `output_delta` directly in zero model rounds. An explicit switch to the session

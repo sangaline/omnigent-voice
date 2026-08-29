@@ -984,7 +984,7 @@ export const voiceMessageInstruction = (
       "",
     )
     .replace(
-      /\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:if\s+(?:anything|anything\s+new|any\s+updates?)\s+(?:came|comes|arrived|arrives)\s+in\b.*|(?:tell|let)\s+me\b.*\b(?:came|arrived|updates?)\b.*)$/i,
+      /\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:if\s+(?:anything(?:\s+else)?(?:\s+new)?|any\s+updates?)\s+(?:came|comes|arrived|arrives)\s+in\b.*|(?:tell|let)\s+me\b.*\b(?:came|arrived|updates?)\b.*)$/i,
       "",
     )
     .trim()
@@ -1182,9 +1182,110 @@ const coordinatorUpdates = (value: unknown): CoordinatorUpdate[] => {
 };
 
 const asksForIncomingUpdate = (input: string): boolean =>
-  /\b(?:anything\s+(?:new\s+)?(?:just\s+)?(?:come|came|arrive|arrived)|what\s+(?:just\s+)?(?:came|arrived)\s+in|what\s+(?:new\s+)?(?:update|notification)\s+(?:just\s+)?(?:came|arrived))\b/i.test(
+  /\b(?:anything(?:\s+else)?(?:\s+new)?(?:\s+just)?\s+(?:come|came|arrive|arrived)|what\s+(?:just\s+)?(?:came|arrived)\s+in|what\s+(?:new\s+)?(?:update|notification)\s+(?:just\s+)?(?:came|arrived))\b/i.test(
     input,
   );
+
+const noIncomingUpdateSpeech =
+  "No new coordinator updates came in while you were talking.";
+
+const hasEmptyIncomingUpdateSnapshot = (
+  input: string,
+  state: JsonObject,
+): boolean => {
+  if (!asksForIncomingUpdate(input)) return false;
+  if (!Array.isArray(state.updates) || state.updates.length > 0) return false;
+  const delta = objectValue(state.output_delta);
+  return delta?.changed === false && state.update_cursor_expired !== true;
+};
+
+const requestsAdditionalCoordinatorWork = (input: string): boolean =>
+  /\b(?:send|message|steer|queue|switch|focus|open|archive|rename|start|make|create|approve|accept|decline|deny|reject|cancel|interrupt|stop|rerun|retry|latest|status|progress|output|found|doing|read|show|check|inspect|where|repeat)\b/i.test(
+    input,
+  ) ||
+  /\b(?:tell|ask|have)\s+(?!(?:me|us)\b)/i.test(input) ||
+  /\blet\s+(?!(?:me|us)\b).{0,80}\bknow\b/i.test(input);
+
+export const directNoIncomingUpdateSpeech = (
+  input: string,
+  state: JsonObject,
+): string | undefined => {
+  if (
+    !hasEmptyIncomingUpdateSnapshot(input, state) ||
+    requestsAdditionalCoordinatorWork(input)
+  ) {
+    return undefined;
+  }
+  return noIncomingUpdateSpeech;
+};
+
+const latestVoiceOwnedSentMessage = (recentActions: unknown): string | undefined => {
+  if (!Array.isArray(recentActions)) return undefined;
+  for (let index = recentActions.length - 1; index >= 0; index -= 1) {
+    const action = objectValue(recentActions[index]);
+    if (
+      action?.type === "message_sent" &&
+      typeof action.message === "string" &&
+      /^I\s+(?:misunderstood|misread|misinterpreted|missed|omitted|failed|said|sent)\b/i.test(
+        action.message.trim(),
+      )
+    ) {
+      return action.message.trim();
+    }
+  }
+  return undefined;
+};
+
+export const verifiedAttributionClarificationSpeech = (
+  input: string,
+  recentActions: unknown,
+): string | undefined => {
+  if (!latestVoiceOwnedSentMessage(recentActions)) return undefined;
+  if (
+    !/\b(?:voice\s+(?:thing|coordinator|agent|assistant|interface))\b/i.test(input) ||
+    !/\b(?:came|come|coming)\s+from\s+me\b|\b(?:attribute|attributed|attributing)\b.{0,40}\bto\s+me\b|\bmake\b.{0,40}\b(?:sound|look)\b.{0,30}\blike\s+i\b/i.test(
+      input,
+    ) ||
+    !/\b(?:do\s+you\s+(?:get|understand)|you\s+(?:get|understand)\s+what\s+i\s+mean|what\s+i\s+mean)\b/i.test(
+      input,
+    )
+  ) {
+    return undefined;
+  }
+  return "Yes. That wording attributes the mistake to you, but the voice coordinator made the mistake.";
+};
+
+export const voiceAttributionRelayMessage = (
+  input: string,
+  history: readonly Pick<ChatMessage, "role" | "content">[],
+  recentActions: unknown,
+): string | undefined => {
+  if (
+    !/\b(?:send|tell|message|flag)\b/i.test(input) ||
+    !/\b(?:that|the|same|exact)\b.{0,30}\bdistinction\b/i.test(input)
+  ) {
+    return undefined;
+  }
+  const priorSpeech = [...history]
+    .reverse()
+    .find((message) => message.role === "assistant" && typeof message.content === "string")
+    ?.content;
+  if (
+    typeof priorSpeech !== "string" ||
+    !/\bvoice coordinator\b/i.test(priorSpeech) ||
+    !/\b(?:you|human)\b/i.test(priorSpeech)
+  ) {
+    return undefined;
+  }
+  const priorMessage = latestVoiceOwnedSentMessage(recentActions);
+  const predicate = priorMessage
+    ?.replace(/^I\s+/i, "")
+    .replace(/[.!?]+$/, "")
+    .trim();
+  return predicate
+    ? `The voice coordinator ${predicate}; the human did not.`
+    : undefined;
+};
 
 const resultSessionName = (value: unknown): string | undefined => {
   const object = objectValue(value);
@@ -2024,11 +2125,29 @@ export class CelerisConversation {
       this.remember(input, speech);
       return speech;
     }
-    const directIncomingUpdate = asksForIncomingUpdate(input)
+    const incomingUpdateQuestion = asksForIncomingUpdate(input);
+    const emptyIncomingUpdateSnapshot = hasEmptyIncomingUpdateSnapshot(input, updates);
+    const directIncomingUpdate = incomingUpdateQuestion
       ? directCoordinatorUpdateSpeech(retainedTurnUpdates())
       : undefined;
     if (directIncomingUpdate) {
       const speech = sanitizeForSpeech(directIncomingUpdate, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
+    const noIncomingUpdate = directNoIncomingUpdateSpeech(input, updates);
+    if (noIncomingUpdate) {
+      const speech = sanitizeForSpeech(noIncomingUpdate, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
+    const attributionClarification = retainedTurnUpdates().length === 0
+      ? verifiedAttributionClarificationSpeech(input, updates.recent_actions)
+      : undefined;
+    if (attributionClarification) {
+      const speech = sanitizeForSpeech(attributionClarification, 300);
       this.updateCursor = turnUpdateCursor;
       this.remember(input, speech, retainedTurnUpdates());
       return speech;
@@ -2141,10 +2260,14 @@ export class CelerisConversation {
           }
         : undefined;
     const startInstruction = voiceStartInstruction(input);
-    const incomingUpdateQuestion = asksForIncomingUpdate(input);
     const messageInstruction = voiceMessageInstruction(
       input,
       messageRouting.target?.name,
+    );
+    const attributionRelayMessage = voiceAttributionRelayMessage(
+      input,
+      this.history,
+      updates.recent_actions,
     );
     const missedSendCorrection = isDeclarativeMissedSend(
       input,
@@ -2366,13 +2489,16 @@ export class CelerisConversation {
           }
           if (
             call.function.name === "send_message" &&
-            messageInstruction &&
+            (messageInstruction || attributionRelayMessage) &&
             !readsInSameCompletion &&
             !executedAcrossRounds.some(
               ({ name }) => name === "get_output" || name === "poll_output",
             )
           ) {
-            args = { ...args, message: messageInstruction };
+            args = {
+              ...args,
+              message: messageInstruction ?? attributionRelayMessage,
+            };
           }
           if (
             call.function.name === "focus_session" &&
@@ -2650,6 +2776,9 @@ export class CelerisConversation {
             [
               ...new Set(successfulReceipts),
               ...new Set(failedTools.map((name) => toolFailureSpeech(name))),
+              ...(emptyIncomingUpdateSnapshot && retainedTurnUpdates().length === 0
+                ? [noIncomingUpdateSpeech]
+                : []),
             ].join(" "),
             300,
           );
@@ -2779,11 +2908,17 @@ export class CelerisConversation {
           successfulReceipts.length > 0 &&
           successfulReceipts.every((receipt): receipt is string => Boolean(receipt))
         ) {
+          const receiptSpeech = [...new Set(successfulReceipts)].join(" ");
           const speech = sanitizeForSpeech(
-            [...new Set(successfulReceipts)].join(" "),
+            [
+              receiptSpeech,
+              ...(emptyIncomingUpdateSnapshot && retainedTurnUpdates().length === 0
+                ? [noIncomingUpdateSpeech]
+                : []),
+            ].join(" "),
             300,
           );
-          this.lastVerifiedActionOutcome = speech;
+          this.lastVerifiedActionOutcome = sanitizeForSpeech(receiptSpeech, 300);
           this.lastVerifiedActionCount = successfulReceipts.length;
           this.rememberPollOutputCursors(executedAcrossRounds);
           this.updateCursor = turnUpdateCursor;

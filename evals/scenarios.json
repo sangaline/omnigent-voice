@@ -3686,7 +3686,7 @@
           "speechAnyTerms": [["voice coordinator", "voice agent", "voice assistant", "voice interface"]],
           "speechTerms": ["you"],
           "speechForbiddenTerms": ["I'll send", "I will send", "I'm sending", "send a message"],
-          "maxRounds": 1
+          "maxRounds": 0
         }
       },
       {
@@ -3736,6 +3736,15 @@
           "toolSequence": ["send_message"],
           "forbiddenTools": ["focus_session", "get_output"],
           "messageTerms": ["voice", "coordinator", "misunderstood", "not"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "send_message",
+              "argumentEquals": {
+                "message": "The voice coordinator misunderstood the previous request; the human did not."
+              }
+            }
+          ],
           "delivery": "not_queued",
           "speechTerms": ["primary work"],
           "maxRounds": 2
@@ -4746,6 +4755,149 @@
           "argumentEquals": { "prompt_id": "prompt-audit-deploy", "action": "accept" },
           "speechTerms": ["approved", "audit sweep"],
           "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "empty_arrival_check_preserves_later_cursor",
+    "description": "Answer a genuinely empty arrival check without a model round, then retain a later background event and its output cursor for a deictic incremental read.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 800,
+            "type": "session_output",
+            "session_id": "session-side-audit",
+            "name": "Side Audit",
+            "status": "running",
+            "output_delta": {
+              "changed": true,
+              "output": "assistant: The first retry passed all twenty-eight checks.",
+              "cursor": "audit-28"
+            }
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side audit", "twenty-eight", "passed"],
+          "maxRounds": 0
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay uh while i was saying that did anything else new just come in",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 800
+        },
+        "checkUpdatesAfter": 800,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+          "speechAnyTerms": [["no new", "nothing new", "no additional", "nothing else"]],
+          "speechForbiddenTerms": ["finished", "completed", "stopped", "idle"],
+          "maxRounds": 0
+        }
+      },
+      {
+        "type": "user",
+        "input": "hang on did anything else new just come in now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [
+            {
+              "event_id": 801,
+              "type": "session_output",
+              "session_id": "session-side-audit",
+              "name": "Side Audit",
+              "status": "running",
+              "output_delta": {
+                "changed": true,
+                "output": "assistant: The later phone run passed all twenty-nine checks.",
+                "cursor": "audit-29"
+              }
+            }
+          ],
+          "update_cursor": 801
+        },
+        "checkUpdatesAfter": 800,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+          "speechTerms": ["side audit", "twenty-nine", "passed"],
+          "maxRounds": 0
+        }
+      },
+      {
+        "type": "user",
+        "input": "all right anything newer from that one since then",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-side-audit", "name": "Side Audit", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 801
+        },
+        "toolResults": {
+          "poll_output": {
+            "target_session": { "id": "session-side-audit", "name": "Side Audit", "status": "running" },
+            "focus_changed": false,
+            "changed": false,
+            "output": "",
+            "cursor": "audit-29",
+            "cursor_expired": false
+          }
+        },
+        "checkUpdatesAfter": 801,
+        "expected": {
+          "toolSequence": ["poll_output"],
+          "forbiddenTools": ["get_output", "focus_session", "send_message"],
+          "callExpectations": [
+            {
+              "index": 0,
+              "name": "poll_output",
+              "sessionId": "session-side-audit",
+              "argumentEquals": { "cursor": "audit-29" }
+            }
+          ],
+          "speechTerms": ["side audit"],
+          "speechAnyTerms": [["no new", "nothing new", "no additional", "hasn't produced", "has not produced"]],
+          "maxRounds": 2
         }
       }
     ]
