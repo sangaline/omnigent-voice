@@ -280,6 +280,12 @@ an empty channel or advance the voice consumer's event cursor merely because
 the bot itself is connected. A human turn takes priority and receives any
 unspoken event in its frozen context. The voice consumer advances its event
 cursor only after proactive playback completes.
+An update already present at speech finalization never short-circuits requested
+coordinator work. If one turn combines an arrival question with separately
+addressed sends, the harness forces the first send, requires every remaining
+destination before speech, then composes the verified receipts with the new
+update. The update cursor remains available for a later incremental read and
+none of those sends changes sticky focus.
 One plain `session_output` message or real `session_completed` output delta up
 to 240 characters and three lines is spoken directly in zero model rounds.
 The production completion event does not carry the synthetic `summary` used by

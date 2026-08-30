@@ -2012,3 +2012,33 @@ instruction. The corrected linked run returned natural answers in 342, 234,
 and 146 ms respectively while preserving the original preference and later
 qualification. No tool schema or coordinator snapshot was present in any
 persona request, and no Omnigent session was read or mutated.
+
+### 2026-08-29 — Preflight updates cannot erase compound actions
+
+Hypothesis H67 came from a production control-flow audit after the persona
+checkpoint. A linked ASR-style turn told two named background sessions to do
+different work while also asking what arrived during speech. A third session's
+stable output was already present in the atomic snapshot at speech
+finalization. The baseline failed zero of three runs: it rendered that update
+in 0–5 ms and returned before either requested `send_message` call ran.
+
+The direct arrival renderer now runs only when the turn requests no additional
+coordinator work. For a compound arrival-and-send turn, the harness forces the
+first `send_message`; the existing required-destination guard then executes
+every remaining separately addressed send before speech. Verified receipts and
+the concurrent update are composed deterministically when they fit the spoken
+budget. The update's session identity and opaque cursor remain in notification
+history, and sticky focus is unchanged.
+
+The candidate passed five of five targeted linked runs across fifteen turns.
+Every compound turn completed both exact sends in one model round, spoke the
+third-session update, continued from its cursor on the next turn, and answered
+the two-action/focus audit in zero model rounds. Five neighboring notification,
+decision, action, ordinal, and cursor scenarios also passed. Promotion evidence
+is 159 passing unit tests, clean typecheck and build, and all 41 stateful
+scenarios across 128 linked turns. The isolated corpus passed 45 of 46 on its
+first aggregate sweep; the unrelated context-description case that produced
+one unapproved number then passed five of five targeted reruns, so it remains
+recorded as stochastic evidence rather than a quality pass. All coordinator
+executions were frozen. No live Omnigent session was read or mutated, and the
+excluded ESPN session remained untouched.

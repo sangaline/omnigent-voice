@@ -5635,5 +5635,161 @@
         }
       }
     ]
+  },
+  {
+    "id": "multi_send_with_preflight_update",
+    "description": "Complete two separately addressed sends even when a third-session update is already present at speech finalization, report all three outcomes, retain the update cursor, and preserve sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false },
+        { "id": "session-docs", "name": "Docs Worker", "status": "running", "focused": false },
+        { "id": "session-audit", "name": "Audit Sweep", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell build worker rerun the flaky reconnect probe with debug logs and tell docs worker write down the first audio latency and uh if anything came in while i was talking tell me too",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false },
+            { "id": "session-docs", "name": "Docs Worker", "status": "running", "focused": false },
+            { "id": "session-audit", "name": "Audit Sweep", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [
+            {
+              "event_id": 1501,
+              "type": "session_output",
+              "session_id": "session-audit",
+              "name": "Audit Sweep",
+              "status": "running",
+              "output_delta": {
+                "changed": true,
+                "output": "assistant: The queue soak passed 31 checks with zero dropped events.",
+                "cursor": "audit-31"
+              }
+            }
+          ],
+          "update_cursor": 1501
+        },
+        "toolResults": {
+          "send_message": [
+            {
+              "accepted": true,
+              "delivery": "immediate",
+              "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "recent_actions": [
+                { "action_id": 1502, "type": "message_sent", "session_id": "session-build", "name": "Build Worker", "delivery": "immediate", "message": "Rerun the flaky reconnect probe with debug logs.", "summary": "Sent immediately to Build Worker: rerun the flaky reconnect probe with debug logs." }
+              ]
+            },
+            {
+              "accepted": true,
+              "delivery": "immediate",
+              "target_session": { "id": "session-docs", "name": "Docs Worker", "status": "running" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "recent_actions": [
+                { "action_id": 1502, "type": "message_sent", "session_id": "session-build", "name": "Build Worker", "delivery": "immediate", "message": "Rerun the flaky reconnect probe with debug logs.", "summary": "Sent immediately to Build Worker: rerun the flaky reconnect probe with debug logs." },
+                { "action_id": 1503, "type": "message_sent", "session_id": "session-docs", "name": "Docs Worker", "delivery": "immediate", "message": "Write down the first-audio latency.", "summary": "Sent immediately to Docs Worker: write down the first-audio latency." }
+              ]
+            }
+          ]
+        },
+        "checkUpdatesAfter": 0,
+        "expected": {
+          "toolSequence": ["send_message", "send_message"],
+          "forbiddenTools": ["focus_session", "get_output", "poll_output"],
+          "unorderedCallExpectations": [
+            { "name": "send_message", "sessionId": "session-build", "messageTerms": ["rerun", "flaky", "reconnect", "debug logs"], "delivery": "not_queued" },
+            { "name": "send_message", "sessionId": "session-docs", "messageTerms": ["write", "first audio", "latency"], "delivery": "not_queued" }
+          ],
+          "speechTerms": ["build worker", "docs worker", "audit sweep", "31", "zero"],
+          "maxRounds": 3
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay whats newer from that one since that update",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false },
+            { "id": "session-docs", "name": "Docs Worker", "status": "running", "focused": false },
+            { "id": "session-audit", "name": "Audit Sweep", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1502, "type": "message_sent", "session_id": "session-build", "name": "Build Worker", "delivery": "immediate", "message": "Rerun the flaky reconnect probe with debug logs.", "summary": "Sent immediately to Build Worker: rerun the flaky reconnect probe with debug logs." },
+            { "action_id": 1503, "type": "message_sent", "session_id": "session-docs", "name": "Docs Worker", "delivery": "immediate", "message": "Write down the first-audio latency.", "summary": "Sent immediately to Docs Worker: write down the first-audio latency." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 1501
+        },
+        "toolResults": {
+          "poll_output": {
+            "target_session": { "id": "session-audit", "name": "Audit Sweep", "status": "running" },
+            "focus_changed": false,
+            "changed": true,
+            "output": "assistant: The final watcher pass reached 32 checks and found one stale cursor.",
+            "cursor": "audit-32",
+            "cursor_expired": false
+          }
+        },
+        "checkUpdatesAfter": 1501,
+        "expected": {
+          "toolSequence": ["poll_output"],
+          "forbiddenTools": ["get_output", "focus_session", "send_message"],
+          "callExpectations": [
+            { "index": 0, "name": "poll_output", "sessionId": "session-audit", "argumentEquals": { "cursor": "audit-31" } }
+          ],
+          "speechTerms": ["audit sweep", "32", "stale cursor"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "and did both actually happen and where am i still",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false },
+            { "id": "session-docs", "name": "Docs Worker", "status": "running", "focused": false },
+            { "id": "session-audit", "name": "Audit Sweep", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1502, "type": "message_sent", "session_id": "session-build", "name": "Build Worker", "delivery": "immediate", "message": "Rerun the flaky reconnect probe with debug logs.", "summary": "Sent immediately to Build Worker: rerun the flaky reconnect probe with debug logs." },
+            { "action_id": 1503, "type": "message_sent", "session_id": "session-docs", "name": "Docs Worker", "delivery": "immediate", "message": "Write down the first-audio latency.", "summary": "Sent immediately to Docs Worker: write down the first-audio latency." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 1501
+        },
+        "checkUpdatesAfter": 1501,
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session", "send_message", "get_output", "poll_output"],
+          "speechTerms": ["build worker", "docs worker", "primary work"],
+          "speechAnyTerms": [["recorded", "sent"]],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

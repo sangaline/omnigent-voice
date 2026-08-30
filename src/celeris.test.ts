@@ -2621,6 +2621,117 @@ describe("Celeris coordinator conversation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("completes every named send before reporting an update present at speech finalization", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-build-before-update-reply",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({
+                  target: "Build Worker",
+                  message: "shortened by model",
+                }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-docs-before-update-reply",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({
+                  target: "Docs Worker",
+                  message: "also shortened",
+                }),
+              },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string, args) => {
+      if (name === "check_updates") {
+        return Promise.resolve({
+          focused_session: { id: "session-primary", name: "Primary Work" },
+          known_sessions: [
+            { id: "session-primary", name: "Primary Work" },
+            { id: "session-build", name: "Build Worker" },
+            { id: "session-docs", name: "Docs Worker" },
+            { id: "session-audit", name: "Audit Sweep" },
+          ],
+          pending_decisions: [],
+          output_delta: { changed: false, output: "" },
+          updates: [
+            {
+              event_id: 1501,
+              type: "session_output",
+              session_id: "session-audit",
+              name: "Audit Sweep",
+              output_delta: {
+                changed: true,
+                output: "assistant: The queue soak passed 31 checks with zero dropped events.",
+                cursor: "audit-31",
+              },
+            },
+          ],
+          update_cursor: 1501,
+        });
+      }
+      const target = args.session_id === "session-build"
+        ? { id: "session-build", name: "Build Worker" }
+        : { id: "session-docs", name: "Docs Worker" };
+      return Promise.resolve({
+        accepted: true,
+        delivery: "immediate",
+        target_session: target,
+        focused_session: { id: "session-primary", name: "Primary Work" },
+        updates: [],
+        update_cursor: 1501,
+      });
+    });
+    const subject = conversation("test-key", tools);
+
+    await expect(
+      subject.respond(
+        "tell build worker rerun the flaky reconnect probe with debug logs and tell docs worker write down the first audio latency and uh if anything came in while i was talking tell me too",
+      ),
+    ).resolves.toBe(
+      "I sent that to Build Worker. I sent that to Docs Worker. Audit Sweep update: The queue soak passed 31 checks with zero dropped events.",
+    );
+
+    expect(tools.callTool).toHaveBeenCalledTimes(3);
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "send_message", {
+      message: "rerun the flaky reconnect probe with debug logs",
+      session_id: "session-build",
+      delivery: "immediate",
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(3, "send_message", {
+      message: "write down the first audio latency",
+      session_id: "session-docs",
+      delivery: "immediate",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      const request = JSON.parse(String(call[1]?.body)) as {
+        tool_choice?: { function?: { name?: string } };
+      };
+      expect(request.tool_choice?.function?.name).toBe("send_message");
+    }
+  });
+
   it("clarifies an ambiguous notification read without invoking the model", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

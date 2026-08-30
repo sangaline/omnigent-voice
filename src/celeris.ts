@@ -2737,7 +2737,8 @@ export class CelerisConversation {
     }
     const incomingUpdateQuestion = asksForIncomingUpdate(input);
     const emptyIncomingUpdateSnapshot = hasEmptyIncomingUpdateSnapshot(input, updates);
-    const directIncomingUpdate = incomingUpdateQuestion
+    const directIncomingUpdate = incomingUpdateQuestion &&
+      !requestsAdditionalCoordinatorWork(input)
       ? directCoordinatorUpdateSpeech(retainedTurnUpdates())
       : undefined;
     if (directIncomingUpdate) {
@@ -3015,7 +3016,8 @@ export class CelerisConversation {
     const allowedTools = new Set(tools.map((tool) => tool.function.name));
     const sendBeforeIncomingUpdateReply =
       incomingUpdateQuestion &&
-      (messageRouting.mode === "named" ||
+      (messageRouting.mode === "multiple" ||
+        messageRouting.mode === "named" ||
         (messageRouting.mode === "focused" && Boolean(messageInstruction))) &&
       allowedTools.has("send_message");
     const requiredCompoundActions =
