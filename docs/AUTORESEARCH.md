@@ -1905,3 +1905,26 @@ turns. Three scenarios in the final aggregate run were invalidated only by HTTP
 was counted as a quality pass. All model evaluations used frozen coordinator
 state, no live Omnigent session was read or mutated, and the excluded ESPN
 session remained untouched.
+
+### 2026-08-29 — Two-destination ASR without “to”
+
+Hypothesis H64: the no-`to` grammar promoted for one destination did not extend
+to a realistic compound utterance such as “tell Build Worker rerun … and tell
+Docs Worker write ….” The new linked baseline failed zero of three: neither
+message tool ran, both requested destinations were absent from speech, and the
+work was silently lost behind an ambiguous/model response.
+
+Multi-target routing now accepts the omitted word only when every explicitly
+addressed destination is followed by a concrete instruction. The exact-clause
+extractor uses the same boundary and injects each dictated task into its own
+tool call. Conjunctions and question/source prefixes including “what,”
+“whether,” and “how” are excluded, so “tell Primary what Side found” still
+requires output evidence instead of becoming a blind deterministic send.
+
+The candidate passed ten of ten targeted linked runs. Nine completed both sends
+in one model round and one used the existing required-action recovery round;
+all kept sticky focus. Promotion evidence is 146 passing unit tests, clean
+typecheck and build, all 46 isolated trials after one HTTP 429 rerun, and all 38
+stateful scenarios across 121 linked turns. The evaluations used frozen
+coordinator state, no live session was read or mutated, and the excluded ESPN
+session remained untouched.

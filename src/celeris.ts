@@ -850,6 +850,9 @@ export const voiceMessageRouting = (
         new RegExp(`\\b(?:tell|ask|have|steer)(?: the)? ${phrase} to\\b`).test(
           normalized,
         ) ||
+        new RegExp(
+          `\\b(?:tell|ask|have|steer)(?: the)? ${phrase} (?!(?:and|but|then|what|whether|if|how|why|who|where|when)\\b)`,
+        ).test(normalized) ||
         new RegExp(`\\bmessage(?: the)? ${phrase} (?:to|that)\\b`).test(normalized) ||
         new RegExp(`\\bqueue(?: the)? ${phrase} (?:(?:a )?message )?to\\b`).test(
           normalized,
@@ -1160,7 +1163,7 @@ export const voiceMultipleMessageInstructions = (
     const targetPattern = words(target.name).join("\\s+");
     if (!targetPattern) continue;
     const pattern = new RegExp(
-      `\\b(?:(?:tell|ask|have|steer)\\s+(?:the\\s+)?${targetPattern}\\s+to\\s+|message\\s+(?:the\\s+)?${targetPattern}\\s+(?:to|that)\\s+|queue\\s+(?:the\\s+)?${targetPattern}\\s+(?:(?:a|the)\\s+message\\s+)?to\\s+)`,
+      `\\b(?:(?:tell|ask|have|steer)\\s+(?:the\\s+)?${targetPattern}\\s+(?:to\\s+|(?!(?:and|but|then|what|whether|if|how|why|who|where|when)\\b))|message\\s+(?:the\\s+)?${targetPattern}\\s+(?:to|that)\\s+|queue\\s+(?:the\\s+)?${targetPattern}\\s+(?:(?:a|the)\\s+message\\s+)?to\\s+)`,
       "i",
     );
     const match = pattern.exec(input);

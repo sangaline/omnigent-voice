@@ -463,7 +463,11 @@ server-owned ID, deduplicates attempts, and requires every destination before
 speech. Each named clause is extracted up to the next addressed destination and
 copied exactly into that target's tool call. `now`, after-current-turn timing,
 and trailing voice-navigation controls are kept in delivery/routing semantics
-instead of leaking into the destination's message. Per-destination delivery is
+instead of leaking into the destination's message. Conversational ASR may omit
+the word “to” after each destination only when every named clause begins with a
+concrete imperative. A following conjunction or question/source prefix such as
+“what” or “whether” does not qualify, preserving ambiguity and read-first
+safety. Per-destination delivery is
 also harness-owned in this form: a target's
 explicit queue, wait, or after-current-turn clause forces `queued`, while every
 other target is forced to the normal `immediate` default. Clause boundaries

@@ -1085,6 +1085,20 @@ describe("Celeris coordinator conversation", () => {
     expect(
       Object.fromEntries(
         voiceMultipleMessageInstructions(
+          "tell build worker rerun the packet cutoff and tell docs worker write down first audio latency don't switch me",
+          [
+            { id: "session-build", name: "Build Worker" },
+            { id: "session-docs", name: "Docs Worker" },
+          ],
+        ),
+      ),
+    ).toEqual({
+      "session-build": "rerun the packet cutoff",
+      "session-docs": "write down first audio latency",
+    });
+    expect(
+      Object.fromEntries(
+        voiceMultipleMessageInstructions(
           "uh tell docs worker to record the first audio timing and queue build worker a message to rerun the long reply after this turn don't move me",
           [
             { id: "session-docs", name: "Docs Worker" },
@@ -1230,6 +1244,22 @@ describe("Celeris coordinator conversation", () => {
     expect(
       voiceMessageRouting(
         "tell build worker to rerun phone audio and tell docs worker to record first audio",
+        [
+          { id: "session-build", name: "Build Worker" },
+          { id: "session-docs", name: "Docs Worker" },
+        ],
+      ),
+    ).toEqual({
+      mode: "multiple",
+      candidates: ["Build Worker", "Docs Worker"],
+      targets: [
+        { id: "session-build", name: "Build Worker" },
+        { id: "session-docs", name: "Docs Worker" },
+      ],
+    });
+    expect(
+      voiceMessageRouting(
+        "tell build worker rerun phone audio and tell docs worker record first audio",
         [
           { id: "session-build", name: "Build Worker" },
           { id: "session-docs", name: "Docs Worker" },
