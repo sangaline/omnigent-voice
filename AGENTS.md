@@ -715,9 +715,14 @@ runtime's real background behavior: the coordinator already watches sessions
 and the voice loop proactively announces real output, completion, failure, and
 decision events. A question about whether the user will be told when work gets
 back is answered yes in terms of that runtime capability, without promising a
-model-owned future action. A short “nothing new” check cannot hide an unresolved
-typed prompt; one safe pending decision is rendered directly without a model
-round.
+model-owned future action. When a follow-up asks whether retained backend output
+actually answered an earlier question, the short model completion is buffered
+instead of streamed and any whole sentence offering to monitor, watch, keep an
+eye on, report back, or notify later is removed before TTS. This narrow evidence
+path preserves the existing factual comparison while preventing unsupported
+future promises from escaping as first audio. A short “nothing new” check cannot
+hide an unresolved typed prompt; one safe pending decision is rendered directly
+without a model round.
 
 Logs are newline-delimited JSON on stdout and, when `LOG_FILE` is configured,
 appended to that runtime file. `conversation.user.recognized` contains each ASR

@@ -591,6 +591,11 @@ const asksWhetherAgentResponded = (input: string): boolean =>
   ) &&
     !/\b(?:exact|verbatim|read|show|inspect|latest output|full output)\b/i.test(input));
 
+const asksWhetherRetainedUpdateAnswered = (input: string): boolean =>
+  /\b(?:did|does|has|have|didn't|doesn't|hasn't|haven't|never)\b[^?.!]{0,110}\b(?:say|give|provide|mention|answer)\b/i.test(
+    input,
+  );
+
 const hasRetainedBackendNotification = (history: readonly ChatMessage[]): boolean =>
   history.some(
     (message) =>
@@ -698,6 +703,16 @@ export const directRepetitionCorrectionSpeech = (input: string): string | undefi
   )
     ? "You're right. That explanation doesn't make sense, and I was repeating it instead of reconsidering it. I'll stop."
     : "You're right. I was repeating the same explanation instead of reconsidering it. I'll stop.";
+};
+
+export const withoutUnsupportedMonitoringOffers = (speech: string): string => {
+  const unsupported =
+    /\bi(?:'ll|\s+will|\s+can|\s+could|\s+would|\s+am\s+going\s+to)\s+(?:also\s+)?(?:continue\s+to\s+|make\s+sure\s+to\s+|be\s+)?(?:keep\s+an\s+eye|monitor(?:ing)?|watch(?:ing)?(?:\s+for)?|report\s+back|let\s+you\s+know|tell\s+you\s+when|update\s+you)\b/i;
+  return (speech.match(/[^.!?]+[.!?]?/g) ?? [speech])
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence && !unsupported.test(sentence))
+    .join(" ")
+    .trim();
 };
 
 const immediateNotificationUpdates = (
@@ -2966,7 +2981,8 @@ export class CelerisConversation {
     );
     const humanEvidenceCorrection = concreteHumanCorrection(input);
     const retainedResponseEvidence =
-      asksWhetherAgentResponded(input) && hasRetainedBackendNotification(this.history);
+      hasRetainedBackendNotification(this.history) &&
+      (asksWhetherAgentResponded(input) || asksWhetherRetainedUpdateAnswered(input));
     const actionInvariant =
       this.options.actionInvariantOverride ?? currentTurnActionInvariant;
     const messages: ChatMessage[] = [
@@ -3109,7 +3125,7 @@ export class CelerisConversation {
         forcedToolName = undefined;
         // Celeris accepts automatic tool selection on streamed requests, but
         // named/required tool forcing is deliberately non-streaming.
-        const speechSegmenter = onSpeechSegment && !forcedThisRound
+        const speechSegmenter = onSpeechSegment && !forcedThisRound && !retainedResponseEvidence
           ? new StreamingSpeechSegmenter(300)
           : undefined;
         let streamedSegments = 0;
@@ -3149,9 +3165,16 @@ export class CelerisConversation {
             continue;
           }
           if (!content) throw new Error("Celeris returned neither speech nor a tool call twice");
-          const speech = streamedSpeech.length > 0
+          let speech = streamedSpeech.length > 0
             ? streamedSpeech.join(" ")
             : sanitizeForSpeech(content, 300);
+          if (retainedResponseEvidence) {
+            speech = sanitizeForSpeech(
+              withoutUnsupportedMonitoringOffers(speech) ||
+                "That update did not establish the answer you asked for.",
+              300,
+            );
+          }
           const verifiedOutcome = verifiedActionReceipt();
           if (verifiedOutcome) {
             this.lastVerifiedActionOutcome = verifiedOutcome;

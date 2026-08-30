@@ -2105,6 +2105,37 @@ stateful sweep passed 43 of 44 scenarios across 136 linked turns; its only miss
 was an unrelated older evidence scenario adding the forbidden phrase “keep an
 eye.” That scenario immediately passed five of five targeted reruns across 25
 turns, while both H69 scenarios and every neighboring action scenario passed in
-the aggregate. All tests use the same production conversation and in-memory MCP
-path with frozen coordinator results. No live Omnigent session was read or
-mutated, and the excluded ESPN session remained untouched.
+the aggregate. After the unrelated H70 evidence fix, the same complete stateful
+suite passed 44 of 44 scenarios across 136 turns. All tests use the same
+production conversation and in-memory MCP path with frozen coordinator results.
+No live Omnigent session was read or mutated, and the excluded ESPN session
+remained untouched.
+
+### 2026-08-29 — Evidence answers cannot offer model-owned monitoring
+
+Hypothesis H70 came from the only miss in H69's full stateful sweep. On a
+follow-up correctly observing that a background update did not contain the
+requested estimate, Celeris sometimes appended “keep an eye” language despite
+the base capability rule. A one-turn reconstruction through the exact
+production harness measured the baseline at 19 of 20. The factual comparison
+was correct; the unsupported future offer was the only failure.
+
+An adjacent prompt-only prohibition did not generalize: it regressed to 17 of
+20 and was reverted. The final candidate uses a narrower execution boundary.
+Only retained-backend-evidence comparisons buffer the short completion instead
+of streaming it, then discard any whole sentence that offers model-owned
+monitoring, watching, reporting, or later notification before TTS. Current
+evidence sentences remain untouched, and the runtime's real proactive-event
+capability is still described normally on capability questions. An initial
+20-run reconstruction happened not to emit the forbidden phrase, but the first
+canonical rerun exposed that “it didn't say how long” was outside the older
+`responded`/`replied` intent predicate and scored only eight of ten. The final
+intent boundary also recognizes retained-event questions asking whether the
+agent said, gave, provided, mentioned, or answered something. With that scope
+fixed, the canonical case passed 30 of 30, while the neighboring proactive-
+runtime capability case passed ten of ten and the original five-turn scenario
+passed five of five across 25 turns. Promotion evidence is 161 passing unit
+tests, clean typecheck and build, all 47 isolated cases, and all 44 stateful
+scenarios across 136 linked turns with no invalid trials. The sanitized failure
+is now a permanent corpus case; every coordinator execution was frozen, no live
+session was accessed, and the excluded ESPN session remained untouched.

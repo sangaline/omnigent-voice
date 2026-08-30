@@ -38,6 +38,7 @@ import {
   verifiedExactMessageSpeech,
   verifiedQueuedDeliverySpeech,
   verifiedToolWorkflowOutcome,
+  withoutUnsupportedMonitoringOffers,
   voiceFocusRouting,
   voiceAttributionRelayMessage,
   voiceMessageInstruction,
@@ -195,6 +196,24 @@ describe("Celeris coordinator conversation", () => {
       ),
     ).toContain("doesn't make sense");
     expect(directRepetitionCorrectionSpeech("please explain that again")).toBeUndefined();
+  });
+
+  it("removes unsupported future-monitoring offers without losing current evidence", () => {
+    expect(
+      withoutUnsupportedMonitoringOffers(
+        "No, it didn't give a time estimate. It is building the image now. I'll keep an eye on it and let you know.",
+      ),
+    ).toBe("No, it didn't give a time estimate. It is building the image now.");
+    expect(
+      withoutUnsupportedMonitoringOffers(
+        "It reported the build is running, but it did not provide a timing estimate.",
+      ),
+    ).toBe("It reported the build is running, but it did not provide a timing estimate.");
+    expect(
+      withoutUnsupportedMonitoringOffers(
+        "The runtime will monitor coordinator events. I can't monitor them by myself.",
+      ),
+    ).toBe("The runtime will monitor coordinator events. I can't monitor them by myself.");
   });
 
   it("does not reuse an older send receipt for an interrupted content-free request", () => {

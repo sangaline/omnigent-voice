@@ -1747,5 +1747,36 @@
       "speechTerms": ["release work"],
       "maxRounds": 1
     }
+  },
+  {
+    "id": "evidence_answer_does_not_promise_monitoring",
+    "description": "Answer whether retained background output supplied the requested estimate without claiming a model-owned monitoring loop or future follow-up.",
+    "history": [
+      { "role": "user", "content": "can you ask release work how long until the first version can be tested" },
+      { "role": "assistant", "content": "I sent that to Release Work." },
+      { "role": "system", "content": "Omnigent background update: [{\"event_id\":1002,\"type\":\"session_output\",\"session_id\":\"session-release\",\"name\":\"Release Work\",\"status\":\"running\",\"output_delta\":{\"changed\":true,\"output\":\"assistant: I finished validating the deployment templates and I am building the image now.\",\"cursor\":\"release-1002\"}}]" },
+      { "role": "assistant", "content": "Release Work update: it finished validating the deployment templates and is building the image now." }
+    ],
+    "input": "so it didn't say how long then when you asked about the timing",
+    "coordinatorState": {
+      "focused_session": { "id": "session-release", "name": "Release Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-release", "name": "Release Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [
+        { "action_id": 1001, "type": "message_sent", "session_id": "session-release", "name": "Release Work" }
+      ],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 1002
+    },
+    "expected": {
+      "toolSequence": [],
+      "forbiddenTools": ["send_message", "get_output", "poll_output", "focus_session"],
+      "speechAnyTerms": [["image", "building"]],
+      "speechForbiddenTerms": ["thirty", "forty", "i'll let you know", "i will let you know", "keep an eye", "monitor", "watch for", "report back"],
+      "maxRounds": 1
+    }
   }
 ]
