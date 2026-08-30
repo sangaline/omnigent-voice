@@ -689,18 +689,41 @@ export const directRepetitionCorrectionSpeech = (input: string): string | undefi
     : "You're right. I was repeating the same explanation instead of reconsidering it. I'll stop.";
 };
 
+const immediateNotificationUpdates = (
+  history: readonly { role: string; content: unknown }[],
+): JsonObject[] => {
+  const lastUserIndex = history.findLastIndex((message) => message.role === "user");
+  const updates: JsonObject[] = [];
+  for (const notification of history.slice(lastUserIndex + 1)) {
+    if (
+      notification.role !== "system" ||
+      typeof notification.content !== "string" ||
+      !notification.content.startsWith(backgroundUpdatePrefix)
+    ) {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(notification.content.slice(backgroundUpdatePrefix.length));
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(parsed)) continue;
+    for (const update of parsed) {
+      if (update && typeof update === "object" && !Array.isArray(update)) {
+        updates.push(update as JsonObject);
+      }
+    }
+  }
+  return updates;
+};
+
 export const immediateNotificationTargets = (
   history: readonly { role: string; content: unknown }[],
   knownSessions: unknown,
 ): VoiceSessionTarget[] => {
-  const lastUserIndex = history.findLastIndex((message) => message.role === "user");
-  const notifications = history.slice(lastUserIndex + 1).filter(
-    (message) =>
-      message.role === "system" &&
-      typeof message.content === "string" &&
-      message.content.startsWith(backgroundUpdatePrefix),
-  );
-  if (notifications.length === 0) return [];
+  const updates = immediateNotificationUpdates(history);
+  if (updates.length === 0) return [];
 
   const knownById = new Map<string, VoiceSessionTarget>();
   for (const candidate of Array.isArray(knownSessions) ? knownSessions : []) {
@@ -713,27 +736,46 @@ export const immediateNotificationTargets = (
   }
 
   const targets = new Map<string, VoiceSessionTarget>();
-  for (const notification of notifications) {
-    if (typeof notification.content !== "string") continue;
-    let updates: unknown;
-    try {
-      updates = JSON.parse(notification.content.slice(backgroundUpdatePrefix.length));
-    } catch {
-      continue;
-    }
-    if (!Array.isArray(updates)) continue;
-    for (const update of updates) {
-      if (!update || typeof update !== "object" || Array.isArray(update)) continue;
-      const id = (update as JsonObject).session_id;
-      const recordedName = (update as JsonObject).name;
-      if (typeof id !== "string" || !id) continue;
-      const known = knownById.get(id);
-      const name = known?.name ??
-        (typeof recordedName === "string" && recordedName ? recordedName : undefined);
-      if (name) targets.set(id, { id, name });
-    }
+  for (const update of updates) {
+    const id = update.session_id;
+    const recordedName = update.name;
+    if (typeof id !== "string" || !id) continue;
+    const known = knownById.get(id);
+    const name = known?.name ??
+      (typeof recordedName === "string" && recordedName ? recordedName : undefined);
+    if (name) targets.set(id, { id, name });
   }
   return [...targets.values()];
+};
+
+export const requiresNotificationOutputRead = (
+  input: string,
+  history: readonly { role: string; content: unknown }[],
+  readRouting: VoiceReadRouting,
+  notificationTargets: readonly VoiceSessionTarget[],
+): boolean => {
+  const target = readRouting.mode === "named" ? readRouting.target : undefined;
+  if (!target || !notificationTargets.some(({ id }) => id === target.id)) return false;
+
+  const relevantUpdates = immediateNotificationUpdates(history).filter(
+    (update) => update.session_id === target.id,
+  );
+  if (relevantUpdates.length === 0) return false;
+  const hasUsableContent = relevantUpdates.some((update) => {
+    const delta = objectValue(update.output_delta);
+    return [update.summary, update.output, delta?.output].some(
+      (value) => typeof value === "string" && value.trim().length > 0,
+    );
+  });
+  const asksForOutputDetail =
+    /\b(?:exact(?:ly)?|verbatim|read|show|inspect)\b/i.test(input) ||
+    /\b(?:last|latest)\b[^?.!]{0,50}\b(?:thing|message|output|said|saying)\b/i.test(
+      input,
+    ) ||
+    /\bwhere\b[^?.!]{0,50}\bleft\s+off\b/i.test(input) ||
+    /\bquick\s+summary\b/i.test(input) ||
+    /\bwhat\b[^?.!]{0,60}\b(?:said|saying)\b/i.test(input);
+  return !hasUsableContent || asksForOutputDetail;
 };
 
 const hasDeicticMessageTarget = (input: string): boolean =>
@@ -745,22 +787,65 @@ const hasDeicticMessageTarget = (input: string): boolean =>
   /\bsend\b.+\bto\s+(?:it|that|that\s+one|the\s+one)\b/i.test(input) ||
   /\blet\s+(?:it|that\s+one|the\s+one)\s+know\b/i.test(input);
 
+interface NotificationOrdinalAddress {
+  target: VoiceSessionTarget;
+  start: number;
+  contentStart: number;
+}
+
+const notificationOrdinalAddresses = (
+  input: string,
+  targets: readonly VoiceSessionTarget[],
+): NotificationOrdinalAddress[] => {
+  const addresses: NotificationOrdinalAddress[] = [];
+  const pattern =
+    /\b(?:tell|ask|message|steer|have|queue)\s+(?:the\s+)?(first|second|third|last|other)\s+(?:one|session|agent)\s+(?:to\s+)?/gi;
+  for (const match of input.matchAll(pattern)) {
+    const ordinal = match[1]?.toLocaleLowerCase();
+    let target: VoiceSessionTarget | undefined;
+    if (ordinal === "first") target = targets[0];
+    else if (ordinal === "second") target = targets[1];
+    else if (ordinal === "third") target = targets[2];
+    else if (ordinal === "last") target = targets.at(-1);
+    else if (ordinal === "other" && targets.length === 2) target = targets[0];
+    if (!target || match.index === undefined) continue;
+    addresses.push({
+      target,
+      start: match.index,
+      contentStart: match.index + match[0].length,
+    });
+  }
+  return addresses;
+};
+
 const notificationMessageRouting = (
   input: string,
   targets: readonly VoiceSessionTarget[],
 ): VoiceMessageRouting | undefined => {
   if (!hasDeicticMessageTarget(input) || targets.length === 0) return undefined;
-  const ordinal =
-    /\b(?:tell|ask|message|steer|have|queue)\s+(?:the\s+)?(first|second|third|last|other)\s+(?:one|session|agent)\b/i.exec(
-      input,
-    )?.[1]?.toLocaleLowerCase();
-  let target: VoiceSessionTarget | undefined;
-  if (ordinal === "first") target = targets[0];
-  else if (ordinal === "second") target = targets[1];
-  else if (ordinal === "third") target = targets[2];
-  else if (ordinal === "last") target = targets.at(-1);
-  else if (ordinal === "other" && targets.length === 2) target = targets[0];
-  else if (!ordinal && targets.length === 1) target = targets[0];
+  const addresses = notificationOrdinalAddresses(input, targets);
+  if (addresses.length > 1) {
+    const distinctTargets = new Set(addresses.map(({ target }) => target.id));
+    const complete = addresses.every((address, index) => {
+      const nextStart = addresses[index + 1]?.start ?? input.length;
+      const clause = input
+        .slice(address.contentStart, nextStart)
+        .replace(/\s+(?:and|then)\s*$/i, "")
+        .trim();
+      return Boolean(clause) &&
+        !/^(?:and|but|then|what|whether|if|how|why|who|where|when)\b/i.test(clause);
+    });
+    if (complete && distinctTargets.size === addresses.length) {
+      const routedTargets = addresses.map(({ target }) => target);
+      return {
+        mode: "multiple",
+        targets: routedTargets,
+        candidates: routedTargets.map(({ name }) => name),
+      };
+    }
+    return { mode: "ambiguous", candidates: targets.map(({ name }) => name) };
+  }
+  const target = addresses[0]?.target ?? (targets.length === 1 ? targets[0] : undefined);
   if (target) return { mode: "named", target };
   return { mode: "ambiguous", candidates: targets.map(({ name }) => name) };
 };
@@ -1179,6 +1264,28 @@ export const voiceMultipleMessageInstructions = (
     });
   }
   addresses.sort((left, right) => left.start - right.start);
+  const instructions = new Map<string, string>();
+  for (let index = 0; index < addresses.length; index += 1) {
+    const address = addresses[index]!;
+    const nextStart = addresses[index + 1]?.start ?? input.length;
+    const instruction = cleanVoiceMessageInstruction(
+      input.slice(address.contentStart, nextStart),
+    )
+      ?.replace(
+        /\s+(?:now|after\s+(?:this|the|its)\s+(?:current\s+)?turn|once\s+(?:this|the|its)\s+(?:current\s+)?turn\s+(?:finishes|ends))$/i,
+        "",
+      )
+      .trim();
+    if (instruction) instructions.set(address.target.id, instruction);
+  }
+  return instructions;
+};
+
+export const voiceNotificationMessageInstructions = (
+  input: string,
+  targets: readonly VoiceSessionTarget[],
+): Map<string, string> => {
+  const addresses = notificationOrdinalAddresses(input, targets);
   const instructions = new Map<string, string>();
   for (let index = 0; index < addresses.length; index += 1) {
     const address = addresses[index]!;
@@ -2410,6 +2517,19 @@ export const directCoordinatorUpdateSpeech = (
   const completed = updates.filter((update) => update.type === "session_completed");
   const decisions = updates.filter((update) => update.type === "decision_needed");
   if (
+    delivered.length === 0 &&
+    decisions.length === 0 &&
+    completed.length >= 2 &&
+    completed.length <= 3 &&
+    updates.length === completed.length
+  ) {
+    const summaries = completed.map(safeCompletionSpeech);
+    if (summaries.every((summary): summary is string => Boolean(summary))) {
+      const speech = summaries.join(" ");
+      return speech.length <= 300 ? speech : undefined;
+    }
+  }
+  if (
     delivered.length === 1 &&
     updates.length === delivered.length + completed.length + decisions.length &&
     completed.length <= 1 &&
@@ -2787,14 +2907,26 @@ export class CelerisConversation {
             cursor: this.outputCursors.get(readRouting.target.id),
           }
         : undefined;
-    const startInstruction = voiceStartInstruction(input);
-    const messageInstruction = voiceMessageInstruction(
+    const notificationOutputRead = requiresNotificationOutputRead(
       input,
-      messageRouting.target?.name,
+      this.history,
+      readRouting,
+      notificationTargets,
     );
+    const startInstruction = voiceStartInstruction(input);
+    const messageInstruction = messageRouting.mode === "multiple"
+      ? undefined
+      : voiceMessageInstruction(
+          input,
+          messageRouting.target?.name,
+        );
     const multipleMessageInstructions = voiceMultipleMessageInstructions(
       input,
       messageRouting.targets ?? [],
+    );
+    const notificationMessageInstructions = voiceNotificationMessageInstructions(
+      input,
+      notificationTargets,
     );
     const attributionRelayMessage =
       voiceSelfReportRelayMessage(input) ??
@@ -2913,7 +3045,9 @@ export class CelerisConversation {
           ? "poll_output"
           : sendBeforeIncomingUpdateReply
             ? "send_message"
-            : undefined;
+            : notificationOutputRead && allowedTools.has("get_output")
+              ? "get_output"
+              : undefined;
       const attemptedMessageTargetIds = new Set<string>();
       const executedAcrossRounds: Array<{ name: string; result: JsonObject }> = [];
       const verifiedActionReceipts = (): string[] =>
@@ -3052,7 +3186,8 @@ export class CelerisConversation {
             (attributionRelayMessage ||
               messageInstruction ||
               (resolvedMultipleMessageTarget &&
-                multipleMessageInstructions.has(resolvedMultipleMessageTarget.id))) &&
+                (multipleMessageInstructions.has(resolvedMultipleMessageTarget.id) ||
+                  notificationMessageInstructions.has(resolvedMultipleMessageTarget.id)))) &&
             !readsInSameCompletion &&
             !executedAcrossRounds.some(
               ({ name }) => name === "get_output" || name === "poll_output",
@@ -3064,7 +3199,8 @@ export class CelerisConversation {
                 attributionRelayMessage ??
                 messageInstruction ??
                 (resolvedMultipleMessageTarget
-                  ? multipleMessageInstructions.get(resolvedMultipleMessageTarget.id)
+                  ? multipleMessageInstructions.get(resolvedMultipleMessageTarget.id) ??
+                    notificationMessageInstructions.get(resolvedMultipleMessageTarget.id)
                   : undefined),
             };
           }

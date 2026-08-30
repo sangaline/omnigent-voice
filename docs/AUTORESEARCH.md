@@ -1952,3 +1952,44 @@ required-action recovery round. Promotion evidence is 146 passing unit tests,
 clean typecheck and build, all 46 isolated trials, and all 39 stateful scenarios
 across 122 linked turns. Model tests used frozen coordinator state, no live
 session was read or mutated, and the excluded ESPN session remained untouched.
+
+### 2026-08-29 — Notification ordinals and mandatory detail reads
+
+Hypothesis H66 began with aggregate-only inspection of the private audit log.
+Across 223 recognized turns, 74 were relay-shaped and 26 typed coordinator
+actions were recorded. Three unsupported send-success claims existed only in
+the earliest few of 52 process epochs; none occurred after the action guards
+were introduced. One recent relay-shaped turn without a receipt was a
+content-free preamble with no generated or played response, consistent with
+utterance merging rather than a false delivery. Only aggregate counts and
+event types left the private pod; no transcript, name, ID, or output was copied
+into the repository.
+
+The next uncovered state transition was a single ASR-style turn addressing two
+fresh notifications independently: tell the first session to rerun a measured
+probe set and tell the second to record a first-audio measurement, without
+changing sticky focus. The baseline passed zero of three runs because only one
+`send_message` was selected. In one proactive run the model had also omitted a
+numeric fact from the two-session completion announcement.
+
+The harness now retains notification order, resolves every separately
+addressed ordinal, requires distinct destinations and complete clauses, and
+injects the exact per-session instruction. Incomplete or repeated clauses fail
+closed. A safe batch of two or three completion summaries is rendered directly
+within the existing 300-character speech bound, eliminating the lossy model
+round. The candidate passed ten of ten linked runs across 30 turns; every
+notification batch used zero model rounds and every compound action used one.
+
+The first full promotion run then exposed an older intermittent weakness: after
+a content-free completion notification, an ASR-style request for where that
+session left off could answer without reading its output. A notification detail
+question now forces `get_output` for the server-owned announced target. A read
+is also forced for any read-shaped follow-up when the notification has no
+summary or output; a sufficient retained summary remains usable for an ordinary
+question. The formerly flaky isolated case passed ten of ten in one model round.
+
+Final promotion evidence is 147 passing unit tests, clean typecheck and build,
+all 46 isolated model trials, and all 40 stateful scenarios across 125 linked
+turns with no invalid trials. All model evaluations used frozen coordinator
+state. No live Omnigent session was read or mutated, and the excluded ESPN
+session remained untouched.

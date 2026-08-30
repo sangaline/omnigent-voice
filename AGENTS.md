@@ -278,7 +278,10 @@ outcome, validation, safety, and blocker clauses within a 24-word budget and
 discards negative-value unchanged-focus prose. It never rewrites identifiers or
 facts. Complex or unsafe content still uses a one-sentence, 24-word Celeris
 adaptation contract. This keeps proactive facts exact and avoids the garbled
-proper nouns observed in live model paraphrases. Bounded batches
+proper nouns observed in live model paraphrases. A batch of two or three safe
+`session_completed` summaries is also joined and spoken directly when the full
+result fits 300 characters; this prevents the fast model from silently dropping
+one completed session or one numeric outcome. Bounded batches
 of up to three structured `decision_needed` events are also rendered directly
 from their prompt messages: confirmation mode says “needs your approval,” while
 other modes say “needs your input.” URLs, code fences, longer output, and other
@@ -418,6 +421,12 @@ an exact background-update record or typed tool result outranks prior assistant
 speech, which is only a fallible interpretation. Preserve the source's actor,
 positive and negative capabilities, and causal direction; a client that does
 not consume an event is not evidence that the backend cannot emit it.
+A detail-seeking follow-up such as “where did it leave off,” “what was the last
+thing it said,” or “give me a quick summary” forces `get_output` for the exact
+announced session. The same read is forced for any read-shaped follow-up when
+the retained notification contains only a lifecycle headline and no summary,
+output, or output delta. An ordinary question may still use a sufficiently
+informative retained summary without a redundant backend read.
 A changed `output_delta`
 directly answers “what's new” and “since then” without an older-output read.
 For the narrower question “did anything new come in while I was talking,” an
@@ -449,6 +458,10 @@ the narrow deterministic reference expires. When the current human supplies
 the complete instruction, the same route copies its exact clause into the tool
 call, including natural ASR forms such as “tell that one rerun …”; the fast
 model may select the action but cannot shorten the dictated work.
+Two or more ordinal clauses in one turn are handled independently: each ordinal
+must resolve to a distinct notification and carry its own complete instruction,
+then every exact clause is injected into the corresponding tool call before
+speech. Missing, repeated, or incomplete ordinal clauses fail closed.
 ASR discourse repairs such as “no wait” do not select queued delivery; only an
 explicit request to queue or wait for the current turn does. For a true output
 visibility check, the response combines the action ledger's delivery evidence

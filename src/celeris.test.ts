@@ -27,6 +27,7 @@ import {
   missingMultiSourceNumbers,
   requestsPositiveFocusAction,
   requestedRenameTitle,
+  requiresNotificationOutputRead,
   serializeToolResult,
   StreamingSpeechSegmenter,
   successfulActionSpeech,
@@ -41,6 +42,7 @@ import {
   voiceAttributionRelayMessage,
   voiceMessageInstruction,
   voiceMultipleMessageInstructions,
+  voiceNotificationMessageInstructions,
   voiceMessageRouting,
   voiceSelfReportRelayMessage,
   voiceReadRouting,
@@ -1112,6 +1114,20 @@ describe("Celeris coordinator conversation", () => {
     });
     expect(
       Object.fromEntries(
+        voiceNotificationMessageInstructions(
+          "tell the first one rerun all 12 cutoff probes and tell the second one write down the 180 millisecond first audio number don't switch me",
+          [
+            { id: "session-alpha", name: "Side Alpha" },
+            { id: "session-beta", name: "Side Beta" },
+          ],
+        ),
+      ),
+    ).toEqual({
+      "session-alpha": "rerun all 12 cutoff probes",
+      "session-beta": "write down the 180 millisecond first audio number",
+    });
+    expect(
+      Object.fromEntries(
         voiceMultipleMessageInstructions(
           "uh tell docs worker to record the first audio timing and queue build worker a message to rerun the long reply after this turn don't move me",
           [
@@ -1236,6 +1252,27 @@ describe("Celeris coordinator conversation", () => {
     });
     expect(
       voiceMessageRouting("tell that one rerun the test", [], notificationBurst),
+    ).toEqual({ mode: "ambiguous", candidates: ["Side Alpha", "Side Beta"] });
+    expect(
+      voiceMessageRouting(
+        "tell the first one rerun all 12 cutoff probes and tell the second one write down the 180 millisecond first audio number",
+        [],
+        notificationBurst,
+      ),
+    ).toEqual({
+      mode: "multiple",
+      candidates: ["Side Alpha", "Side Beta"],
+      targets: [
+        { id: "session-alpha", name: "Side Alpha" },
+        { id: "session-beta", name: "Side Beta" },
+      ],
+    });
+    expect(
+      voiceMessageRouting(
+        "tell the first one and tell the second one rerun it",
+        [],
+        notificationBurst,
+      ),
     ).toEqual({ mode: "ambiguous", candidates: ["Side Alpha", "Side Beta"] });
     expect(voiceMessageRouting("tell it to rerun the test", [])).toEqual({
       mode: "focused",
@@ -1402,6 +1439,46 @@ describe("Celeris coordinator conversation", () => {
         notificationTargets,
       ),
     ).toEqual({ mode: "model" });
+    const contentlessNotificationHistory = [
+      {
+        role: "system",
+        content:
+          'Omnigent background update: [{"event_id":7,"type":"session_completed","session_id":"session-beta","name":"Side Beta"}]',
+      },
+      { role: "assistant", content: "Side Beta completed." },
+    ];
+    expect(
+      requiresNotificationOutputRead(
+        "yeah just a quick summary where it left off",
+        contentlessNotificationHistory,
+        { mode: "named", target: { id: "session-beta", name: "Side Beta" } },
+        notificationTargets,
+      ),
+    ).toBe(true);
+    const summarizedNotificationHistory = [
+      {
+        role: "system",
+        content:
+          'Omnigent background update: [{"event_id":7,"type":"session_completed","session_id":"session-beta","name":"Side Beta","summary":"Side Beta passed all eighteen checks."}]',
+      },
+      { role: "assistant", content: "Side Beta passed all eighteen checks." },
+    ];
+    expect(
+      requiresNotificationOutputRead(
+        "what was the update from that one",
+        summarizedNotificationHistory,
+        { mode: "named", target: { id: "session-beta", name: "Side Beta" } },
+        notificationTargets,
+      ),
+    ).toBe(false);
+    expect(
+      requiresNotificationOutputRead(
+        "what was the last thing that one actually said",
+        summarizedNotificationHistory,
+        { mode: "named", target: { id: "session-beta", name: "Side Beta" } },
+        notificationTargets,
+      ),
+    ).toBe(true);
     expect(
       voiceRetryReadRouting(
         "can you try again",
@@ -2067,6 +2144,7 @@ describe("Celeris coordinator conversation", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tool_choice?: unknown;
       tools?: Array<{
         function?: {
           name?: string;
@@ -2075,6 +2153,10 @@ describe("Celeris coordinator conversation", () => {
         };
       }>;
     };
+    expect(request.tool_choice).toEqual({
+      type: "function",
+      function: { name: "get_output" },
+    });
     const read = request.tools?.find((tool) => tool.function?.name === "get_output");
     expect(read?.function?.description).toContain("Side Audit");
     expect(read?.function?.parameters?.properties).not.toHaveProperty("session_id");
@@ -3855,6 +3937,36 @@ describe("Celeris coordinator conversation", () => {
     ).resolves.toBe(
       "Side Beta finished the check. It found one flaky reconnect test.",
     );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("voices a bounded batch of safe completions without dropping either result", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const updates = [
+      {
+        event_id: 30,
+        type: "session_completed" as const,
+        session_id: "session-alpha",
+        name: "Side Alpha",
+        summary: "Side Alpha finished twelve cutoff probes.",
+      },
+      {
+        event_id: 31,
+        type: "session_completed" as const,
+        session_id: "session-beta",
+        name: "Side Beta",
+        summary: "Side Beta measured first audio at 180 milliseconds.",
+      },
+    ];
+    const expected =
+      "Side Alpha finished twelve cutoff probes. " +
+      "Side Beta measured first audio at 180 milliseconds.";
+
+    expect(directCoordinatorUpdateSpeech(updates)).toBe(expected);
+    await expect(
+      conversation("test-key").announceUpdate(updates, new AbortController().signal),
+    ).resolves.toBe(expected);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

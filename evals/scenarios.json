@@ -5524,5 +5524,116 @@
         }
       }
     ]
+  },
+  {
+    "id": "two_notification_ordinals_receive_distinct_messages",
+    "description": "After two background notifications, route two different ordinal follow-up messages to their recorded sessions without changing sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-alpha", "name": "Side Alpha", "status": "running", "focused": false },
+        { "id": "session-beta", "name": "Side Beta", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          { "event_id": 1401, "type": "session_completed", "session_id": "session-alpha", "name": "Side Alpha", "summary": "Side Alpha finished twelve cutoff probes." },
+          { "event_id": 1402, "type": "session_completed", "session_id": "session-beta", "name": "Side Beta", "summary": "Side Beta measured first audio at 180 milliseconds." }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["side alpha", "side beta", "180"],
+          "speechAnyTerms": [["12", "twelve"]],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay tell the first one rerun all 12 cutoff probes and tell the second one write down the 180 millisecond first audio number don't switch me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-alpha", "name": "Side Alpha", "status": "idle", "focused": false },
+            { "id": "session-beta", "name": "Side Beta", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 1402
+        },
+        "toolResults": {
+          "send_message": [
+            {
+              "accepted": true,
+              "delivery": "immediate",
+              "target_session": { "id": "session-alpha", "name": "Side Alpha", "status": "running" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "recent_actions": [
+                { "action_id": 1403, "type": "message_sent", "session_id": "session-alpha", "name": "Side Alpha", "delivery": "immediate", "message": "Rerun all 12 cutoff probes.", "summary": "Sent immediately to Side Alpha: rerun all 12 cutoff probes." }
+              ]
+            },
+            {
+              "accepted": true,
+              "delivery": "immediate",
+              "target_session": { "id": "session-beta", "name": "Side Beta", "status": "running" },
+              "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+              "recent_actions": [
+                { "action_id": 1403, "type": "message_sent", "session_id": "session-alpha", "name": "Side Alpha", "delivery": "immediate", "message": "Rerun all 12 cutoff probes.", "summary": "Sent immediately to Side Alpha: rerun all 12 cutoff probes." },
+                { "action_id": 1404, "type": "message_sent", "session_id": "session-beta", "name": "Side Beta", "delivery": "immediate", "message": "Write down the 180 millisecond first-audio number.", "summary": "Sent immediately to Side Beta: write down the 180 millisecond first-audio number." }
+              ]
+            }
+          ]
+        },
+        "checkUpdatesAfter": 1402,
+        "expected": {
+          "toolSequence": ["send_message", "send_message"],
+          "forbiddenTools": ["focus_session"],
+          "unorderedCallExpectations": [
+            { "name": "send_message", "sessionId": "session-alpha", "messageTerms": ["rerun", "12", "cutoff probes"], "delivery": "not_queued" },
+            { "name": "send_message", "sessionId": "session-beta", "messageTerms": ["write", "180", "first audio"], "delivery": "not_queued" }
+          ],
+          "speechTerms": ["side alpha", "side beta"],
+          "speechAnyTerms": [["sent", "told"]],
+          "maxRounds": 3
+        }
+      },
+      {
+        "type": "user",
+        "input": "and where am i still",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-alpha", "name": "Side Alpha", "status": "running", "focused": false },
+            { "id": "session-beta", "name": "Side Beta", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1403, "type": "message_sent", "summary": "Sent immediately to Side Alpha: rerun all 12 cutoff probes." },
+            { "action_id": 1404, "type": "message_sent", "summary": "Sent immediately to Side Beta: write down the 180 millisecond first-audio number." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 1402
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["focus_session", "send_message"],
+          "speechTerms": ["primary work"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]
