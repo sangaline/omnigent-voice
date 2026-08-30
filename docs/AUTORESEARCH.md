@@ -2139,3 +2139,25 @@ tests, clean typecheck and build, all 47 isolated cases, and all 44 stateful
 scenarios across 136 linked turns with no invalid trials. The sanitized failure
 is now a permanent corpus case; every coordinator execution was frozen, no live
 session was accessed, and the excluded ESPN session remained untouched.
+
+### 2026-08-29 — New-session tasks exclude voice update controls
+
+Hypothesis H71 first tested two other compound-action boundaries: archive plus
+an exact relay, and approval plus an exact relay. Both passed ten of ten through
+the unchanged shared harness, so no speculative action enforcement was added.
+The uncovered failure was start-session plus a request to report events that
+arrived during speech. In all five baseline runs, the correct session was
+started and the concurrent update was spoken, but the injected coding task was
+`profile the phone endpointing cutoff and tell me what came in while i was
+talking`. The voice-only update control had leaked into remote work.
+
+`voiceStartInstruction` now removes only a trailing voice-directed arrival
+clause while preserving legitimate continuations such as “and tell me how to
+reproduce it.” The bounded task remains harness-injected, and an explicit start
+participates in the required-action set before speech. The candidate passed ten
+of ten targeted runs in one model round with the exact task, verified start
+receipt, concurrent Metrics Watch source, 190-millisecond measurement, and zero
+false-cut result. All coordinator results were frozen; no live session was read
+or mutated. Promotion evidence is 161 passing unit tests, clean typecheck and
+build, all 47 isolated cases, and all 45 stateful scenarios across 137 linked
+turns with no invalid trials. The excluded ESPN session remained untouched.

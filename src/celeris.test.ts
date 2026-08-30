@@ -1601,6 +1601,16 @@ describe("Celeris coordinator conversation", () => {
     expect(
       voiceStartInstruction("make a temporary session to test that receipt wording"),
     ).toBe("test that receipt wording");
+    expect(
+      voiceStartInstruction(
+        "make a new session to profile the phone endpointing cutoff and tell me what came in while i was talking",
+      ),
+    ).toBe("profile the phone endpointing cutoff");
+    expect(
+      voiceStartInstruction(
+        "make a new session to profile the cutoff and tell me how to reproduce it",
+      ),
+    ).toBe("profile the cutoff and tell me how to reproduce it");
     expect(voiceStartInstruction("what is this session doing")).toBeUndefined();
   });
 

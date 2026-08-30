@@ -599,7 +599,12 @@ records a `queued_after_turn` action and emits `message_delivered`; a failed
 dispatch is put back into the in-process queue and emits no false success.
 For clear “start/make/create/open a session to/for …” language, the harness
 copies the user's exact task clause into `start_session.instruction`; Celeris
-still selects the tool and may choose the title, agent, and workspace.
+still selects the tool and may choose the title, agent, and workspace. A
+trailing voice-directed concurrent-update clause such as “and tell me what came
+in while I was talking” is not part of the coding task and is removed before
+tool execution. Other task continuations remain intact. The explicit start is
+included in the required-action set, while its concurrent update is retained
+and spoken from the typed event after the verified start receipt.
 `get_output` reads `/v1/sessions/{id}/items`; arbitrary tmux scrollback is not
 available through the Omnigent HTTP API and must not be implied. It returns a
 JSON array instead of flattening the page into text. Page 1 contains the most

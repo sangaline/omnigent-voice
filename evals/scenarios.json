@@ -6209,5 +6209,64 @@
         }
       }
     ]
+  },
+  {
+    "id": "start_session_with_preflight_update",
+    "description": "Start a new focused session with only its exact work clause while also reporting a concurrent background update requested in the same ASR-style turn.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "make a new session to profile the phone endpointing cutoff and tell me what came in while i was talking",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [
+            { "event_id": 1821, "type": "session_output", "session_id": "session-metrics", "name": "Metrics Watch", "status": "running", "output_delta": { "changed": true, "output": "assistant: The last phone probe ended at 190 milliseconds with zero false cuts.", "cursor": "metrics-190" } }
+          ],
+          "update_cursor": 1821
+        },
+        "toolResults": {
+          "start_session": {
+            "started": true,
+            "focused_session": { "id": "session-endpoint", "name": "Phone Endpointing", "status": "running" },
+            "previous_focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-endpoint", "name": "Phone Endpointing", "status": "running", "focused": true },
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+              { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 1822, "type": "session_started", "summary": "Started and focused Phone Endpointing from Primary Work." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["start_session"],
+          "forbiddenTools": ["send_message", "focus_session", "get_output", "poll_output"],
+          "argumentEquals": { "instruction": "profile the phone endpointing cutoff" },
+          "speechTerms": ["phone endpointing", "metrics watch", "190", "zero false cuts"],
+          "maxRounds": 2
+        }
+      }
+    ]
   }
 ]

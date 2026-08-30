@@ -1213,7 +1213,12 @@ export const voiceStartInstruction = (input: string): string | undefined => {
     /\b(?:start|make|create|open)\b.{0,50}\b(?:session|chat)\b\s+(?:to|for)\s+(.+)/i.exec(
       input,
     );
-  const instruction = match?.[1]?.trim();
+  const instruction = match?.[1]
+    ?.replace(
+      /\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:(?:if\s+(?:anything(?:\s+else)?(?:\s+new)?|any\s+updates?)\s+(?:came|comes|arrived|arrives)\s+in\b.*)|(?:(?:tell|let)\s+me\b.*\b(?:came|arrived|updates?)\b.*))$/i,
+      "",
+    )
+    .trim();
   return instruction || undefined;
 };
 
@@ -3072,6 +3077,9 @@ export class CelerisConversation {
       allowedTools.has("rename_session")
     ) {
       requiredCompoundActionSet.add("rename_session");
+    }
+    if (startInstruction && allowedTools.has("start_session")) {
+      requiredCompoundActionSet.add("start_session");
     }
     if (
       requestsPositiveFocusAction(input) &&
