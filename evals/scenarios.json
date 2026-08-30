@@ -6881,5 +6881,158 @@
         }
       }
     ]
+  },
+  {
+    "id": "start_explicitly_named_session_and_message_existing",
+    "description": "Preserve an explicit new-session title and task while separately messaging an existing session.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "make a new session called Reconnect Lab to investigate websocket jitter and tell primary work keep the release branch unchanged",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "start_session": {
+            "started": true,
+            "focused_session": { "id": "session-reconnect", "name": "Reconnect Lab", "status": "running" },
+            "previous_focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2401, "type": "session_started", "summary": "Started and focused Reconnect Lab from Primary Work." }
+            ]
+          },
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "focused_session": { "id": "session-reconnect", "name": "Reconnect Lab", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2401, "type": "session_started", "summary": "Started and focused Reconnect Lab from Primary Work." },
+              { "action_id": 2402, "type": "message_sent", "summary": "Sent immediately to Primary Work: Keep the release branch unchanged." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["start_session", "send_message"],
+          "alternativeToolSequences": [["send_message", "start_session"]],
+          "unorderedCallExpectations": [
+            {
+              "name": "start_session",
+              "argumentEquals": {
+                "title": "Reconnect Lab",
+                "instruction": "investigate websocket jitter"
+              }
+            },
+            {
+              "name": "send_message",
+              "sessionId": "session-primary",
+              "messageTerms": ["keep", "release", "branch", "unchanged"],
+              "delivery": "not_queued"
+            }
+          ],
+          "speechTerms": ["reconnect lab", "primary work"],
+          "speechAnyTerms": [["started", "created"], ["sent", "told"]],
+          "maxRounds": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "start_named_chat_and_ask_existing",
+    "description": "Hold out chat-named-for grammar while preserving a distinct existing-session relay.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "start a chat named Audio Probe for measuring phone first audio and ask docs worker record the 180 millisecond baseline",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "start_session": {
+            "started": true,
+            "focused_session": { "id": "session-audio", "name": "Audio Probe", "status": "running" },
+            "previous_focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2411, "type": "session_started", "summary": "Started and focused Audio Probe from Primary Work." }
+            ]
+          },
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-docs", "name": "Docs Worker", "status": "running" },
+            "focused_session": { "id": "session-audio", "name": "Audio Probe", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2411, "type": "session_started", "summary": "Started and focused Audio Probe from Primary Work." },
+              { "action_id": 2412, "type": "message_sent", "summary": "Sent immediately to Docs Worker: Record the 180 millisecond baseline." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["start_session", "send_message"],
+          "alternativeToolSequences": [["send_message", "start_session"]],
+          "unorderedCallExpectations": [
+            {
+              "name": "start_session",
+              "argumentEquals": {
+                "title": "Audio Probe",
+                "instruction": "measuring phone first audio"
+              }
+            },
+            {
+              "name": "send_message",
+              "sessionId": "session-docs",
+              "messageTerms": ["record", "180", "millisecond", "baseline"],
+              "delivery": "not_queued"
+            }
+          ],
+          "speechTerms": ["audio probe", "docs worker"],
+          "speechAnyTerms": [["started", "created"], ["sent", "told"]],
+          "allowedSpeechNumbers": [180],
+          "maxRounds": 2
+        }
+      }
+    ]
   }
 ]

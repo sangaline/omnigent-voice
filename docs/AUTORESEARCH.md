@@ -2290,3 +2290,34 @@ cases, and all 55 stateful scenarios across 147 linked turns with no invalid
 trials. All coordinator execution was frozen; no live Omnigent session was
 accessed or mutated, and the excluded ESPN session remained untouched. The live
 Audrey persona pod was not redeployed for this coordinator-only change.
+
+### 2026-08-29 — Explicit new-session names and tasks remain verbatim
+
+Hypothesis H77 tested a natural compound request: make a new session called
+Reconnect Lab to investigate websocket jitter, then tell Primary Work to keep
+its release branch unchanged. Both coordinator actions executed in all twenty
+baseline trials, and the model preserved the title, but seventeen trials
+rewrote the task as `Investigate websocket jitter.` rather than copying the
+user's exact `investigate websocket jitter`. The harness did not recognize a
+`session called NAME to TASK` form, so it neither enforced the start nor
+injected the bounded title and instruction.
+
+Named starts now recognize session, chat, or conversation plus called/named and
+to/for grammar. The runtime copies both explicit fields into `start_session`,
+bounds the task before any separately routed known-session relay, and includes
+the start in the existing required-action set. An ordinary unnamed start still
+lets Celeris choose its title, and user task continuations remain unchanged.
+
+The repaired canonical flow passed twenty of twenty. A held-out `chat named
+Audio Probe for ...` request with a distinct Docs Worker relay and a
+180-millisecond fact also passed twenty of twenty. Every successful result
+preserved the exact title, task, relay target, and relay content within two
+model rounds. The two flows are permanent stateful regressions. Promotion
+evidence is 162 passing unit tests, clean typecheck and build, a final 47-of-47
+isolated confirmation, and all 57 stateful scenarios across 149 linked turns
+with no invalid trials. Two unrelated isolated cases missed once in the first
+sweep, passed five of five immediate targeted reruns each, and passed in the
+final complete confirmation. All coordinator execution was frozen; no live
+Omnigent session was accessed or mutated, and the excluded ESPN session remained
+untouched. The live Audrey persona pod was not redeployed for this
+coordinator-only change.

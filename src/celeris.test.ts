@@ -49,6 +49,7 @@ import {
   voiceReadRouting,
   voiceRetryReadRouting,
   voiceStartInstruction,
+  voiceStartTitle,
 } from "./celeris.js";
 import { Logger } from "./log.js";
 import { CoordinatorExecutor, CoordinatorMcpClient } from "./mcp.js";
@@ -1622,6 +1623,20 @@ describe("Celeris coordinator conversation", () => {
         ["Primary Work"],
       ),
     ).toBe("investigate reconnect jitter");
+    expect(
+      voiceStartInstruction(
+        "make a new session called Reconnect Lab to investigate websocket jitter and tell primary work keep the release branch unchanged",
+        ["Primary Work"],
+      ),
+    ).toBe("investigate websocket jitter");
+    expect(
+      voiceStartTitle(
+        "make a new session called Reconnect Lab to investigate websocket jitter",
+      ),
+    ).toBe("Reconnect Lab");
+    expect(
+      voiceStartTitle("make a temporary session to test receipt wording"),
+    ).toBeUndefined();
     expect(
       voiceStartInstruction(
         "make a side chat for check the audio cutoff then ask docs worker write down the current result",

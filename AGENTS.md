@@ -608,9 +608,12 @@ records a `queued_after_turn` action and emits `message_delivered`; a failed
 dispatch is put back into the in-process queue and emits no false success.
 For clear “start/make/create/open a session to/for …” language, the harness
 copies the user's exact task clause into `start_session.instruction`; Celeris
-still selects the tool and may choose the title, agent, and workspace. A
-trailing voice-directed concurrent-update clause such as “and tell me what came
-in while I was talking” is not part of the coding task and is removed before
+still selects the tool and may choose the title, agent, and workspace. When the
+human explicitly says “session called NAME to TASK” or “chat named NAME for
+TASK,” the harness also injects that exact title rather than letting the model
+rewrite it. A trailing voice-directed concurrent-update clause such as
+“and tell me what came in while I was talking” is not part of the coding task
+and is removed before
 tool execution. When the same utterance separately addresses a known existing
 session, that relay clause is also excluded from the new session's instruction;
 the exact start and send remain two required, independently verified actions.

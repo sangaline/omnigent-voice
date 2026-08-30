@@ -1268,11 +1268,16 @@ export const voiceStartInstruction = (
   input: string,
   relayTargetNames: readonly string[] = [],
 ): string | undefined => {
-  const match =
-    /\b(?:start|make|create|open)\b.{0,50}\b(?:session|chat)\b\s+(?:to|for)\s+(.+)/i.exec(
+  const namedMatch =
+    /\b(?:start|make|create|open)\b.{0,50}\b(?:session|chat|conversation)\b\s+(?:called|named)\s+(.+?)\s+(?:to|for)\s+(.+)/i.exec(
       input,
     );
-  let instruction = match?.[1]
+  const genericMatch = namedMatch
+    ? undefined
+    : /\b(?:start|make|create|open)\b.{0,50}\b(?:session|chat|conversation)\b\s+(?:to|for)\s+(.+)/i.exec(
+        input,
+      );
+  let instruction = (namedMatch?.[2] ?? genericMatch?.[1])
     ?.replace(
       /\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:(?:if\s+(?:anything(?:\s+else)?(?:\s+new)?|any\s+updates?)\s+(?:came|comes|arrived|arrives)\s+in\b.*)|(?:(?:tell|let)\s+me\b.*\b(?:came|arrived|updates?)\b.*))$/i,
       "",
@@ -1288,6 +1293,14 @@ export const voiceStartInstruction = (
     }
   }
   return instruction || undefined;
+};
+
+export const voiceStartTitle = (input: string): string | undefined => {
+  const title =
+    /\b(?:start|make|create|open)\b.{0,50}\b(?:session|chat|conversation)\b\s+(?:called|named)\s+(.+?)\s+(?:to|for)\s+.+/i.exec(
+      input,
+    )?.[1]?.trim();
+  return title || undefined;
 };
 
 const cleanVoiceMessageInstruction = (captured: string): string | undefined => {
@@ -3033,6 +3046,7 @@ export class CelerisConversation {
           ? [messageRouting.target.name]
           : [],
     );
+    const startTitle = voiceStartTitle(input);
     const messageInstruction = messageRouting.mode === "multiple"
       ? undefined
       : voiceMessageInstruction(
@@ -3380,7 +3394,11 @@ export class CelerisConversation {
             };
           }
           if (call.function.name === "start_session" && startInstruction) {
-            args = { ...args, instruction: startInstruction };
+            args = {
+              ...args,
+              instruction: startInstruction,
+              ...(startTitle ? { title: startTitle } : {}),
+            };
           }
           if (
             call.function.name === "rename_session" &&
