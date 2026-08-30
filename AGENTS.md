@@ -195,6 +195,17 @@ from the focused session to the model context, including text received while
 the human was still speaking. Partial text is not proactively spoken; a final
 message produces one `session_output` event immediately rather than waiting for
 item persistence. Output arriving later remains buffered for the next turn.
+Native output deltas can contain a large chronological prefix of terminal and
+tool activity before the final assistant message. Immediately before a
+coordinator snapshot, notification, or tool result enters Celeris, the harness
+recognizes that native shape and retains only the last assistant conclusion,
+bounded to 2,000 characters. The compacted delta is tagged with
+`voice_selection`, and notification history also records that it was a new
+backend event at that position in the dialogue. This is a model-only view: the
+original update still controls deterministic safe rendering, cursors, and the
+private audit path. If a noisy delta has no usable assistant conclusion, it
+remains model-routed and is merely bounded; native tool text can never become a
+direct zero-model spoken result through this compaction.
 An idle transition within five seconds of that final live message does not emit
 an empty second completion announcement; a later completion still does.
 Persisted conversation items exclude transient terminal animations.

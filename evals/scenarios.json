@@ -5178,5 +5178,76 @@
         }
       }
     ]
+  },
+  {
+    "id": "noisy_native_stream_preserves_latest_conclusion",
+    "description": "Adapt a native SSE message containing terminal and tool noise into one concise spoken update, then retain its current-session provenance for a skeptical follow-up.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 1101,
+            "type": "session_output",
+            "session_id": "session-voice",
+            "name": "Voice Work",
+            "status": "running",
+            "output_delta": {
+              "changed": true,
+              "output": "tool call shell: check the rollout and inspect the private runtime logs\n\ntool result: deployment is ready; temporary transfer archive removed\n\ntool call apply_patch: update the transport research notes and cursor regression\n\ntool result: 138 unit tests, 46 isolated cases, and 34 linked scenarios passed\n\nassistant: The live-output bridge is deployed and healthy. The isolated stream reached first assistant text in about 2.2 seconds, and every regression gate passed.",
+              "cursor": "native-live-1101"
+            }
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["voice work", "live", "2.2"],
+          "speechAnyTerms": [
+            ["pass", "green"],
+            ["tests", "regression"]
+          ],
+          "speechForbiddenTerms": ["tool call", "tool result", "apply patch", "shell", "archive removed"],
+          "maxSpeechWords": 28,
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "user",
+        "input": "wait was that actually from voice work just now or were you reading me some old command junk",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 1101
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
+          "speechTerms": ["voice work", "live-output"],
+          "speechAnyTerms": [
+            ["deployed", "healthy"]
+          ],
+          "speechForbiddenTerms": ["old command", "not sure", "need to check", "tool call", "tool result"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

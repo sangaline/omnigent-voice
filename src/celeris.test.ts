@@ -6,6 +6,7 @@ import {
   CelerisConversation,
   CelerisTraceEvent,
   CelerisMemoryPolicy,
+  compactCoordinatorUpdatesForModel,
   CoordinatorToolClient,
   directCoordinatorUpdateSpeech,
   directFocusedOutputSpeech,
@@ -407,6 +408,96 @@ describe("Celeris coordinator conversation", () => {
     expect(parsed.latest_message?.text).toContain("latest ");
     expect(parsed.items?.[0]).toMatchObject({ position: 1, kind: "message" });
     expect(parsed.items?.at(-1)).toHaveProperty("omitted_items");
+  });
+
+  it("keeps only the latest assistant conclusion from noisy native stream output", () => {
+    const original = [
+      {
+        event_id: 7,
+        type: "session_output" as const,
+        session_id: "session-voice",
+        name: "Voice Work",
+        output_delta: {
+          changed: true,
+          output:
+            "assistant: tool call shell: inspect the deployment\n\ntool result: raw command output\n\ntool call apply_patch: edit source\n\nassistant: The live bridge passed 138 tests in 2.2 seconds.\n[older output omitted]",
+        },
+      },
+    ];
+    expect(directCoordinatorUpdateSpeech(original)).toBeUndefined();
+    const [compacted] = compactCoordinatorUpdatesForModel(original);
+    expect(compacted).toMatchObject({
+      event_id: 7,
+      name: "Voice Work",
+      output_delta: {
+        changed: true,
+        output: "assistant: The live bridge passed 138 tests in 2.2 seconds.",
+        voice_selection: "latest_assistant_conclusion_after_native_activity",
+      },
+    });
+  });
+
+  it("compacts native activity in coordinator fields before serializing tool results", () => {
+    const nativeOutput =
+      "tool call shell: inspect a private rollout\n\ntool result: irrelevant command text\n\nassistant: The current rollout is healthy.";
+    const serialized = serializeToolResult({
+      output_delta: { changed: true, output: nativeOutput },
+      updates: [
+        {
+          event_id: 10,
+          type: "session_output",
+          session_id: "session-voice",
+          name: "Voice Work",
+          output_delta: { changed: true, output: nativeOutput },
+        },
+      ],
+    });
+    expect(serialized).not.toContain("irrelevant command text");
+    const parsed = JSON.parse(serialized) as {
+      output_delta: { output: string; voice_selection: string };
+      updates: Array<{ output_delta: { output: string; voice_selection: string } }>;
+    };
+    expect(parsed.output_delta).toEqual({
+      changed: true,
+      output: "assistant: The current rollout is healthy.",
+      voice_selection: "latest_assistant_conclusion_after_native_activity",
+    });
+    expect(parsed.updates[0]?.output_delta).toEqual(parsed.output_delta);
+  });
+
+  it("leaves ordinary coordinator output unchanged", () => {
+    const updates = [
+      {
+        event_id: 8,
+        type: "session_output" as const,
+        session_id: "session-voice",
+        name: "Voice Work",
+        output_delta: {
+          changed: true,
+          output: "assistant: The deployment is healthy.",
+        },
+      },
+    ];
+    expect(compactCoordinatorUpdatesForModel(updates)).toEqual(updates);
+  });
+
+  it("bounds noisy native output that has no final assistant conclusion", () => {
+    const noise = `tool call shell: inspect\n\ntool result: ${"x".repeat(4_000)}`;
+    const [compacted] = compactCoordinatorUpdatesForModel([
+      {
+        event_id: 9,
+        type: "session_output",
+        session_id: "session-voice",
+        name: "Voice Work",
+        output_delta: { changed: true, output: noise },
+      },
+    ]);
+    expect(compacted).toBeDefined();
+    if (!compacted) throw new Error("missing compacted update");
+    const output = (compacted.output_delta as { output: string }).output;
+    expect(output.length).toBeLessThanOrEqual(2_000);
+    expect(output).toContain("tool call shell");
+    expect(output).toContain("tool result");
   });
 
   it("answers a plain latest-output question only from a safe fresh delta", () => {

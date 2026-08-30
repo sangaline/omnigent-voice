@@ -1794,3 +1794,40 @@ archived after the test; no existing session was read or mutated, and the
 excluded ESPN session remained untouched. Promotion evidence is 138 passing
 unit tests, clean typecheck and build, all 46 isolated Celeris trials, and all
 34 stateful scenarios across 115 linked turns.
+
+### 2026-08-29 — Model-only native stream compaction
+
+Hypothesis H61: authenticated live output removed the persistence delay, but a
+native delta containing the whole recent terminal/tool prefix was wasting
+context and making the small voice model rediscover the final assistant answer.
+The first two post-rollout notifications confirmed both sides. New final output
+was delivered immediately; Celeris completed in 737 ms and 599 ms, and Discord
+playback began 923 ms and 661 ms after delivery started. However, each source
+delta was roughly 8.5 KB and the model prompts grew from 4,637 to 7,435 tokens
+after the first noisy payload entered retained history. The spoken adaptations
+were only 106 and 132 characters.
+
+The harness now recognizes native deltas with separated tool-call or tool-result
+sections and selects the last assistant conclusion for Celeris. The same
+model-only transform is applied to proactive notification prompts, current
+coordinator snapshots after human speech, updates attached to later tool
+results, and retained notification history. A synthetic production-sized
+7,934-character delta became a 93-character model value, a 98.8 percent
+reduction. The original payload remains authoritative for safe deterministic
+rendering, cursor advancement, and private audit logging. A noisy delta without
+a usable final assistant section is capped at 2,000 characters but still goes
+through Celeris; compaction cannot promote untrusted tool text into direct
+speech.
+
+The new linked regression uses ASR-style skepticism after a noisy notification:
+“was that actually from voice work just now or were you reading me some old
+command junk.” Its first strict evaluator scored zero of five, but trace review
+showed that the failures were literal-word mismatches such as “passing” versus
+“passed” and “real-time” versus “current,” not wrong behavior. The corrected
+semantic assertions require the named session, the live-output conclusion, the
+measured 2.2-second result, and rejection of tool-log attribution. The candidate
+passed five of five linked runs across ten turns in one model round per turn.
+No coordinator action or live-session read was used for this experiment, and
+the excluded ESPN session remained untouched. Promotion evidence is 142 passing
+unit tests, clean typecheck and build, all 46 isolated trials, and all 35
+stateful scenarios across 117 linked turns.
