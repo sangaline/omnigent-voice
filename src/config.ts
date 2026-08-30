@@ -32,6 +32,10 @@ export interface Config {
   celerisHistoryCompactCharacters: number;
   celerisHistoryKeepMessages: number;
   celerisHistoryCompactionIdleMs: number;
+  personaChatApiKey?: string | undefined;
+  personaChatBaseUrl: string;
+  personaChatModel: string;
+  personaChatOpenRouterProvider?: string | undefined;
   personaSystemPrompt: string;
   personaMaxResponseCharacters: number;
   personaTemperature: number;
@@ -289,6 +293,20 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
       env,
       "CELERIS_HISTORY_COMPACTION_IDLE_MS",
       5_000,
+    ),
+    personaChatApiKey:
+      optional(env, "PERSONA_CHAT_API_KEY") ?? optional(env, "CELERIS_API_KEY"),
+    personaChatBaseUrl:
+      optional(env, "PERSONA_CHAT_BASE_URL") ??
+      optional(env, "CELERIS_BASE_URL") ??
+      "https://inference.celeris.ai/celeris-1/v1",
+    personaChatModel:
+      optional(env, "PERSONA_CHAT_MODEL") ??
+      optional(env, "CELERIS_MODEL") ??
+      "celeris-1",
+    personaChatOpenRouterProvider: optional(
+      env,
+      "PERSONA_CHAT_OPENROUTER_PROVIDER",
     ),
     personaSystemPrompt: optional(env, "PERSONA_SYSTEM_PROMPT") ?? "",
     personaMaxResponseCharacters: positiveInteger(

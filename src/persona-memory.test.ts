@@ -11,6 +11,7 @@ import {
   groundedMemoryCandidate,
   selfContainedPersonaRequest,
   unsafeCreativeDraft,
+  usefulPersonaThought,
 } from "./persona-memory.js";
 
 class FakeStore implements PersonaMemoryStore {
@@ -301,6 +302,10 @@ describe("OpenAI-compatible persona adviser", () => {
       "tell me something ordinary",
       "Did you know crows remember faces?",
     )).toBe(false);
+    expect(unsafeCreativeDraft(
+      "tell me a weird joke",
+      "Imagine a snail buying a fast car so everyone says, look at that snail go!",
+    )).toBe(true);
   });
 
   it("does not speak creative planner drafts directly", async () => {
@@ -352,6 +357,78 @@ describe("OpenAI-compatible persona adviser", () => {
       "I'm Casey.",
       "Nice to meet you, Casey.",
     )).toMatchObject({ canonicalKey: "user.name", source: "user" });
+  });
+
+  it("rejects ambiguous, transient, and fictional durable memories", () => {
+    expect(groundedMemoryCandidate(
+      {
+        kind: "user_fact",
+        canonical_key: "user.memory.quality",
+        text: "The user describes their memory as decent.",
+        source: "user",
+        evidence_quote: "A decent memory",
+        confidence: 0.8,
+        importance: 0.5,
+      },
+      "A decent memory",
+      "I'm doing my best to keep up.",
+    )).toBeUndefined();
+
+    expect(groundedMemoryCandidate(
+      {
+        kind: "episode",
+        canonical_key: "shared.episode.cloud-joke",
+        text: "Audrey told a fictional joke about a cloud.",
+        source: "assistant",
+        evidence_quote: "Imagine a cloud",
+        confidence: 0.9,
+        importance: 0.4,
+      },
+      "Tell me a joke",
+      "Imagine a cloud trying to hide.",
+    )).toBeUndefined();
+
+    expect(groundedMemoryCandidate(
+      {
+        kind: "user_fact",
+        canonical_key: "user.observation.latency",
+        text: "The user says response latency feels higher.",
+        source: "user",
+        evidence_quote: "I meant the latency feels higher",
+        confidence: 0.9,
+        importance: 0.5,
+      },
+      "I meant the latency feels higher",
+      "That kills the flow.",
+    )).toBeUndefined();
+  });
+
+  it("requires name evidence to contain the claimed name", () => {
+    expect(groundedMemoryCandidate(
+      {
+        kind: "user_fact",
+        canonical_key: "user.name",
+        text: "The user's name is Casey.",
+        source: "user",
+        evidence_quote: "Remember my name",
+        confidence: 1,
+        importance: 0.9,
+      },
+      "Remember my name",
+      "I've got it, Casey.",
+    )).toBeUndefined();
+  });
+
+  it("keeps substantive private thoughts and rejects interview prompts", () => {
+    expect(usefulPersonaThought(
+      "Rainy mornings could be a playful callback to the user's preference.",
+    )).toBe(true);
+    expect(usefulPersonaThought(
+      "Ask the user if there is something specific they want remembered.",
+    )).toBe(false);
+    expect(usefulPersonaThought(
+      "Gently steer back to personal conversation or ask if they want another topic.",
+    )).toBe(false);
   });
 
   it("parses bounded structured memories without exposing its key", async () => {

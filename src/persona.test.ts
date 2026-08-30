@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Logger } from "./log.js";
 import type { PersonaMemoryRuntime } from "./persona-memory.js";
 import {
+  directDeepSeekQuestion,
   PersonaConversation,
   containsPersonaAnchor,
   currentCorrectionAnchor,
@@ -9,6 +10,7 @@ import {
   defaultPersonaSystemPrompt,
   directPersonalRecallQuestion,
   invalidPersonaResponse,
+  incompletePersonaContribution,
   parsePersonaCandidatePool,
   personaRhythmHint,
   personaTurnGroundingInvariant,
@@ -52,8 +54,11 @@ describe("persona conversation", () => {
     expect(invalidPersonaResponse("< channel thought")).toBe(true);
     expect(invalidPersonaResponse("<|channel|>analysis")).toBe(true);
     expect(invalidPersonaResponse("I had a weird dream about a tiny orchestra.")).toBe(true);
+    expect(invalidPersonaResponse("Let me tell you about the time I tried to alphabetize my thoughts.")).toBe(true);
     expect(invalidPersonaResponse('{"candidates":["Do not say this"]}')).toBe(true);
     expect(invalidPersonaResponse("That is a thoughtful answer.")).toBe(false);
+    expect(incompletePersonaContribution("I've got you. It was a tragedy in three acts.")).toBe(true);
+    expect(incompletePersonaContribution("I've got you. Imagine a pigeon applying for a desk job.")).toBe(false);
   });
 
   it("recovers only closed candidates from a truncated structured fallback", () => {
@@ -187,10 +192,10 @@ describe("persona conversation", () => {
         (segment) => segments.push(segment),
       ),
     ).resolves.toBe(
-      "Ooh, give me a second to make this one good. I tried pottery, but I could not handle the pressure.",
+      "One second. I tried pottery, but I could not handle the pressure.",
     );
     expect(segments).toEqual([
-      "Ooh, give me a second to make this one good.",
+      "One second.",
       "I tried pottery, but I could not handle the pressure.",
     ]);
     expect(persistentMemory.askAdviser).toHaveBeenCalledWith(
@@ -233,6 +238,69 @@ describe("persona conversation", () => {
       "what is that deep sea flash thing doing in the background",
     )).resolves.toContain("DeepSeek Flash");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps DeepSeek follow-ups grounded in the exact prior background record", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({ content: "That sounds like a useful direction." }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const persistentMemory = {
+      prepare: vi.fn(),
+      contextFor: vi.fn(() => JSON.stringify({
+        relevant_memories: [],
+        optional_private_thought: {
+          text: "Offer one concrete opinion instead of asking another question.",
+          topic: "conversation rhythm",
+          confidence: 0.9,
+        },
+      })),
+      preparedDraftFor: vi.fn(() => undefined),
+      hasPreparedResponseIdea: vi.fn(() => false),
+      runtimeContext: vi.fn(() => "{}"),
+      speechReferenceHint: vi.fn(() => undefined),
+      rememberTurn: vi.fn(),
+      askAdviser: vi.fn(),
+    } as unknown as PersonaMemoryRuntime;
+    const subject = conversation({ persistentMemory });
+
+    await subject.respond("I want this to feel more natural.");
+    expect(directDeepSeekQuestion("is deep seek actually telling you things", []))
+      .toBe(true);
+    expect(directDeepSeekQuestion("that's interesting", [
+      { role: "assistant", content: "DeepSeek Flash can prepare a draft." },
+    ])).toBe(false);
+    await expect(subject.respond(
+      "Can you tell me specifically what deep seek said to you?",
+    )).resolves.toContain(
+      "Offer one concrete opinion instead of asking another question.",
+    );
+    await expect(subject.respond(
+      "is it actually giving you input",
+    )).resolves.toContain("private suggestion");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("pins an OpenRouter provider only when explicitly configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({ content: "A provider-neutral reply." }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const subject = conversation({
+      baseUrl: "https://openrouter.invalid/api/v1",
+      openRouterProvider: "cerebras/fp16",
+    });
+
+    await expect(subject.respond("say something brief")).resolves.toBe(
+      "A provider-neutral reply.",
+    );
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      provider?: unknown;
+    };
+    expect(body.provider).toEqual({
+      only: ["cerebras/fp16"],
+      allow_fallbacks: false,
+    });
   });
 
   it("waits briefly for cold durable recall instead of falsely denying a known name", async () => {

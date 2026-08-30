@@ -2622,3 +2622,69 @@ The final complete sweep passed all seventeen scenarios with no invalid trials:
 median endpoint generation was 175 ms, p95 746 ms, and maximum 808 ms. The full
 188-test unit and integration suite passed, and typecheck, build, and diff checks
 were clean before promotion.
+
+### 2026-08-30 — Live companion audit and provider comparison seam
+
+Fifteen retained phone turns showed that the transport path is no longer the
+dominant problem. Ten Smart Turn endpoints reached first Discord audio in
+roughly 281–588 ms after speech ended. Five semantic fallbacks took roughly
+750–941 ms because they still paid the 350 ms merge grace. ASR final drain was
+48–110 ms and Pocket first audio was 41–60 ms. The creative answer text was
+ready about 807 ms after endpoint, but the 2.16-second hold line delayed its
+second audio resource until roughly 2.95 seconds. The new independent resource
+did play the final answer, confirming the prior playback-lifetime fix.
+
+The same trace falsified the assumption that Pareto turn planning was helping
+ordinary live replies: zero of fifteen snapshots had a partial or complete hot
+plan. Serialized post-turn reflection did run, varying from about one second to
+more than fourteen seconds. Database inspection found three precision failures:
+an ambiguous “a decent memory” fragment became a user fact, fictional joke
+material became a shared episode, and latency feedback became a durable fact.
+Several short-lived thoughts explicitly encouraged another question or evasion,
+which matched the passive interview-like replies heard in Discord.
+
+The harness now rejects those memory and thought classes locally, shortens the
+creative hold to “One second,” retains exact background provenance for direct
+DeepSeek follow-ups, and configures production's fallback merge grace at 150 ms.
+The immediate persona backend also gained provider-neutral runtime settings and
+an exact OpenRouter provider pin. A first free Gemma 4 31B scenario was invalid:
+Google AI Studio's shared free pool returned HTTP 429 on all requests. That run
+exposed and fixed an evaluator bug where the local recovery phrase could satisfy
+weak turn assertions; chat transport failures now invalidate the whole scenario.
+Retry the free route after the upstream shared-pool limit clears before drawing
+any quality conclusion.
+
+The paid same-weight comparison separated output quality from provider speed.
+Gemma through ModelRun and Cerebras each passed the full seventeen-scenario,
+twenty-seven-turn corpus once. ModelRun's run had 349 ms median total model time,
+1.315 s p95, and 1.613 s maximum. Cerebras had 277 ms median, 922 ms p95, and one
+6.444 s creative-race outlier. Qualitatively, Gemma more often contributed a
+specific image, opinion, or concise disagreement than Celeris and was less prone
+to paraphrasing the human or conducting an interview. It still produced an
+occasional needless question, mechanical memory receipt, familiar joke, or
+unsupported confidence claim, so the same local gates remain necessary.
+
+Completion throughput was the wrong live comparison. After instrumenting the
+first complete segment handed to TTS, three runs of the same five-turn friendship
+flow produced fifteen samples per provider. Celeris measured 164 ms median and
+297 ms p95; Gemma ModelRun measured 298 ms median and 532 ms p95; Gemma Cerebras
+measured 324 ms median and 688 ms p95. Maxima were 346 ms, 1.434 s, and 1.413 s
+respectively. ModelRun therefore beat Cerebras on the voice-critical metric while
+also costing less, despite Cerebras's much higher advertised output throughput.
+
+For inexpensive development fallback, CoreWeave was rejected after three
+consecutive ten-second conversation timeouts. DeepInfra Turbo passed the same
+five-turn flow; its first TTS-ready segments ranged from 293 to 1,443 ms and all
+answers passed. The operational policy is free Gemma for bulk development,
+explicit DeepInfra Turbo reruns when the free shared pool returns 429, and only a
+measured low-TTFT provider for real speech. Automatic OpenRouter fallback remains
+disabled so cost and latency cannot change invisibly.
+
+The final Celeris promotion sweep passed every quality assertion in all
+seventeen scenarios. Sixteen scenarios completed in the main run; one Pareto
+post-turn analysis exceeded its thirty-second transport deadline and was
+correctly classified as invalid rather than a quality failure, then passed on
+an isolated retry. Across the main run's twenty-seven spoken turns, first
+TTS-ready text measured 159 ms median, 524 ms p95, and 680 ms maximum. Total
+conversation generation measured 170 ms median, 553 ms p95, and 701 ms maximum.
+The complete suite passed 194 tests with clean typecheck, build, and diff checks.

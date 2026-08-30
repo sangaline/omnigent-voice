@@ -67,6 +67,27 @@ describe("conversation mode configuration", () => {
     expect(config.personaMemoryEnabled).toBe(false);
   });
 
+  it("lets persona chat use another OpenAI-compatible provider without changing coordinator settings", () => {
+    const config = loadConfig({
+      DISCORD_BOT_TOKEN: "test-token",
+      SHERPA_ASR_MODEL_DIR: "/test/asr",
+      SHERPA_TTS_MODEL_DIR: "/test/tts",
+      CONVERSATION_MODE: "persona",
+      CELERIS_API_KEY: "coordinator-key",
+      CELERIS_MODEL: "celeris-1",
+      PERSONA_CHAT_API_KEY: "persona-key",
+      PERSONA_CHAT_BASE_URL: "https://openrouter.invalid/api/v1",
+      PERSONA_CHAT_MODEL: "google/gemma-test",
+      PERSONA_CHAT_OPENROUTER_PROVIDER: "provider/fp16",
+    });
+
+    expect(config.celerisModel).toBe("celeris-1");
+    expect(config.personaChatApiKey).toBe("persona-key");
+    expect(config.personaChatBaseUrl).toBe("https://openrouter.invalid/api/v1");
+    expect(config.personaChatModel).toBe("google/gemma-test");
+    expect(config.personaChatOpenRouterProvider).toBe("provider/fp16");
+  });
+
   it("validates the opt-in persistent persona memory dependencies", () => {
     const base = {
       DISCORD_BOT_TOKEN: "test-token",

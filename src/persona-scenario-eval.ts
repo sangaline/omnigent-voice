@@ -185,12 +185,16 @@ const scoreSequence = (
   return failures;
 };
 
-const celerisKeyFile = option("--celeris-api-key-file") ?? option("--api-key-file");
+const celerisKeyFile =
+  option("--chat-api-key-file") ??
+  option("--celeris-api-key-file") ??
+  option("--api-key-file");
 const adviserKeyFile = option("--adviser-api-key-file");
 const celerisApiKey = required(
-  process.env.CELERIS_API_KEY?.trim() ??
+  process.env.PERSONA_CHAT_API_KEY?.trim() ??
+    process.env.CELERIS_API_KEY?.trim() ??
     (celerisKeyFile ? readFileSync(celerisKeyFile, "utf8").trim() : undefined),
-  "CELERIS_API_KEY or --celeris-api-key-file PATH",
+  "PERSONA_CHAT_API_KEY or --chat-api-key-file PATH",
 );
 const adviserApiKey = required(
   process.env.PERSONA_ADVISER_API_KEY?.trim() ??
@@ -240,9 +244,16 @@ for (const scenario of scenarios) {
     const conversation = new PersonaConversation({
       apiKey: celerisApiKey,
       baseUrl:
+        process.env.PERSONA_CHAT_BASE_URL?.replace(/\/$/, "") ??
         process.env.CELERIS_BASE_URL?.replace(/\/$/, "") ??
         "https://inference.celeris.ai/celeris-1/v1",
-      model: process.env.CELERIS_MODEL ?? "celeris-1",
+      model:
+        process.env.PERSONA_CHAT_MODEL ??
+        process.env.CELERIS_MODEL ??
+        "celeris-1",
+      ...(process.env.PERSONA_CHAT_OPENROUTER_PROVIDER
+        ? { openRouterProvider: process.env.PERSONA_CHAT_OPENROUTER_PROVIDER }
+        : {}),
       logger: evalLogger,
       systemPrompt: defaultPersonaSystemPrompt,
       temperature: Number(option("--temperature") ?? "0"),
@@ -264,9 +275,15 @@ for (const scenario of scenarios) {
         const started = performance.now();
         try {
           const segments: string[] = [];
+          let firstSpeechSegmentMs: number | undefined;
           const speech = await conversation.respond(
             turn.input,
-            (segment) => segments.push(segment),
+            (segment) => {
+              if (firstSpeechSegmentMs === undefined) {
+                firstSpeechSegmentMs = Math.round(performance.now() - started);
+              }
+              segments.push(segment);
+            },
           );
           if (segments.length > 0 && segments.join(" ") !== speech) {
             throw new Error("Production streaming speech diverged from remembered speech");
@@ -278,6 +295,7 @@ for (const scenario of scenarios) {
             input: turn.input,
             speech,
             durationMs: Math.round(performance.now() - started),
+            firstSpeechSegmentMs,
             passed: failures.length === 0,
             failures,
           };
@@ -285,7 +303,7 @@ for (const scenario of scenarios) {
           if (!hasOption("--json")) {
             console.log(
               `${failures.length === 0 ? "PASS" : "FAIL"} ${scenario.id} turn ${turnIndex + 1}` +
-                ` (${result.durationMs} ms): ${speech}`,
+                ` (first ${result.firstSpeechSegmentMs ?? "n/a"} ms, total ${result.durationMs} ms): ${speech}`,
             );
             for (const failure of failures) console.log(`  ${failure}`);
           }
@@ -306,11 +324,12 @@ for (const scenario of scenarios) {
       await memory.close();
     }
 
-    const backgroundTransportFailure = evalLogger.failures.find(
+    const transportFailure = evalLogger.failures.find(
       ({ event, message }) =>
-        event === "persona.memory.turn.failed" && transientFailure(message),
+        (event === "persona.memory.turn.failed" || event === "persona.turn.failed") &&
+        transientFailure(message),
     );
-    if (backgroundTransportFailure) invalid = true;
+    if (transportFailure) invalid = true;
 
     const analysisText = JSON.stringify(store.analyses);
     const analysisFailures: string[] = [];

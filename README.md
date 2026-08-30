@@ -9,12 +9,15 @@ ordinary turns directly and uses a small in-process MCP coordinator when a
 request depends on real sessions or requires agent work. Work is queued
 asynchronously, so spoken acknowledgements do not wait for a coding agent.
 
-`CONVERSATION_MODE=persona` is a companion-oriented conversational variant. It
+`CONVERSATION_MODE=persona` is a companion-oriented conversational variant. Its
+immediate conversation model is any OpenAI-compatible endpoint; it inherits the
+`CELERIS_*` settings by default, while `PERSONA_CHAT_*` can select a different
+backend without changing coordinator mode. It
 uses a static personality prompt and the same Discord, streaming ASR, semantic
 endpointing, barge-in, Pocket/Piper TTS, and private audit pipeline. It does not
 initialize an Omnigent client, coordinator, or MCP transport. Optional durable
 persona memory uses Postgres/pgvector, local embeddings, and an asynchronous
-OpenAI-compatible adviser; ordinary Celeris turns never wait for the adviser.
+OpenAI-compatible adviser; ordinary conversation turns never wait for the adviser.
 `PERSONA_SYSTEM_PROMPT` can replace the sanitized built-in persona;
 response length and variation use `PERSONA_MAX_RESPONSE_CHARACTERS` and
 `PERSONA_TEMPERATURE`. See [docs/PERSONA.md](docs/PERSONA.md).
@@ -225,3 +228,24 @@ For sanitized diagnostic fixtures, `--json --include-trace` includes raw model
 completion shapes so empty or malformed responses can be investigated.
 Keys, reports, and cases copied from private transcripts must remain outside the
 repository.
+
+Persona scenarios use the same production `PersonaConversation`, prompt,
+memory harness, streaming callback, and safety gates as Discord. A different
+OpenAI-compatible model can therefore be compared without a fork:
+
+```bash
+PERSONA_CHAT_BASE_URL=https://openrouter.ai/api/v1 \
+PERSONA_CHAT_MODEL=google/gemma-4-31b-it:free \
+npm run eval:persona -- \
+  --chat-api-key-file /private/path/openrouter-key \
+  --adviser-api-key-file /private/path/adviser-key
+```
+
+`PERSONA_CHAT_OPENROUTER_PROVIDER` optionally pins one exact OpenRouter provider
+and disables provider fallback so measured latency and cost are attributable.
+It is omitted for the free route. If the free shared pool returns 429 during
+offline development, rerun explicitly with the paid Gemma model and
+`PERSONA_CHAT_OPENROUTER_PROVIDER=deepinfra/turbo`; never make that slower route
+an implicit live-voice fallback. Rate limits and provider transport failures
+make an entire scenario invalid rather than allowing the local recovery phrase
+to count as a quality pass.

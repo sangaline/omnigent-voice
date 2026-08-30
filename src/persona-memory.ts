@@ -660,6 +660,21 @@ const evidenceAppearsIn = (quote: string, source: string): boolean => {
   return normalizedQuote.length >= 2 && normalizedMemoryText(source).includes(normalizedQuote);
 };
 
+const firstPersonEvidence = (quote: string): boolean =>
+  /\b(?:i|i'm|i've|i'd|i'll|me|my|mine|we|we're|we've|our|ours|us|call me)\b/i.test(quote);
+
+const claimedName = (text: string): string | undefined => {
+  const match = /\b(?:name is|named|goes by)\s+([\p{L}\p{M}'-]+(?:\s+[\p{L}\p{M}'-]+){0,2})(?=[.!?,;:]|$)/iu.exec(
+    text,
+  );
+  return match?.[1]?.replace(/\s+/g, " ").trim();
+};
+
+const transientSystemFeedback = (text: string): boolean =>
+  /\b(?:latency|response time|lag|turnaround|first audio|faster response|slower response)\b/i.test(
+    text,
+  );
+
 const partialJsonString = (content: string, key: string): string | undefined => {
   const match = new RegExp(`"${key}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`).exec(
     content,
@@ -699,10 +714,20 @@ const creativePersonaRequest = (input: string): boolean =>
 export const selfContainedPersonaRequest = (input: string): boolean =>
   /\b(?:give me|tell me|say something|make me|(?:distract|entertain|amuse) me|cheer me up|your (?:honest )?(?:read|opinion|take)|one tiny reset)\b/i.test(
     input,
-  );
+  ) ||
+  (/\b(?:i(?:'m| am) bored|brain is mush)\b/i.test(input) &&
+    /\b(?:don'?t|do not)\b[\s\S]{0,80}\b(?:pick|questions?|topic)\b/i.test(input));
 
 const jokePersonaRequest = (input: string): boolean =>
   /\b(?:joke|punchline|make me laugh)\b/i.test(input);
+
+export const usefulPersonaThought = (text: string): boolean => {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized.includes("?")) return false;
+  return !/\b(?:ask(?:ing)? (?:the user|them|if)|invit(?:e|ing) (?:the user|them)|steer(?:ing)? (?:back|away)|what (?:they|the user)(?:'d| would) like|if (?:they|the user) (?:have|want)|tell me something|share (?:a )?(?:new )?fact|test (?:your|the) memory|want(?:s)? (?:Audrey|her) to remember|offer to remember)\b/i.test(
+    normalized,
+  );
+};
 
 export const groundedMemoryCandidate = (
   raw: Record<string, unknown>,
@@ -720,11 +745,19 @@ export const groundedMemoryCandidate = (
     return undefined;
   }
   if (kind === "audrey_self" && source !== "assistant") return undefined;
-  if (kind !== "audrey_self" && kind !== "episode" && source !== "user") {
-    return undefined;
-  }
+  if (kind !== "audrey_self" && source !== "user") return undefined;
   if (!evidenceAppearsIn(evidenceQuote, source === "user" ? user : assistant)) {
     return undefined;
+  }
+  if (source === "user" && !firstPersonEvidence(evidenceQuote)) return undefined;
+  if (source === "user" && transientSystemFeedback(`${text} ${evidenceQuote}`)) {
+    return undefined;
+  }
+  if (canonicalKey === "user.name") {
+    const name = claimedName(text);
+    if (!name || !normalizedMemoryText(evidenceQuote).includes(normalizedMemoryText(name))) {
+      return undefined;
+    }
   }
   return {
     kind,
@@ -754,12 +787,18 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
             "short exact evidence quote from that speaker. Use a stable semantic canonical_key such as user.name, " +
             "user.preference.rain, shared.episode.pottery, or audrey.preference.music so corrections replace stale values. " +
             "Use one short atomic sentence per memory. " +
-            "A thought is a private, short-lived idea that could improve a related future turn: a callback, better joke, " +
-            "gentle question, or useful conversational angle. It is a suggestion, never a fact. Return null when none is worthwhile. " +
+            "A thought is a private, short-lived idea that could improve a related future turn: a specific callback, " +
+            "concrete observation, fresh contribution, or useful conversational angle. It is a suggestion, never a fact. " +
+            "Never make the thought a question, an instruction to ask or invite the human, a memory test, a generic offer " +
+            "to remember something, or a suggestion to steer away from a direct mechanism question. Return null when no " +
+            "specific substantive contribution is worthwhile. " +
             "Always retain an explicitly stated preferred name, changed preference, future plan, appointment, promised follow-up, " +
             "or unresolved event. When one event is resolved and the human states a dated next step, store that new next step as " +
             "an open_loop and preserve the exact day in its text and evidence. " +
-            "A question, hypothetical, joke premise, or false shared-memory test is not evidence that an event happened. " +
+            "Do not store transient feedback about latency, response speed, model behavior, or system testing as a durable " +
+            "human fact. A short fragment such as 'a decent memory' is not a human fact unless it explicitly refers to the " +
+            "human in first person. A question, hypothetical, joke premise, fictional material spoken by Audrey, or false " +
+            "shared-memory test is not evidence that an event happened. " +
             "If Audrey denies a purported event, do not extract that event as memory.",
         },
         {
@@ -789,7 +828,7 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
       const raw = parsed.thought as Record<string, unknown>;
       const text = cleanText(raw.text, 500);
       const topic = cleanText(raw.topic, 160);
-      if (text && topic) {
+      if (text && topic && usefulPersonaThought(text)) {
         thought = {
           text,
           topic,
@@ -832,7 +871,9 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
             "inside the reply: if asked to distract or entertain, provide the distraction instead of asking the human for " +
             "another task. If asked to give, tell, say, make, distract, entertain, or offer an honest read, the reply must " +
             "deliver that contribution and must not turn it into a question. A distraction reply must be a self-contained " +
-            "amusing observation, tiny story, or playful riff, not a question or conversation prompt. Resolve conversational shorthand before writing: when the human says something like today's " +
+            "amusing observation, tiny story, or playful riff, not a question or conversation prompt. If an optional " +
+            "background thought directly supplies the requested contribution, use its specific image or idea instead of " +
+            "replacing it with an unrelated one. Resolve conversational shorthand before writing: when the human says something like today's " +
             "the day, it happened, or that one, name the concrete event from recent dialogue or an open-loop memory. For " +
             "example, if the established event is an interview, say interview rather than giving generic encouragement. " +
             "Respond to nerves with specific continuity rather than a stock pep talk. For jokes or creative requests, " +
@@ -1138,7 +1179,7 @@ export const unsafeCreativeDraft = (input: string, draft: string): boolean => {
     (jokePersonaRequest(input) &&
       !/^(?:okay[,.]?\s+)?(?:imagine\b|picture this\b)/i.test(draft.trim())) ||
     /\b(?:weird|fun|strange|random)\s+fact\s*:/i.test(draft) ||
-    /\b(?:why did|what do you call|here(?:'s| is) (?:a )?(?:weird |fun |strange )?fact|i once(?: read| watched| saw| heard)?|i (?:watched|saw|heard)|my pet|when i was|did you know|scientists?|researchers?|first coined|in (?:18|19|20)\d{2}|species of|biologically|theoretically|scarecrow|outstanding in (?:his|her|their|the) field|knock knock|cross(?:ed|es|ing)? the road|books? on paranoia|(?:a|an|two)\s+[^.!?]{0,32}\s+walk(?:s|ed)? into (?:a\s+)?(?:bar|library))\b/i.test(
+    /\b(?:why did|what do you call|here(?:'s| is) (?:a )?(?:weird |fun |strange )?fact|i once(?: read| watched| saw| heard)?|i (?:watched|saw|heard)|my pet|when i was|did you know|scientists?|researchers?|first coined|in (?:18|19|20)\d{2}|species of|biologically|theoretically|scarecrow|outstanding in (?:his|her|their|the) field|knock knock|cross(?:ed|es|ing)? the road|books? on paranoia|snail[^.!?]{0,80}(?:fast|sports?) car|look at that (?:snail|s car) go|(?:a|an|two)\s+[^.!?]{0,32}\s+walk(?:s|ed)? into (?:a\s+)?(?:bar|library))\b/i.test(
       draft,
     );
 };
@@ -1186,6 +1227,25 @@ const memoryContinuityAnchors = (
   ...openLoopContinuityAnchors(memories),
   ...preferenceCallbackAnchors(memories),
 ]));
+
+const preparedPlanUsesThought = (
+  input: string,
+  plan: PersonaTurnPlan,
+  thought: PersonaThoughtRecord | undefined,
+): boolean => {
+  if (!thought || !selfContainedPersonaRequest(input)) return true;
+  const ignored = new Set([
+    "about", "after", "audrey", "background", "better", "could", "future",
+    "human", "making", "offer", "playful", "reply", "reset", "should",
+    "specific", "suggest", "suggesting", "their", "there", "thing", "thought",
+    "using", "would",
+  ]);
+  const terms = normalizedMemoryText(`${thought.text} ${thought.topic}`)
+    .split(" ")
+    .filter((term) => term.length >= 5 && !ignored.has(term));
+  const draft = normalizedMemoryText(plan.draftReply);
+  return terms.some((term) => draft.includes(term));
+};
 
 export class PersonaMemoryRuntime {
   private prepared: PreparedMemory | undefined;
@@ -1482,7 +1542,7 @@ export class PersonaMemoryRuntime {
       if (detail) return `That tracks; you have a soft spot for ${detail}.`;
     }
     const anchor = memoryContinuityAnchors(prepared.selection.memories).at(-1);
-    return anchor ? `The ${anchor} is the thread here.` : undefined;
+    return anchor ? `Right, the ${anchor}.` : undefined;
   }
 
   public preparedDraftFor(input: string): string | undefined {
@@ -1693,6 +1753,7 @@ export class PersonaMemoryRuntime {
         recentDialogue,
       }, (plan) => {
         if (generation !== this.planGeneration) return;
+        if (!preparedPlanUsesThought(input, plan, selection.thought)) return;
         this.preparedPlan = {
           normalizedQuery,
           sourceInput: input,
@@ -1716,6 +1777,10 @@ export class PersonaMemoryRuntime {
       }, controller.signal)
       .then((plan) => {
         if (generation !== this.planGeneration) return;
+        if (!preparedPlanUsesThought(input, plan, selection.thought)) {
+          this.options.logger.warn("persona.turn_plan.thought_miss");
+          return;
+        }
         this.preparedPlan = {
           normalizedQuery,
           sourceInput: input,

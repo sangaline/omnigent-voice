@@ -143,6 +143,31 @@ The fast fallback may recover complete closed candidate strings from a truncated
 JSON pool, but a structured envelope or unfinished string is never speech. Keep
 the final raw-JSON rejection even when provider token limits change.
 
+Persona's immediate chat backend is provider-neutral. `PERSONA_CHAT_API_KEY`,
+`PERSONA_CHAT_BASE_URL`, and `PERSONA_CHAT_MODEL` override the legacy
+`CELERIS_*` values only in persona mode; coordinator mode remains unchanged.
+`PERSONA_CHAT_OPENROUTER_PROVIDER` pins one exact OpenRouter endpoint and disables
+fallback for attributable comparisons. The same `PersonaConversation`, prompt,
+memory harness, streaming callback, and scenario corpus must be used across
+model comparisons. Provider rate limits are invalid trials, never successful
+fallback speech. The Celeris-only `/echo` warmup is skipped for other hosts.
+Bulk OpenRouter development uses `google/gemma-4-31b-it:free` first. An upstream
+free-pool 429 is retried later or rerun explicitly with the paid model pinned to
+`deepinfra/turbo`; never enable transparent fallback in live speech. Live model
+selection uses endpoint-to-first-complete-speech-segment latency, not advertised
+completion throughput. A three-run, fifteen-turn friendship probe measured
+Celeris at 164 ms median / 297 ms p95, Gemma ModelRun at 298 / 532 ms, and
+Gemma Cerebras at 324 / 688 ms before Pocket's roughly 40–60 ms first audio.
+
+Post-turn memory analysis is a precision path. Non-self memories require
+first-person user evidence, fictional assistant output cannot become a shared
+episode, a claimed name must occur in its evidence quote, and transient
+latency/testing observations are rejected. Optional thoughts must be concrete
+contributions, not instructions to interview the human, invite a memory test,
+or evade a direct runtime question. Provenance retains the selected memory,
+thought, or draft process-locally so short DeepSeek follow-ups can report exactly
+what contributed without another model round.
+
 The bundled runtime models are the int8 0.6B Nemotron English streaming
 transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the
 public `alba` voice, and Piper US English Lessac medium as a fallback. The public
@@ -1029,6 +1054,7 @@ npm test
 npm run build
 npm run eval -- --api-key-file /private/path/celeris-key
 npm run eval:scenarios -- --api-key-file /private/path/celeris-key
+npm run eval:persona -- --chat-api-key-file /private/path/chat-key --adviser-api-key-file /private/path/adviser-key
 npm run dev
 npm run mcp
 npm run mcp:remote

@@ -13,7 +13,7 @@ TTS_RUNTIME=pocket
 It keeps the production streaming path unchanged:
 
 ```text
-Discord -> local streaming ASR -> Smart Turn endpointing -> Celeris persona
+Discord -> local streaming ASR -> Smart Turn endpointing -> OpenAI-compatible persona chat (Celeris default)
         -> streaming local Pocket TTS -> Discord
 ```
 
@@ -29,6 +29,23 @@ bake a private persona, name, biography, or relationship into the public image.
 `PERSONA_MAX_RESPONSE_CHARACTERS` defaults to 420 and
 `PERSONA_TEMPERATURE` defaults to 0.4. The harness rejects leaked model control
 markers and retries once rather than speaking them.
+
+The hot model is configured through the provider-neutral `PERSONA_CHAT_API_KEY`,
+`PERSONA_CHAT_BASE_URL`, and `PERSONA_CHAT_MODEL` variables. Empty values inherit
+the existing `CELERIS_*` configuration, so the deployed default remains Celeris
+without maintaining a second harness. OpenRouter experiments may additionally
+set `PERSONA_CHAT_OPENROUTER_PROVIDER` to an exact endpoint slug; the request
+then uses only that endpoint with fallback disabled. Provider keys, routing, and
+model names remain runtime configuration and never enter the image.
+
+For OpenRouter development, run the free Gemma route first. Its Google AI
+Studio shared pool can return upstream 429s; retry later or explicitly rerun the
+same corpus with the paid Gemma model pinned to `deepinfra/turbo`. Do not enable
+OpenRouter's implicit provider fallback, and do not use that cheaper, slower
+route for live voice. Production speech must pin a provider selected by measured
+first TTS-ready segment latency. The current small comparison favored
+`modelrun/fp4` over `cerebras/fp16` for that metric despite Cerebras's greater
+completion throughput. Celeris remained materially faster than either.
 
 Recent dialogue is retained verbatim and uses the same idle compaction
 thresholds as coordinator mode. Persona compaction preserves preferences,
@@ -93,7 +110,13 @@ secret. `PERSONA_MEMORY_ANALYSIS_MODEL` may use a precise structured-output
 model while `PERSONA_ADVISER_MODEL` supplies turn planning and deeper advice.
 Only one structured memory analysis request runs per completed turn. Every
 memory carries a stable key and an exact quote from its declared source;
-runtime validation rejects user facts inferred only from Audrey's wording. Logs retain
+runtime validation rejects user facts inferred only from Audrey's wording.
+Non-self memories must be grounded in a first-person user quote; assistant-made
+fiction cannot become a shared episode, a claimed name must occur in the user
+evidence, and transient latency/testing feedback is discarded. Private thoughts
+must contribute a concrete observation or callback rather than instructing
+Audrey to interview the user, offer memory service, evade a direct mechanism
+question, or steer the subject away. Logs retain
 aggregate timing and token counts but never the provider request text.
 
 The same adviser is exposed to Celeris through one narrow `ask_adviser` tool.
@@ -128,10 +151,12 @@ speech gate.
 
 Typed generation provenance records whether background context was merely
 available, a prepared DeepSeek reply was actually used, or the adviser produced
-the answer. Immediate questions about the last reply use this record rather than
-asking the small model to infer provenance from chat history. Direct questions
-about the “deep sea flash” ASR alias receive the verified DeepSeek Flash name and
-role. Explicit present-tense corrections and retrieved open loops produce a
+the answer. It also retains the exact selected thought, memory text, or draft
+process-locally so a specific follow-up can quote what actually reached the last
+reply. Immediate questions about the last reply use this record rather than
+asking the small model to infer provenance from chat history. Direct and short
+pronoun follow-ups about the “deep sea flash” ASR alias receive the verified
+DeepSeek Flash name and role. Explicit present-tense corrections and retrieved open loops produce a
 required continuity anchor; a Celeris fallback is buffered and retried once if
 it omits that anchor.
 

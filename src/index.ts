@@ -106,9 +106,12 @@ if (config.conversationMode === "persona") {
     });
   }
   conversation = new PersonaConversation({
-    apiKey: config.celerisApiKey,
-    baseUrl: config.celerisBaseUrl,
-    model: config.celerisModel,
+    apiKey: config.personaChatApiKey,
+    baseUrl: config.personaChatBaseUrl,
+    model: config.personaChatModel,
+    ...(config.personaChatOpenRouterProvider
+      ? { openRouterProvider: config.personaChatOpenRouterProvider }
+      : {}),
     logger,
     systemPrompt: config.personaSystemPrompt,
     maxResponseCharacters: config.personaMaxResponseCharacters,
