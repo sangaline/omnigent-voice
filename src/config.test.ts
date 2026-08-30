@@ -37,6 +37,10 @@ describe("Smart Turn configuration", () => {
 describe("conversation mode configuration", () => {
   it("keeps coordinator mode as the default and requires its credentials", () => {
     expect(loadConfig(requiredEnvironment()).conversationMode).toBe("coordinator");
+    expect(loadConfig({
+      ...requiredEnvironment(),
+      CELERIS_OPENROUTER_PROVIDER: "deepinfra/turbo",
+    }).celerisOpenRouterProvider).toBe("deepinfra/turbo");
     expect(() =>
       loadConfig({
         DISCORD_BOT_TOKEN: "test-token",

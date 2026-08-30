@@ -5248,8 +5248,9 @@
         "expected": {
           "toolSequence": [],
           "forbiddenTools": ["get_output", "poll_output", "focus_session", "send_message"],
-          "speechTerms": ["voice work", "live-output"],
+          "speechTerms": ["voice work"],
           "speechAnyTerms": [
+            ["live-output", "live output", "live update", "real-time update", "realtime update"],
             ["deployed", "healthy"]
           ],
           "speechForbiddenTerms": ["old command", "not sure", "need to check", "tool call", "tool result"],

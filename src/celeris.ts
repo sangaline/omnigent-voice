@@ -46,6 +46,7 @@ export interface CelerisOptions {
   apiKey?: string | undefined;
   baseUrl: string;
   model: string;
+  openRouterProvider?: string | undefined;
   logger: Logger;
   tools: CoordinatorToolClient;
   memoryPolicy?: Partial<CelerisMemoryPolicy> | undefined;
@@ -1127,6 +1128,32 @@ export const voiceReadRouting = (
       matches.set(id, { id, name });
     }
   }
+  if (matches.size === 0) {
+    const genericNameWords = new Set([
+      "agent",
+      "chat",
+      "main",
+      "primary",
+      "session",
+      "side",
+      "temporary",
+      "work",
+      "worker",
+    ]);
+    const inputWords = new Set(words(input));
+    for (const candidate of Array.isArray(knownSessions) ? knownSessions : []) {
+      const value = objectValue(candidate);
+      const id = typeof value?.id === "string" ? value.id : "";
+      const name = typeof value?.name === "string" ? value.name : "";
+      if (!id || !name) continue;
+      const distinctive = words(name).filter(
+        (word) => word.length >= 4 && !genericNameWords.has(word),
+      );
+      if (distinctive.some((word) => inputWords.has(word))) {
+        matches.set(id, { id, name });
+      }
+    }
+  }
   if (matches.size === 1) return { mode: "named", target: [...matches.values()][0] };
   if (messageTarget) {
     const sources = [...matches.values()].filter(({ id }) => id !== messageTarget.id);
@@ -1166,6 +1193,50 @@ const requestsIncrementalOutput = (input: string): boolean =>
   /\b(?:anything\s+new(?:er)?|what(?:'s|\s+is)\s+new|newer|since\s+(?:that|the)|after\s+that)\b/i.test(
     input,
   );
+
+export const normalizePromptAnswerTypes = (
+  args: Record<string, unknown>,
+  pendingDecisions: unknown,
+): Record<string, unknown> => {
+  if (!Array.isArray(pendingDecisions) || !objectValue(args.answers)) return args;
+  const promptId = typeof args.prompt_id === "string" ? args.prompt_id : "";
+  if (!promptId) return args;
+  const prompt = pendingDecisions
+    .flatMap((decision) => {
+      const value = objectValue(decision);
+      return Array.isArray(value?.prompts) ? value.prompts : [];
+    })
+    .map(objectValue)
+    .find((candidate) => candidate?.prompt_id === promptId);
+  const schema = objectValue(prompt?.schema);
+  const properties = objectValue(schema?.properties);
+  if (!properties) return args;
+  const answers = { ...(args.answers as Record<string, unknown>) };
+  let changed = false;
+  for (const [name, answer] of Object.entries(answers)) {
+    const property = objectValue(properties[name]);
+    const type = typeof property?.type === "string" ? property.type : "";
+    if (
+      (type === "integer" || type === "number") &&
+      typeof answer === "string" &&
+      /^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(answer.trim())
+    ) {
+      const value = Number(answer);
+      if (Number.isFinite(value) && (type !== "integer" || Number.isInteger(value))) {
+        answers[name] = value;
+        changed = true;
+      }
+    } else if (
+      type === "boolean" &&
+      typeof answer === "string" &&
+      /^(?:true|false)$/i.test(answer.trim())
+    ) {
+      answers[name] = answer.trim().toLocaleLowerCase() === "true";
+      changed = true;
+    }
+  }
+  return changed ? { ...args, answers } : args;
+};
 
 const failedCoordinatorSpeech = (content: string): boolean =>
   /\b(?:couldn't|could not|unable to|failed to|didn't work|did not work|coordination layer|error)\b/i.test(
@@ -1764,6 +1835,16 @@ export const compactCoordinatorUpdatesForModel = (
 ): CoordinatorUpdate[] =>
   updates.map((update) => compactCoordinatorUpdateForModel(update) as CoordinatorUpdate);
 
+export const ensureNotificationSourceName = (
+  updates: readonly CoordinatorUpdate[],
+  speech: string,
+): string => {
+  const names = [...new Set(updates.map((update) => update.name?.trim()).filter(Boolean))];
+  const source = names.length === 1 ? names[0] : undefined;
+  if (!source || words(speech).join(" ").includes(words(source).join(" "))) return speech;
+  return `${source}: ${speech}`;
+};
+
 const coordinatorUpdatesForHistory = (
   updates: readonly CoordinatorUpdate[],
 ): CoordinatorUpdate[] =>
@@ -1771,6 +1852,30 @@ const coordinatorUpdatesForHistory = (
     ...update,
     notification_provenance: "new_backend_event_at_this_dialogue_position",
   }));
+
+export const directNotificationProvenanceSpeech = (
+  input: string,
+  history: readonly Pick<ChatMessage, "role" | "content">[],
+  notificationTargets: readonly VoiceSessionTarget[],
+): string | undefined => {
+  if (
+    notificationTargets.length !== 1 ||
+    !/\b(?:actually|really)\b[\s\S]{0,35}\bfrom\b|\b(?:old|stale)\s+(?:command|output|update|junk)\b/i.test(
+      input,
+    )
+  ) {
+    return undefined;
+  }
+  const priorSpeech = [...history].reverse().find(
+    (message) => message.role === "assistant" && typeof message.content === "string",
+  )?.content?.trim();
+  const target = notificationTargets[0];
+  if (!priorSpeech || !target) return undefined;
+  const core = priorSpeech.toLocaleLowerCase().startsWith(target.name.toLocaleLowerCase())
+    ? priorSpeech.slice(target.name.length).replace(/^\s*[:,-]\s*/, "")
+    : priorSpeech;
+  return `Yes. That was a live update from ${target.name}. ${core}`;
+};
 
 const asksForIncomingUpdate = (input: string): boolean =>
   /\b(?:anything(?:\s+else)?(?:\s+new)?(?:\s+just)?\s+(?:come|came|arrive|arrived)|what\s+(?:just\s+)?(?:came|arrived)\s+in|what\s+(?:new\s+)?(?:update|notification)\s+(?:just\s+)?(?:came|arrived))\b/i.test(
@@ -2800,6 +2905,12 @@ export class CelerisConversation {
 
   public async warmup(): Promise<void> {
     if (!this.options.apiKey) return;
+    try {
+      const hostname = new URL(this.options.baseUrl).hostname.toLocaleLowerCase();
+      if (hostname !== "celeris.ai" && !hostname.endsWith(".celeris.ai")) return;
+    } catch {
+      return;
+    }
     const started = performance.now();
     const endpoint = `${this.options.baseUrl.replace(/\/v1\/?$/, "")}/echo`;
     try {
@@ -3025,6 +3136,17 @@ export class CelerisConversation {
       this.history,
       updates.known_sessions,
     );
+    const notificationProvenance = directNotificationProvenanceSpeech(
+      input,
+      this.history,
+      notificationTargets,
+    );
+    if (notificationProvenance) {
+      const speech = sanitizeForSpeech(notificationProvenance, 300);
+      this.updateCursor = turnUpdateCursor;
+      this.remember(input, speech, retainedTurnUpdates());
+      return speech;
+    }
     const messageRouting = voiceMessageRouting(
       input,
       updates.known_sessions,
@@ -3072,6 +3194,9 @@ export class CelerisConversation {
       readRouting,
       notificationTargets,
     );
+    const notificationReadTarget = notificationOutputRead && notificationTargets.length === 1
+      ? notificationTargets[0]
+      : undefined;
     const startInstruction = voiceStartInstruction(
       input,
       messageRouting.mode === "multiple"
@@ -3165,6 +3290,7 @@ export class CelerisConversation {
             (!retryReadRouting || name !== "send_message") &&
             (!incomingUpdateQuestion ||
               (name !== "get_output" && name !== "poll_output")) &&
+            (name !== "poll_output" || Boolean(incrementalPoll?.cursor)) &&
             (readRouting.mode !== "ambiguous" ||
               (name !== "get_output" && name !== "poll_output"))
           );
@@ -3343,8 +3469,9 @@ export class CelerisConversation {
         const executedThisRound: Array<{ name: string; result: JsonObject }> = [];
         const readsInSameCompletion = calls.some(
           (call) =>
-            call.function.name === "get_output" ||
-            call.function.name === "poll_output",
+            allowedTools.has(call.function.name) &&
+            (call.function.name === "get_output" ||
+              call.function.name === "poll_output"),
         );
         let deferredSendForReadEvidence = false;
         const deferredMissingSourceNames = new Set<string>();
@@ -3424,6 +3551,11 @@ export class CelerisConversation {
             readRouting.target
           ) {
             args = { ...args, session_id: readRouting.target.id };
+          } else if (
+            (call.function.name === "get_output" || call.function.name === "poll_output") &&
+            notificationReadTarget
+          ) {
+            args = { ...args, session_id: notificationReadTarget.id };
           }
           if (
             call.function.name === "poll_output" &&
@@ -3448,6 +3580,9 @@ export class CelerisConversation {
             requestsDirectRenameAction(input)
           ) {
             args = { ...args, title: renameTitle };
+          }
+          if (call.function.name === "answer_prompt") {
+            args = normalizePromptAnswerTypes(args, updates.pending_decisions);
           }
           if (
             call.function.name === "send_message" &&
@@ -3564,6 +3699,21 @@ export class CelerisConversation {
             }
             attemptedMessageTargetIds.add(resolvedMultipleMessageTarget.id);
           }
+          if (!allowedTools.has(call.function.name)) {
+            this.options.logger.info("celeris.tool.deferred", {
+              name: call.function.name,
+              reason: "unavailable_for_turn",
+            });
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: JSON.stringify({
+                deferred: true,
+                reason: `${call.function.name} is not available for this user turn`,
+              }),
+            });
+            continue;
+          }
           this.options.logger.info("celeris.tool.called", { name: call.function.name });
           signal?.throwIfAborted();
           let result: JsonObject;
@@ -3577,10 +3727,6 @@ export class CelerisConversation {
           ) {
             result = {
               error: "Multiple known focus targets were present; one target is required",
-            };
-          } else if (!allowedTools.has(call.function.name)) {
-            result = {
-              error: `${call.function.name} is not available for this user turn`,
             };
           } else try {
             result = await this.options.tools.callTool(call.function.name, args);
@@ -3891,7 +4037,7 @@ export class CelerisConversation {
       const message = await this.complete(messages, "background_update", [], signal, 64);
       const content = typeof message.content === "string" ? message.content.trim() : "";
       if (!content) return undefined;
-      return sanitizeForSpeech(content, 300);
+      return sanitizeForSpeech(ensureNotificationSourceName(updates, content), 300);
     } catch (error) {
       if (signal.aborted) return undefined;
       this.options.trace?.({
@@ -3961,6 +4107,14 @@ export class CelerisConversation {
           temperature: this.options.temperature ?? 0,
           seed: this.options.seed ?? 7,
           messages,
+          ...(this.options.openRouterProvider
+            ? {
+                provider: {
+                  only: [this.options.openRouterProvider],
+                  allow_fallbacks: false,
+                },
+              }
+            : {}),
           ...(onContentDelta
             ? { stream: true, stream_options: { include_usage: true } }
             : {}),

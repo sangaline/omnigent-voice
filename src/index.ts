@@ -147,6 +147,9 @@ if (config.conversationMode === "persona") {
     apiKey: config.celerisApiKey,
     baseUrl: config.celerisBaseUrl,
     model: config.celerisModel,
+    ...(config.celerisOpenRouterProvider
+      ? { openRouterProvider: config.celerisOpenRouterProvider }
+      : {}),
     logger,
     tools,
     memoryPolicy,

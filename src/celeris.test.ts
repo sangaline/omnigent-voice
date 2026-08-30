@@ -14,6 +14,7 @@ import {
   directHumanSuppliedCorrectionSpeech,
   directInterruptedSendVerificationSpeech,
   directNoIncomingUpdateSpeech,
+  directNotificationProvenanceSpeech,
   directOutputVisibilityCapabilitySpeech,
   directRepetitionCorrectionSpeech,
   directPendingDecisionSpeech,
@@ -21,10 +22,12 @@ import {
   directPollOutputResultSpeech,
   directSessionOutputSpeech,
   immediateNotificationTargets,
+  ensureNotificationSourceName,
   isDeclarativeMissedSend,
   missingMultiSourceCauseTerms,
   missingMultiSourceNames,
   missingMultiSourceNumbers,
+  normalizePromptAnswerTypes,
   prependMissingActionReceipts,
   requestsPositiveFocusAction,
   requestedRenameTitle,
@@ -180,6 +183,72 @@ const conversation = (
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Celeris coordinator conversation", () => {
+  it("normalizes weak-model form scalars against the authoritative prompt schema", () => {
+    expect(normalizePromptAnswerTypes({
+      prompt_id: "prompt-form",
+      action: "accept",
+      answers: { replicas: "3", dry_run: "false", environment: "staging" },
+    }, [{
+      prompts: [{
+        prompt_id: "prompt-form",
+        schema: {
+          type: "object",
+          properties: {
+            replicas: { type: "integer" },
+            dry_run: { type: "boolean" },
+            environment: { type: "string" },
+          },
+        },
+      }],
+    }])).toMatchObject({
+      answers: { replicas: 3, dry_run: false, environment: "staging" },
+    });
+  });
+
+  it("grounds notification source names and skeptical provenance follow-ups locally", () => {
+    const updates = [{
+      event_id: 1,
+      type: "session_output" as const,
+      session_id: "session-voice",
+      name: "Voice Work",
+    }];
+    expect(ensureNotificationSourceName(updates, "The bridge is healthy."))
+      .toBe("Voice Work: The bridge is healthy.");
+    expect(directNotificationProvenanceSpeech(
+      "was that actually from voice work or old command junk",
+      [
+        {
+          role: "system",
+          content: 'Omnigent background update: [{"session_id":"session-voice","name":"Voice Work"}]',
+        },
+        { role: "assistant", content: "Voice Work: The live-output bridge is deployed and healthy." },
+      ],
+      [{ id: "session-voice", name: "Voice Work" }],
+    )).toBe(
+      "Yes. That was a live update from Voice Work. The live-output bridge is deployed and healthy.",
+    );
+  });
+
+  it("resolves a unique distinctive session-name word without trusting the model's id", () => {
+    expect(voiceReadRouting(
+      "pull the exact last thing that audit said",
+      [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-audit", name: "Receipt Audit" },
+      ],
+    )).toEqual({
+      mode: "named",
+      target: { id: "session-audit", name: "Receipt Audit" },
+    });
+    expect(voiceReadRouting(
+      "what is work doing",
+      [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-voice", name: "Voice Work" },
+      ],
+    )).toEqual({ mode: "model" });
+  });
+
   it("describes terminal visibility without claiming arbitrary raw scrollback", () => {
     expect(
       directOutputVisibilityCapabilitySpeech(
@@ -1786,10 +1855,10 @@ describe("Celeris coordinator conversation", () => {
         function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
       }>;
     };
-    expect(request.tools).toHaveLength(4);
+    expect(request.tools).toHaveLength(3);
     expect(request.tools?.map((tool) => tool.function?.name)).not.toContain("focus_session");
     expect(request.tools?.map((tool) => tool.function?.name)).toContain("answer_prompt");
-    expect(request.tools?.map((tool) => tool.function?.name)).toContain("poll_output");
+    expect(request.tools?.map((tool) => tool.function?.name)).not.toContain("poll_output");
     const send = request.tools?.find((tool) => tool.function?.name === "send_message");
     expect(send?.function?.parameters?.properties).not.toHaveProperty("session_id");
     expect(
@@ -3974,6 +4043,7 @@ describe("Celeris coordinator conversation", () => {
         apiKey: "test-key",
         baseUrl: "https://example.test/v1",
         model: "test-model",
+        openRouterProvider: "deepinfra/turbo",
         logger: new Logger("error"),
         tools: mcp,
         systemPromptOverride: "Candidate system prompt.",
@@ -3995,11 +4065,16 @@ describe("Celeris coordinator conversation", () => {
       const firstRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
         temperature?: number;
         seed?: number;
+        provider?: unknown;
         tool_choice?: unknown;
         messages?: Array<{ role?: string; content?: string }>;
       };
       expect(firstRequest.temperature).toBe(0.2);
       expect(firstRequest.seed).toBe(11);
+      expect(firstRequest.provider).toEqual({
+        only: ["deepinfra/turbo"],
+        allow_fallbacks: false,
+      });
       expect(firstRequest.tool_choice).toEqual({
         type: "function",
         function: { name: "send_message" },

@@ -212,6 +212,17 @@ npm run eval -- --api-key-file /private/path/celeris-key \
 npm run eval:scenarios -- --api-key-file /private/path/celeris-key
 ```
 
+The coordinator harness is also provider-neutral. For an attributable
+OpenRouter comparison, set `CELERIS_BASE_URL`, `CELERIS_MODEL`, and the optional
+exact `CELERIS_OPENROUTER_PROVIDER`; a provider pin disables fallback:
+
+```bash
+CELERIS_BASE_URL=https://openrouter.ai/api/v1 \
+CELERIS_MODEL=google/gemma-4-31b-it \
+CELERIS_OPENROUTER_PROVIDER=deepinfra/turbo \
+npm run eval:scenarios -- --api-key-file /private/path/openrouter-key
+```
+
 Prompt override flags match replay. HTTP rate limits and transport failures are
 reported as invalid rather than quality failures, while empty model turns and
 wrong tool behavior still fail. `evals/scenarios.json` keeps one production

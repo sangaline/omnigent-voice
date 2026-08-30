@@ -28,6 +28,7 @@ export interface Config {
   celerisApiKey?: string | undefined;
   celerisBaseUrl: string;
   celerisModel: string;
+  celerisOpenRouterProvider?: string | undefined;
   celerisHistoryCompactMessages: number;
   celerisHistoryCompactCharacters: number;
   celerisHistoryKeepMessages: number;
@@ -282,6 +283,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
       optional(env, "CELERIS_BASE_URL") ??
       "https://inference.celeris.ai/celeris-1/v1",
     celerisModel: optional(env, "CELERIS_MODEL") ?? "celeris-1",
+    celerisOpenRouterProvider: optional(env, "CELERIS_OPENROUTER_PROVIDER"),
     celerisHistoryCompactMessages,
     celerisHistoryCompactCharacters: positiveInteger(
       env,

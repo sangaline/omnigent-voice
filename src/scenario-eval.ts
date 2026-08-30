@@ -140,6 +140,9 @@ for (const scenario of scenarios) {
         process.env.CELERIS_BASE_URL?.replace(/\/$/, "") ??
         "https://inference.celeris.ai/celeris-1/v1",
       model: process.env.CELERIS_MODEL ?? "celeris-1",
+      ...(process.env.CELERIS_OPENROUTER_PROVIDER
+        ? { openRouterProvider: process.env.CELERIS_OPENROUTER_PROVIDER }
+        : {}),
       logger: new Logger("error"),
       tools,
       systemPromptOverride: selectedSystemPrompt,

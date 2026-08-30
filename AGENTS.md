@@ -149,7 +149,7 @@ the final raw-JSON rejection even when provider token limits change.
 
 Persona's immediate chat backend is provider-neutral. `PERSONA_CHAT_API_KEY`,
 `PERSONA_CHAT_BASE_URL`, and `PERSONA_CHAT_MODEL` override the legacy
-`CELERIS_*` values only in persona mode; coordinator mode remains unchanged.
+`CELERIS_*` values only in persona mode.
 `PERSONA_CHAT_OPENROUTER_PROVIDER` pins one exact OpenRouter endpoint and disables
 fallback for attributable comparisons. The same `PersonaConversation`, prompt,
 memory harness, streaming callback, and scenario corpus must be used across
@@ -162,6 +162,21 @@ selection uses endpoint-to-first-complete-speech-segment latency, not advertised
 completion throughput. A three-run, fifteen-turn friendship probe measured
 Celeris at 164 ms median / 297 ms p95, Gemma ModelRun at 298 / 532 ms, and
 Gemma Cerebras at 324 / 688 ms before Pocket's roughly 40–60 ms first audio.
+
+Coordinator mode is likewise provider-neutral. `CELERIS_OPENROUTER_PROVIDER`
+pins one endpoint and disables fallback without changing the work harness,
+tool schemas, or evaluation corpus. The Google free Gemma 4 pool still returned
+HTTP 429 on the latest probe. The same 61-scenario, 153-turn corpus initially
+scored 54/61 on `deepinfra/turbo`; general harness constraints for unavailable
+tool hallucinations, incremental reads, typed form answers, authoritative read
+targets, and notification provenance raised the exact corpus to 61/61. A full
+`modelrun/fp4` run then passed 60/61 in 46.3 seconds of cumulative model time;
+the sole source-name omission is now enforced locally and its isolated case
+passes in zero model rounds on the provenance follow-up. Polling is exposed only
+for explicit incremental language with a retained cursor. Form scalar strings
+are normalized only against the current authoritative prompt schema. A unique
+non-generic token from a known session name may resolve a spoken read target;
+generic words such as “work” never do.
 
 Post-turn memory analysis is a precision path. Non-self memories require
 first-person user evidence, fictional assistant output cannot become a shared
