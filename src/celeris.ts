@@ -513,17 +513,26 @@ export const allowsRename = (input: string): boolean =>
 
 export const requestedRenameTitle = (input: string): string | undefined => {
   const normalized = input.trim().replace(/[.!?]+$/g, "").trim();
+  const renameClause = normalized.replace(
+    /\s+(?:(?:and\s+)?then|and|but)\s+(?:tell|ask|send|message|queue|switch|focus|archive|start|make|create|approve|accept|decline|deny|reject|cancel|interrupt|stop)\b[\s\S]*$/i,
+    "",
+  );
   const patterns = [
     /\brename\b[\s\S]*?\bto\s+(.+)$/i,
     /\brename\s+(?:(?:(?:this|the\s+current|current|the\s+focused|focused|the)\s+session)|this|it)\s+(.+)$/i,
     /\bcall\s+(?:(?:this|the\s+current|current|the\s+focused|focused|the)\s+session)\s+(.+)$/i,
   ];
   for (const pattern of patterns) {
-    const title = pattern.exec(normalized)?.[1]?.trim();
+    const title = pattern.exec(renameClause)?.[1]?.trim();
     if (title) return title;
   }
   return undefined;
 };
+
+const requestsDirectRenameAction = (input: string): boolean =>
+  /^(?:(?:okay|ok|great|right|yeah|yes|uh|um|now)[,!.]?\s+)*(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?:rename\b|call\s+(?:this|the\s+(?:current|focused))\s+session\b)/i.test(
+    input.trim(),
+  );
 
 const words = (value: string): string[] =>
   value
@@ -1240,7 +1249,7 @@ export const voiceMessageInstruction = (
           ),
         ]
       : [
-          /\b(?:tell|ask)\s+(?:it|the\s+(?:session|agent)|this\s+(?:session|agent))\s+to\s+(.+)$/i,
+          /\b(?:tell|ask)\s+(?:it|the\s+(?:session|agent)|this\s+(?:session|agent))\s+(?:to\s+|(?!(?:what|whether|if|how|why|who|where|when)\b))(.+)$/i,
         ]),
   ];
   const captured = patterns
@@ -3032,13 +3041,30 @@ export class CelerisConversation {
         messageRouting.mode === "named" ||
         (messageRouting.mode === "focused" && Boolean(messageInstruction))) &&
       allowedTools.has("send_message");
-    const requiredCompoundActions =
-      messageRouting.mode === "named" &&
+    const requiredCompoundActionSet = new Set<string>();
+    if (
+      messageRouting.mode !== "multiple" &&
+      messageRouting.mode !== "ambiguous" &&
+      (attributionRelayMessage || messageInstruction) &&
+      allowedTools.has("send_message")
+    ) {
+      requiredCompoundActionSet.add("send_message");
+    }
+    if (
+      renameTitle &&
+      requestsDirectRenameAction(input) &&
+      allowedTools.has("rename_session")
+    ) {
+      requiredCompoundActionSet.add("rename_session");
+    }
+    if (
       requestsPositiveFocusAction(input) &&
-      allowedTools.has("send_message") &&
+      focusRouting.mode === "named" &&
       allowedTools.has("focus_session")
-        ? ["send_message", "focus_session"]
-        : [];
+    ) {
+      requiredCompoundActionSet.add("focus_session");
+    }
+    const requiredCompoundActions = [...requiredCompoundActionSet];
     const requiredMessageTargets = messageRouting.mode === "multiple"
       ? (messageRouting.targets ?? [])
       : [];
@@ -3245,6 +3271,13 @@ export class CelerisConversation {
           }
           if (call.function.name === "start_session" && startInstruction) {
             args = { ...args, instruction: startInstruction };
+          }
+          if (
+            call.function.name === "rename_session" &&
+            renameTitle &&
+            requestsDirectRenameAction(input)
+          ) {
+            args = { ...args, title: renameTitle };
           }
           if (
             call.function.name === "send_message" &&

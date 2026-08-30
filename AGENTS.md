@@ -579,7 +579,15 @@ supplies the new title. A rename request without a title is answered with a
 deterministic clarification and cannot reach Celeris or the tool. Its voice
 schema requires only the new title, the coordinator returns both names, and
 focus never changes. General stdio MCP clients may supply a session ID for
-either action. `poll_output` accepts and returns an explicit opaque cursor,
+either action. For a direct voice rename, the harness bounds the title at the
+next explicit coordinator-action clause and injects that exact title into
+`rename_session`. This prevents a later phrase such as “switch me back to
+Primary Work” from becoming the title. A compound rename plus focused message
+accepts the common ASR form “tell it rerun …” without the word `to`, preserves
+that complete dictated instruction, and requires both verified actions before
+speech. An explicit named focus in the same compound turn is also required.
+The resulting action receipts and renamed focus remain authoritative for the
+next audit turn. `poll_output` accepts and returns an explicit opaque cursor,
 returns only stable newer output, and never changes focus. This makes the tool
 usable by stateless remote MCP clients; omission returns the bounded buffered
 window. `send_message` defaults to

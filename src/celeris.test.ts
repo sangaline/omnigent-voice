@@ -1014,6 +1014,16 @@ describe("Celeris coordinator conversation", () => {
     expect(requestedRenameTitle("rename this session audio packet research")).toBe(
       "audio packet research",
     );
+    expect(
+      requestedRenameTitle(
+        "rename this session latency lab and then tell it rerun the endpoint probe",
+      ),
+    ).toBe("latency lab");
+    expect(
+      requestedRenameTitle(
+        "rename this session latency lab and then switch me back to primary work",
+      ),
+    ).toBe("latency lab");
     expect(requestedRenameTitle("Call this session Voice Research.")).toBe(
       "Voice Research",
     );
@@ -1060,6 +1070,11 @@ describe("Celeris coordinator conversation", () => {
         "tell it to rerun the endpoint checks and uh if anything came in while i was talking tell me too",
       ),
     ).toBe("rerun the endpoint checks");
+    expect(
+      voiceMessageInstruction(
+        "rename this session latency lab and then tell it rerun the endpoint probe with three warm samples",
+      ),
+    ).toBe("rerun the endpoint probe with three warm samples");
     expect(
       voiceMessageInstruction(
         "okay tell that one rerun the flaky reconnect test with debug logs",
@@ -3685,6 +3700,97 @@ describe("Celeris coordinator conversation", () => {
     expect(secondRequest.messages).toContainEqual({
       role: "system",
       content: expect.stringContaining("explicitly requested multiple coordinator actions"),
+    });
+  });
+
+  it("forces a focused send after an explicit rename and preserves both exact clauses", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-rename",
+              type: "function",
+              function: {
+                name: "rename_session",
+                arguments: JSON.stringify({ title: "latency" }),
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          content: null,
+          tool_calls: [
+            {
+              id: "call-send",
+              type: "function",
+              function: {
+                name: "send_message",
+                arguments: JSON.stringify({ message: "Rerun it" }),
+              },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = toolClient();
+    vi.mocked(tools.callTool).mockImplementation((name: string) => {
+      if (name === "check_updates") {
+        return Promise.resolve({
+          focused_session: { id: "session-lab", name: "Temporary Lab" },
+          known_sessions: [
+            { id: "session-lab", name: "Temporary Lab", focused: true },
+            { id: "session-primary", name: "Primary Work", focused: false },
+          ],
+          updates: [],
+        });
+      }
+      if (name === "rename_session") {
+        return Promise.resolve({
+          renamed: true,
+          previous_name: "Temporary Lab",
+          new_name: "Latency Lab",
+          focused_session: { id: "session-lab", name: "Latency Lab" },
+          updates: [],
+        });
+      }
+      return Promise.resolve({
+        accepted: true,
+        delivery: "immediate",
+        target_session: { id: "session-lab", name: "Latency Lab" },
+        focused_session: { id: "session-lab", name: "Latency Lab" },
+        updates: [],
+      });
+    });
+
+    await expect(
+      conversation("test-key", tools).respond(
+        "rename this session latency lab and then tell it rerun the endpoint probe with three warm samples",
+      ),
+    ).resolves.toBe(
+      "I renamed Temporary Lab to Latency Lab. I sent that to Latency Lab.",
+    );
+    expect(tools.callTool).toHaveBeenNthCalledWith(2, "rename_session", {
+      title: "latency lab",
+    });
+    expect(tools.callTool).toHaveBeenNthCalledWith(3, "send_message", {
+      message: "rerun the endpoint probe with three warm samples",
+    });
+    const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      tool_choice?: unknown;
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    expect(secondRequest.tool_choice).toEqual({
+      type: "function",
+      function: { name: "send_message" },
+    });
+    expect(secondRequest.messages).toContainEqual({
+      role: "system",
+      content: expect.stringContaining("remaining send_message tool"),
     });
   });
 

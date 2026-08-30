@@ -2076,3 +2076,35 @@ model ID then passed five of five targeted reruns. All coordinator executions
 were frozen. No live Omnigent session was read or mutated, and the excluded
 ESPN session remained untouched. The live persona pod was not redeployed
 by this coordinator-only source change.
+
+### 2026-08-29 — Compound rename boundaries and required follow-on actions
+
+Hypothesis H69 tested whether the generic “multiple actions per turn” behavior
+actually extends beyond send-and-switch. A realistic ASR-style turn renamed the
+focused temporary session and then dictated a rerun instruction back to that
+same session. The baseline failed zero of five runs: Celeris renamed the
+session and immediately acknowledged it, silently dropping the requested
+message every time.
+
+The shared harness now recognizes the bounded focused form “tell it rerun …”
+without requiring a spoken `to`, copies the full user-supplied clause, and
+requires both `rename_session` and `send_message` before speech. The local
+rename title is likewise parsed only through the next explicit action clause
+and injected into the tool call. A second baseline exposed why that boundary is
+important: in “rename this session latency lab and then switch me back to
+primary work,” the old cross-clause `to` matcher selected “primary work” as the
+new title in five of five runs. The bounded parser now preserves “latency lab,”
+and explicit named focus participates in the same required-action set.
+
+The focused rename-and-send candidate passed ten of ten initial action trials,
+then five of five linked runs across ten turns including a follow-up audit of
+the exact instruction and current renamed focus. The rename-and-switch candidate
+passed five of five runs in one model round. Promotion evidence is 160 passing
+unit tests, clean typecheck and build, and all 46 isolated trials. The full
+stateful sweep passed 43 of 44 scenarios across 136 linked turns; its only miss
+was an unrelated older evidence scenario adding the forbidden phrase “keep an
+eye.” That scenario immediately passed five of five targeted reruns across 25
+turns, while both H69 scenarios and every neighboring action scenario passed in
+the aggregate. All tests use the same production conversation and in-memory MCP
+path with frozen coordinator results. No live Omnigent session was read or
+mutated, and the excluded ESPN session remained untouched.

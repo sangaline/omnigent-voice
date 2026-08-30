@@ -6044,5 +6044,170 @@
         }
       }
     ]
+  },
+  {
+    "id": "compound_rename_and_focused_send",
+    "description": "Rename the focused session and send it an exact instruction in the same ASR-style turn, then retain both verified actions and the renamed focus for a follow-up audit.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-lab", "name": "Temporary Lab", "status": "idle" },
+      "known_sessions": [
+        { "id": "session-lab", "name": "Temporary Lab", "status": "idle", "focused": true },
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "rename this session latency lab and then tell it rerun the endpoint probe with three warm samples",
+        "coordinatorState": {
+          "focused_session": { "id": "session-lab", "name": "Temporary Lab", "status": "idle" },
+          "known_sessions": [
+            { "id": "session-lab", "name": "Temporary Lab", "status": "idle", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "rename_session": {
+            "renamed": true,
+            "previous_name": "Temporary Lab",
+            "new_name": "Latency Lab",
+            "renamed_session": { "id": "session-lab", "name": "Latency Lab", "status": "idle" },
+            "focus_changed": false,
+            "focused_session": { "id": "session-lab", "name": "Latency Lab", "status": "idle" },
+            "recent_actions": [
+              { "action_id": 1711, "type": "session_renamed", "summary": "Renamed Temporary Lab to Latency Lab." }
+            ]
+          },
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-lab", "name": "Latency Lab", "status": "running" },
+            "focused_session": { "id": "session-lab", "name": "Latency Lab", "status": "running" },
+            "recent_actions": [
+              { "action_id": 1711, "type": "session_renamed", "summary": "Renamed Temporary Lab to Latency Lab." },
+              { "action_id": 1712, "type": "message_sent", "summary": "Sent immediately to Latency Lab: Rerun the endpoint probe with three warm samples." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["rename_session", "send_message"],
+          "alternativeToolSequences": [["send_message", "rename_session"]],
+          "unorderedCallExpectations": [
+            { "name": "rename_session", "argumentEquals": { "title": "latency lab" } },
+            { "name": "send_message", "messageTerms": ["rerun", "endpoint", "three", "warm", "samples"], "delivery": "not_queued" }
+          ],
+          "forbiddenTools": ["focus_session", "get_output", "poll_output"],
+          "speechTerms": ["latency lab"],
+          "speechAnyTerms": [["renamed", "called"], ["sent", "told"]],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay what exactly did you just do and where am i now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-lab", "name": "Latency Lab", "status": "running" },
+          "known_sessions": [
+            { "id": "session-lab", "name": "Latency Lab", "status": "running", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1711, "type": "session_renamed", "summary": "Renamed Temporary Lab to Latency Lab." },
+            { "action_id": 1712, "type": "message_sent", "summary": "Sent immediately to Latency Lab: Rerun the endpoint probe with three warm samples." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["rename_session", "send_message", "focus_session", "get_output", "poll_output"],
+          "speechTerms": ["latency lab", "endpoint", "three", "warm", "samples"],
+          "speechAnyTerms": [["renamed", "called"], ["sent", "told"]],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "compound_rename_and_switch",
+    "description": "Bound a rename title before the following navigation clause, then rename the focused session and switch to one authoritative known target in the same turn.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-lab", "name": "Temporary Lab", "status": "idle" },
+      "known_sessions": [
+        { "id": "session-lab", "name": "Temporary Lab", "status": "idle", "focused": true },
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "rename this session latency lab and then switch me back to primary work",
+        "coordinatorState": {
+          "focused_session": { "id": "session-lab", "name": "Temporary Lab", "status": "idle" },
+          "known_sessions": [
+            { "id": "session-lab", "name": "Temporary Lab", "status": "idle", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "rename_session": {
+            "renamed": true,
+            "previous_name": "Temporary Lab",
+            "new_name": "Latency Lab",
+            "renamed_session": { "id": "session-lab", "name": "Latency Lab", "status": "idle" },
+            "focus_changed": false,
+            "focused_session": { "id": "session-lab", "name": "Latency Lab", "status": "idle" },
+            "recent_actions": [
+              { "action_id": 1721, "type": "session_renamed", "summary": "Renamed Temporary Lab to Latency Lab." }
+            ]
+          },
+          "focus_session": {
+            "focus_changed": true,
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "previous_focused_session": { "id": "session-lab", "name": "Latency Lab", "status": "idle" },
+            "recent_actions": [
+              { "action_id": 1721, "type": "session_renamed", "summary": "Renamed Temporary Lab to Latency Lab." },
+              { "action_id": 1722, "type": "focus_changed", "summary": "Focused Primary Work from Latency Lab." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["rename_session", "focus_session"],
+          "alternativeToolSequences": [["focus_session", "rename_session"]],
+          "unorderedCallExpectations": [
+            { "name": "rename_session", "argumentEquals": { "title": "latency lab" } },
+            { "name": "focus_session", "sessionId": "session-primary" }
+          ],
+          "forbiddenTools": ["send_message", "get_output", "poll_output"],
+          "speechTerms": ["latency lab", "primary work"],
+          "speechAnyTerms": [["renamed", "called"], ["switched", "focused", "now in"]],
+          "maxRounds": 2
+        }
+      }
+    ]
   }
 ]
