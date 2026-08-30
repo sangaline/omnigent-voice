@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+models/
+*.log
+.personaplex-results/
+
+# Private voice prompts and derived cloning state never belong in the public repo.
+*.wav
+*.safetensors

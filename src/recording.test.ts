@@ -1,0 +1,68 @@
+import { describe, expect, it } from "vitest";
+import {
+  ConfirmedRecordingTracker,
+  transcriptMergeDelay,
+} from "./recording.js";
+
+describe("confirmed Discord recording tracking", () => {
+  it("does not let an empty provisional stream block transcript delivery", () => {
+    const tracker = new ConfirmedRecordingTracker();
+    const emptyStream = tracker.createLease();
+
+    expect(tracker.size).toBe(0);
+    expect(emptyStream.close()).toBe(false);
+    expect(tracker.size).toBe(0);
+  });
+
+  it("tracks meaningful streams from first audio through close", () => {
+    const tracker = new ConfirmedRecordingTracker();
+    const recording = tracker.createLease();
+
+    expect(recording.confirm()).toBe(true);
+    expect(recording.confirm()).toBe(false);
+    expect(tracker.size).toBe(1);
+    expect(recording.close()).toBe(true);
+    expect(recording.close()).toBe(false);
+    expect(tracker.size).toBe(0);
+  });
+
+  it("tracks overlapping confirmed streams independently", () => {
+    const tracker = new ConfirmedRecordingTracker();
+    const first = tracker.createLease();
+    const second = tracker.createLease();
+
+    first.confirm();
+    second.confirm();
+    expect(tracker.size).toBe(2);
+    first.close();
+    expect(tracker.size).toBe(1);
+    second.close();
+    expect(tracker.size).toBe(0);
+  });
+
+  it("keeps merge grace only when semantic completion is unproven", () => {
+    expect(transcriptMergeDelay("smart_turn", 350)).toBe(0);
+    expect(transcriptMergeDelay("semantic_fallback", 350)).toBe(350);
+    expect(transcriptMergeDelay("hard_fallback", 350)).toBe(350);
+    expect(transcriptMergeDelay("discord_silence", 350)).toBe(350);
+  });
+
+  it("holds a content-free send preamble for the dictated message", () => {
+    expect(
+      transcriptMergeDelay(
+        "smart_turn",
+        350,
+        "Okay, can you send a message for me",
+        700,
+      ),
+    ).toBe(700);
+    expect(
+      transcriptMergeDelay(
+        "smart_turn",
+        350,
+        "send a message saying the deployment is ready",
+        700,
+      ),
+    ).toBe(0);
+  });
+});

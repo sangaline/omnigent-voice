@@ -1,3 +1,1134 @@
-# Omnigent-Voice
+# Omnigent Voice
 
-Realtime voice agent through discord bot that acts as a UI layer over omnigent running in ~/workspaces/basemod-kubernetes/
+Minimal, speech-only Discord interface for an existing Omnigent deployment.
+
+## Invariants
+
+- The public repository and container image contain no credentials, account IDs,
+  channel IDs, personal paths, private hostnames, or deployment-specific defaults.
+- Secrets and deployment configuration enter only through runtime environment
+  variables. Never use Docker build arguments for secrets.
+- The Discord voice Deployment remains one outbound-only container with no
+  Service or Ingress. The same credential-free image also contains a separate
+  `mcp:remote` entrypoint; it runs in a different pod/process with its own PVC,
+  Service, path-specific Ingress, resources, and kill switch. Never mount the
+  public listener in the Discord voice process.
+- Treat the coordinator tools as remote-code-execution authority: messages can
+  cause coding agents to run commands. The voice runtime must use only its
+  in-process MCP transport, and the standalone server must remain stdio-only.
+  Never add a public listener, Service, Ingress, or unauthenticated remote MCP
+  transport. Any future network transport requires an explicit security review,
+  private reachability, strong user authentication, narrow authorization, and
+  auditable caller identity before it is enabled.
+- `docs/MCP-SECURITY.md` is the release gate for any remote coordinator
+  transport. GitHub/OIDC authentication alone is insufficient: exact stable
+  principal-to-account linkage, per-tool scopes, Omnigent session ACLs,
+  explicit remote write targets, event isolation, revocation, audit attribution,
+  and abuse tests must all pass before a remote route is added. The proposed
+  account-scoped semantic core and ingress design live in
+  `docs/MCP-ARCHITECTURE.md`.
+- Keep the interaction voice-first: no web UI, buttons, menus, or required slash
+  commands.
+
+## Architecture
+
+Discord voice receive -> local sherpa-onnx streaming ASR -> Celeris conversation
+layer -> direct spoken reply or small Omnigent MCP coordinator tools -> local
+Pocket TTS -> Discord voice. Coordinator actions return immediately;
+Celeris never waits for a coding agent to complete work before acknowledging it.
+
+`CONVERSATION_MODE=persona` selects the companion-oriented variant. It reuses
+the exact Discord, streaming ASR, endpointing, interruption, Pocket/Piper TTS,
+hot dialogue, and private logging path, but the process does not instantiate
+`OmnigentClient`, `OmnigentCoordinator`, or an MCP client.
+`PERSONA_SYSTEM_PROMPT` overrides the sanitized built-in Audrey personality;
+the built-in identity must never name or imply an underlying model. Production
+keeps the prompt in its own runtime Secret so personality edits do not require
+rebuilding the image. `PERSONA_MAX_RESPONSE_CHARACTERS` and
+`PERSONA_TEMPERATURE` tune voice-sized output. This mode is separate from
+PersonaPlex and from `VOICE_RUNTIME=kame`: production persona currently uses
+the staged Celeris/Pocket pipeline. A leaked Celeris control marker such as
+`< channel thought` is rejected and retried once before any final fragment is
+queued to speech. See `docs/PERSONA.md`.
+
+`PERSONA_MEMORY_ENABLED=true` adds a parallel durable companion-memory harness
+without changing coordinator mode. Completed turns, typed memories, and
+short-lived private thoughts live in a dedicated Postgres/pgvector database.
+Partial ASR revisions start local Ollama embedding and retrieval; the endpoint
+uses only an already-completed related snapshot and calls Celeris immediately,
+so neither pgvector nor an adviser becomes a normal-turn latency gate. After
+speech generation, one serialized background job persists the turn, calls an
+OpenAI-compatible analysis model, embeds its explicit memories and optional
+thought, and stores them. The latest configured turns restore verbatim after a
+restart. Never log adviser arguments, memory text, database credentials, owner
+keys, or embeddings.
+
+The memory harness exposes only `ask_adviser` to Celeris. Routine conversation
+must answer directly. A deliberate escalation first speaks a short natural
+acknowledgment, then calls the configured conversational adviser. Adviser text
+is already generated as final Audrey speech and is segmented directly into TTS;
+do not reintroduce a lossy second Celeris rewrite. Creative adviser calls return
+three structured candidates and the harness selects the first candidate that
+passes novelty, grounding, and length checks. The original human transcript,
+not Celeris's tool-argument paraphrase, is authoritative for safety routing. The
+adviser cannot perform external actions. `PERSONA_MEMORY_ANALYSIS_MODEL` and
+`PERSONA_ADVISER_MODEL` may differ;
+an external provider receives the completed private dialogue and must be an
+explicit deployment choice. Local Ollama remains a valid OpenAI-compatible
+alternative. See `docs/PERSONA.md`.
+
+Partial ASR also starts one nonblocking DeepSeek turn-plan request once the
+utterance has enough content. Pareto reasoning is explicitly disabled for these
+bounded jobs. The response puts a complete candidate first; creative requests
+add two alternatives. Closed JSON strings become usable before the rest of the
+object finishes. With `PERSONA_PREPARED_DRAFTS_ENABLED=true`, a safe prefix-
+related ordinary candidate can be spoken directly in zero endpoint model rounds.
+Creative and entertainment candidates remain planning context and always go
+through the bounded hot candidate race; never speak them directly as purported
+facts or shared experiences. The
+completed transcript always overrides partial speech: meaningful suffix growth
+restarts planning, corrections and repairs reject stale drafts, explicit open-
+loop anchors must survive, and local gates reject fake trivia, invented first-
+person experiences, familiar joke templates, and oversized creative output.
+The planner emits a typed memory anchor before its draft. A high-confidence
+preference retrieved at score 0.55 or above also derives a stable canonical
+anchor locally, so late planning cannot silently erase a relevant callback;
+lower-scoring memories never enter the hot context. If
+no safe candidate is ready, ordinary Celeris response remains immediate;
+explicit creative or distraction requests may use `ask_adviser` behind the hold
+line. An explanation or analysis of material Audrey just produced is ordinary
+dialogue, not a new creative request. The hot escalation races the adviser
+against a separate three-candidate Celeris fallback and waits 400 ms for a real
+answer before emitting the hold line; a fast winner therefore reaches TTS
+directly instead of being queued behind acknowledgment audio. It applies the
+same safety gate to both, records the actual winner for provenance, and aborts
+the loser. `PERSONA_ADVISER_HOT_TIMEOUT_MS`
+defaults to 6,000 ms and bounds only this caller-facing race; the longer analysis
+timeout remains available for asynchronous memory work. Each delayed spoken
+batch owns a fresh Discord raw-audio resource and is awaited through idle. Never
+append an adviser result to the resource used by an earlier hold line: live logs
+proved Discord can close that resource before the result arrives and silently
+drop the generated answer.
+
+Every extracted durable memory has a stable canonical key, declared source
+speaker, and an exact evidence quote that must appear in that speaker's turn.
+User facts cannot be grounded in Audrey's own claims. Repeated canonical keys
+supersede older active values. The database rejects semantic matches below 0.40,
+the hot context applies a stricter 0.55 scored-memory floor, and short-lived
+thoughts become eligible at confidence 0.55. The structured
+analysis cap is 768 tokens. Ordinary prepared replies use a 192-token budget;
+creative candidate pools and structured advice use 384. Logs contain only
+aggregate duration and token usage.
+
+The live prompt also receives verified runtime capabilities and a compact
+generation record after a turn that had background context, used a prepared
+draft, or used the adviser. Immediate reply-specific provenance questions use
+that typed record directly; capability questions remain distinct from “was a
+draft used?” questions. The exact DeepSeek Flash ASR alias is also rendered from
+verified runtime facts rather than lossy model recall. Audrey should not
+volunteer these internals, but must answer direct provenance or memory questions
+truthfully. Explicit current-turn corrections and retrieved emotional open loops
+produce required lexical anchors. Concrete upcoming day names are retained as
+separate anchors, and all applicable anchors must survive the reply. Celeris
+fallback is buffered and retried; after three misses a small extractive prefix
+preserves the verified relationship detail without discarding the otherwise
+useful answer. False claims of shared physical history receive a typed refusal
+and are excluded from memory extraction. Do not restore an absolute instruction to deny or hide
+mechanisms that were actually used.
+
+An explicit personal-recall question that reached endpoint before any useful
+partial may spend at most 250 ms on one cold memory lookup; ordinary turns never
+acquire this latency gate. The latest four Audrey replies also feed a compact
+rhythm guard: repeated questions and short acknowledgments should produce a
+declarative contribution, not another menu or interview. Direct contribution
+requests must be fulfilled in the current reply. Sequence evals measure total
+question-bearing replies, consecutive question runs, and repeated openings.
+The fast fallback may recover complete closed candidate strings from a truncated
+JSON pool, but a structured envelope or unfinished string is never speech. Keep
+the final raw-JSON rejection even when provider token limits change.
+
+Persona's immediate chat backend is provider-neutral. `PERSONA_CHAT_API_KEY`,
+`PERSONA_CHAT_BASE_URL`, and `PERSONA_CHAT_MODEL` override the legacy
+`CELERIS_*` values only in persona mode.
+`PERSONA_CHAT_OPENROUTER_PROVIDER` pins one exact OpenRouter endpoint and disables
+fallback for attributable comparisons. The same `PersonaConversation`, prompt,
+memory harness, streaming callback, and scenario corpus must be used across
+model comparisons. Provider rate limits are invalid trials, never successful
+fallback speech. The Celeris-only `/echo` warmup is skipped for other hosts.
+Bulk OpenRouter development uses `google/gemma-4-31b-it:free` first. An upstream
+free-pool 429 is retried later or rerun explicitly with the paid model pinned to
+`deepinfra/turbo`; never enable transparent fallback in live speech. Live model
+selection uses endpoint-to-first-complete-speech-segment latency, not advertised
+completion throughput. A three-run, fifteen-turn friendship probe measured
+Celeris at 164 ms median / 297 ms p95, Gemma ModelRun at 298 / 532 ms, and
+Gemma Cerebras at 324 / 688 ms before Pocket's roughly 40–60 ms first audio.
+
+Coordinator mode is likewise provider-neutral. `CELERIS_OPENROUTER_PROVIDER`
+pins one endpoint and disables fallback without changing the work harness,
+tool schemas, or evaluation corpus. The Google free Gemma 4 pool still returned
+HTTP 429 on the latest probe. The same 61-scenario, 153-turn corpus initially
+scored 54/61 on `deepinfra/turbo`; general harness constraints for unavailable
+tool hallucinations, incremental reads, typed form answers, authoritative read
+targets, and notification provenance raised the exact corpus to 61/61. A full
+`modelrun/fp4` run then passed 60/61 in 46.3 seconds of cumulative model time;
+the sole source-name omission is now enforced locally and its isolated case
+passes in zero model rounds on the provenance follow-up. Polling is exposed only
+for explicit incremental language with a retained cursor. Form scalar strings
+are normalized only against the current authoritative prompt schema. A unique
+non-generic token from a known session name may resolve a spoken read target;
+generic words such as “work” never do.
+
+Post-turn memory analysis is a precision path. Non-self memories require
+first-person user evidence, fictional assistant output cannot become a shared
+episode, a claimed name must occur in its evidence quote, and transient
+latency/testing observations are rejected. Optional thoughts must be concrete
+contributions, not instructions to interview the human, invite a memory test,
+or evade a direct runtime question. Provenance retains the selected memory,
+thought, or draft process-locally so short DeepSeek follow-ups can report exactly
+what contributed without another model round.
+Mechanism follow-ups require explicit mechanism language; an ordinary pronoun-
+bearing greeting such as “how's it going?” must never inherit a stale DeepSeek
+topic. A short “I said ...” turn is treated as a likely ASR repair: the quoted
+words drive the reply, and the prefix is not evidence that the human is
+criticizing Audrey. Short repaired acknowledgments also retain the declarative
+conversation-rhythm guard.
+
+The bundled runtime models are the int8 0.6B Nemotron English streaming
+transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the
+public `alba` voice, and Piper US English Lessac medium as a fallback. The public
+image deliberately uses `kyutai/pocket-tts-without-voice-cloning`; it cannot
+derive a new voice state from audio. The full gated Pocket checkpoint can
+condition on a private audio prompt and export that state; the stripped public
+runtime can then load the compatible `.safetensors` state without gated weights
+or Hugging Face credentials. Private prompts and derived states must enter
+through private runtime storage rather than the public image. Production uses
+the generic retained-PVC path
+`/var/lib/omnigent-voice/private-voice-state.safetensors`; never record the
+speaker identity or source filename in public configuration. Speech models run on
+CPU; ASR and Piper use `sherpa-onnx-node`, while Pocket stays warm behind a
+private stdio Python bridge. Model
+archives and checksums belong in the container build, never in git. TTS progress
+chunks stream into Discord as they are generated; do not regress to buffering a
+complete utterance before playback. Each Discord utterance also owns a live ASR
+stream: decoded 16 kHz packets are accepted and decoded while the caller is
+still speaking, and end-of-turn performs only right-context padding and a final
+drain. Do not regress to accumulating the full waveform before recognition.
+Pocket is the staged deployment default because it retains Piper-class first
+audio latency with a substantially more natural voice. The exact stripped
+container loaded and warmed Pocket in about 5.05 seconds, produced first audio
+in 34 ms, and generated 3.28 seconds of audio in 437 ms across 41 chunks.
+The first live private state loaded and warmed in 5.33 seconds. Its offline
+candidate measurement produced first audio in 44.7 ms; startup and state load
+remain outside the live turn path.
+Startup is outside the live turn path. Three 3.28-4.08 second intelligibility
+probes generated in 0.51-0.68 seconds and were independently recognized by the
+bundled Nemotron model with only two minor word omissions. Returning `false`
+from the Discord chunk callback sends a real cancellation to the warm bridge;
+do not regress to rendering an unheard long reply before accepting the next TTS
+request. The public image removes Hugging Face download locks, Xet logs, and
+generic agent-client metadata after caching the public checkpoint, and runtime
+telemetry is disabled. Piper remains selectable with `TTS_RUNTIME=piper`.
+
+Production Celeris requests use OpenAI-compatible SSE whenever the round is not
+forcing a named tool. Complete natural speech segments are queued into one
+continuous Discord/Pocket stream, so the first segment may synthesize while a
+conventional autoregressive provider is still generating later text. Celeris-1
+itself is a diffusion model and currently returns its whole completion in one
+burst: a live 279-character probe delivered the first speech segment at 474 ms
+and completed at 475 ms. Its SSE support therefore provides protocol symmetry,
+not token-level overlap. Adjacent segments received within 15 ms are coalesced
+into one Pocket request; this retains immediate synthesis for the current
+same-burst response while avoiding per-sentence silence and prosody resets.
+Genuinely incremental content still streams in later batches. Do not add fake
+typing delays. Named tool forcing stays buffered
+because Celeris rejects forced tools on streaming requests. Startup sends the
+documented authenticated `/echo` warmup with a five-second best-effort timeout;
+it invokes no model and establishes the network connection before the caller's
+first turn.
+
+The streaming segmenter emits only complete sentence boundaries before the
+provider finishes and accounts for inter-segment spaces in the 300-character
+spoken budget. If a later complete sentence does not fit, it is omitted instead
+of being spoken as a dangling clause with an ellipsis. The returned assistant
+speech, hot dialogue memory, and audit record must equal the exact joined
+segments queued for Discord; never sanitize the full completion into a
+different remembered answer after streaming it. A single first sentence that
+itself exceeds the budget still uses the bounded sanitizer fallback. Replay,
+isolated eval, and scenario eval pass the production streaming callback and
+fail immediately if queued speech diverges from the returned speech.
+
+Nemotron replaced the smaller 80 ms NeMo fast-conformer after the live Discord
+transcript showed severe omissions and substitutions. On the host, the 560 ms
+int8 model loaded in about 1.24 seconds at roughly 951 MiB RSS, decoded bundled
+samples at about 0.08 realtime, and flushed final tokens in about 42 ms. Its
+chunk latency is overlapped with live speech. The verified model archive is
+463,945,051 bytes; accuracy must be judged through live phone tests because the
+formal bundled samples were transcribed correctly by both models.
+
+The bot auto-discovers its voice channel only when exactly one accessible guild
+and voice channel exist. Explicit runtime IDs override discovery. Discord's raw
+speaking event does not stop playback; decoded audio must cross
+`DISCORD_BARGE_IN_PEAK` (default `0.08`). This rejects the short low-energy
+phone echo bursts that previously cut speech off mid-word. Production overrides
+it to `0.18` after live empty receive bursts at `0.099` and `0.104` interrupted
+playback while confirmed phone speech peaked above `0.73`. Confirmed human
+speech stops playback and cancels further TTS generation, but backend output
+polling continues. A Discord receive stream remains provisional until decoded
+audio crosses `0.002` peak amplitude. Zero-energy tail streams therefore never
+clear a ready transcript timer or count as active recordings; live logs showed
+that the old behavior added 710-770 ms after otherwise completed turns. Keep
+the provisional receive subscription alive for its normal silence lifetime so
+real speech arriving on it can still activate the existing ASR and barge-in
+path. Semantic endpointing is enabled by default. Silero VAD
+observes the live 16 kHz stream and proposes an endpoint after 180 ms of
+silence; Smart Turn v3.2 classifies up to the latest eight seconds of the raw
+current-turn waveform. A decision is accepted as complete only at the
+configurable `SMART_TURN_COMPLETE_THRESHOLD` (default `0.65`); lower-confidence
+predictions keep listening until the 700 ms hard fallback. This is deliberately
+above the model's raw `0.5` decision boundary after a live dangling fragment
+scored `0.6067`. New speech invalidates an in-flight decision and the
+full updated turn is classified after the next pause. This replaces the staged
+450 ms capture stop plus 350 ms transcript merge; when semantic endpointing is
+disabled, those legacy settings remain available. Only explicit cancel
+language interrupts the focused running Omnigent session.
+Only a Smart Turn classification above that confidence floor commits with no
+transcript merge delay. A semantic or hard fallback does not prove the thought is complete, so
+it retains the configured 350 ms continuation grace; a new Discord receive
+stream cancels that timer and joins the next transcript. Confirmed new speech
+also aborts the superseded Celeris request. The conversation checks that abort
+after model completion and again immediately before every coordinator tool
+invocation, so a stale partial transcript cannot mutate a session merely
+because Celeris already selected a tool.
+One positive Smart Turn result is intentionally overridden: a content-free
+preamble such as “can you send a message for me” retains the full 700 ms
+endpoint fallback window. A continuation during that window is merged before
+Celeris runs, so a short phone pause cannot separate the action from its
+dictated content. If a model turn is nevertheless interrupted, its human input
+and an explicit interrupted marker remain in dialogue memory; a later
+verification cannot reuse an older action receipt for that newer request.
+
+Smart Turn runs as a persistent local Python bridge inside the same container,
+using its 8.7 MB int8 ONNX model and Pipecat's NumPy-only Whisper feature
+extraction. The exact container measured 37.7 ms mean, 47.1 ms p95, and 47.7 ms
+maximum across twenty complete decisions on the host. A full fixture scored
+0.957 complete while a fixture mid-sentence cut scored 0.490. In the first 119
+live predictions, the old 0.5 boundary accepted 66, with median probability
+0.9486; only seven were below the new 0.65 floor. Silero and Smart Turn model
+downloads are checksum-pinned in the image build. Never put raw endpoint audio
+in JSON logs. The only permitted retention is the explicit private WAV capture
+described below.
+
+Omnigent auth uses a runtime refresh token. At boot, the coordinator focuses the
+most recently active native session but does not create one. Focus is sticky:
+reading or listing sessions never changes it, and `focus_session` is only for an
+explicit user-requested switch. Every coordinator result includes the focused
+session, and send acknowledgements include their actual target session. Session
+summaries also expose the native Omnigent project as a typed `{id, name}` value
+or `null`. Omnigent currently exposes no separate pinned-session field; the
+voice harness answers project-versus-pin questions from those typed values
+instead of asking the small model to infer organization from a title.
+Starting or explicitly focusing a session records the prior focus in a bounded
+server-owned stack. Archiving the focused session restores the newest still-valid
+prior focus, falling back to the most recently active unarchived session. The
+archive result identifies both the archived and newly focused sessions, and the
+voice layer must speak that transition rather than relying on model memory.
+Every result also includes the last five entries from a bounded server-owned
+`recent_actions` ledger. It records exact outbound message text and target,
+delivery mode, focus changes, starts, archives, and prompt resolutions with a
+preformatted summary. This is authoritative after Celeris history compaction;
+absence from short spoken history is never evidence that an action did not
+happen. Action summaries are retained in the private JSONL audit log.
+
+The coordinator keeps an authenticated Omnigent SSE live tail for the focused
+session, every recent running/waiting session, and every session the voice layer
+touches. It also polls recent summaries and stable conversation items every two
+seconds as the reconnect and persistence fallback. Native message IDs, chunk
+indexes, and final markers reconstruct one assistant message across stream
+reconnects. A reconnect snapshot replaces an already-seen prefix instead of
+appending it, and the later persisted item reconciles by ID/text without a
+second spoken copy. No credentials or session identifiers enter stream logs.
+At ASR finalization, `check_updates` atomically adds any new partial live text
+from the focused session to the model context, including text received while
+the human was still speaking. Partial text is not proactively spoken; a final
+message produces one `session_output` event immediately rather than waiting for
+item persistence. Output arriving later remains buffered for the next turn.
+Native output deltas can contain a large chronological prefix of terminal and
+tool activity before the newest assistant text. Coordinator entries therefore
+carry a typed `voice_assistant_output` and `voice_assistant_output_state` of
+`streaming` or `final`, plus `voice_assistant_output_scope` of `full`,
+`continued`, or `streaming_suffix`. A final `continued` value means an earlier
+human turn already consumed the prefix of that same live response. Short safe
+values are spoken as the named response's final part rather than exposing the
+internal continuation label or presenting the suffix as the complete answer.
+Immediately before a snapshot, notification, or tool
+result enters Celeris, the harness prefers that typed value, bounds it to 2,000
+characters, and replaces the duplicate native prefix with `voice_selection`.
+Legacy/frozen payloads use a structural fallback only when their last native
+section is an assistant message; an older assistant section followed by newer
+tool activity is instead tagged and bounded as activity without a conclusion.
+Notification history also records that it was a new backend event at that
+position in the dialogue. This is a model-only view: the original update still
+controls deterministic safe rendering, cursors, and the private audit path.
+Native tool text can never become a direct zero-model spoken result through
+compaction. A current-status question can use a short safe typed streaming
+suffix directly, but its deterministic receipt must say that the session is
+still responding and label the text as “so far”; it must never claim completion.
+An idle transition within five seconds of that final live message does not emit
+an empty second completion announcement; a later completion still does.
+Persisted conversation items exclude transient terminal animations.
+Completion, failure, new-decision, and assistant-progress events remain in a
+bounded replay log; tool-only terminal activity does not interrupt the user.
+Every tool result includes only this MCP connection's unread `updates` plus an
+`update_cursor`; `check_updates(after_event_id)` can replay from an explicit
+cursor for clients without notifications. A cursor beyond the current process
+or older than the retained window sets `update_cursor_expired` and returns the
+available window. Events are never globally drained by one caller.
+When a spoken or acknowledged `session_output` notification carries an output
+cursor, the voice harness retains that opaque cursor process-locally for its
+exact session. A later explicit “anything newer,” “since that,” or “after that”
+read of that session forces `poll_output`; the model-visible schema omits both
+the authoritative session ID and prior cursor, and the harness injects them.
+The returned cursor is committed only after a successful spoken response. A
+short safe changed or unchanged result is rendered directly in one model round;
+unsafe, expired, concurrent-update, or longer results return to Celeris. This is
+voice-layer convenience only: standalone MCP clients continue passing their
+own explicit cursors and therefore degrade cleanly without process-local voice
+state.
+After each successful `send_message`, the voice harness records the current
+spoken-notification sequence for that exact target. If a later proactive
+`session_output`, completion, failure, or decision for that target is spoken,
+a subsequent “did we get a response?” or contradictory “it didn't get back”
+turn is answered deterministically from that verified spoken notification.
+This prevents Celeris from denying a reply already present in its retained
+history. A newer send resets the baseline, and the harness does not infer a
+positive response from an older notification.
+The coordinator can read persisted Omnigent conversation messages plus stable
+tool or terminal items, and it can receive authenticated live assistant text
+from the session SSE stream. It does not have arbitrary live terminal
+scrollback, and a file diff is visible only when Omnigent persists it in an item. Direct
+capability questions about raw output are answered from this harness contract,
+not from model self-assessment. An explicit “stop repeating” correction is
+likewise handled before the model: acknowledge the repetition, reconsider the
+failed explanation, and do not restate its premise.
+Events consumed by `check_updates` or returned by a later tool call during a
+successful human turn are also retained as structured notification history,
+deduplicated by event ID, and their output cursors are committed with the spoken
+turn. They are not retained on a failed or superseded turn. This preserves an
+exact session target for one subsequent “that one” reference even when the
+event arrived while the human or tool workflow had priority. An explicit “what
+just came in?” request with one safe short event voices that event directly in
+zero model rounds; unrelated compound speech still lets Celeris combine the
+event with the requested work.
+When the channel runtime is idle and at least one trusted non-bot human is
+actually present in the voice channel, those real events are spoken
+proactively; joining the channel schedules any waiting update. Never play into
+an empty channel or advance the voice consumer's event cursor merely because
+the bot itself is connected. A human turn takes priority and receives any
+unspoken event in its frozen context. The voice consumer advances its event
+cursor only after proactive playback completes.
+An update already present at speech finalization never short-circuits requested
+coordinator work. If one turn combines an arrival question with separately
+addressed sends, the harness forces the first send, requires every remaining
+destination before speech, then composes the verified receipts with the new
+update. The update cursor remains available for a later incremental read and
+none of those sends changes sticky focus.
+Voice-directed language such as “tell me what arrived” is never an outbound
+message merely because the same turn names a focus target. In a compound
+“switch me to X and tell me” turn, `focus_session` is the only mutation; a
+`send_message` would be unauthorized. A successful focus receipt names both
+the old and new sessions when the coordinator returned both, then composes any
+concurrent update without losing its cursor.
+One plain `session_output` message or real `session_completed` output delta up
+to 240 characters and three lines is spoken directly in zero model rounds.
+The production completion event does not carry the synthetic `summary` used by
+older fixtures, so direct rendering must inspect `output_delta.output`. A longer
+plain single completion can use the bounded extractive path: it selects exact
+outcome, validation, safety, and blocker clauses within a 24-word budget and
+discards negative-value unchanged-focus prose. It never rewrites identifiers or
+facts. Complex or unsafe content still uses a one-sentence, 24-word Celeris
+adaptation contract. This keeps proactive facts exact and avoids the garbled
+proper nouns observed in live model paraphrases. A batch of two or three safe
+`session_completed` summaries is also joined and spoken directly when the full
+result fits 300 characters; this prevents the fast model from silently dropping
+one completed session or one numeric outcome. Bounded batches
+of up to three structured `decision_needed` events are also rendered directly
+from their prompt messages: confirmation mode says “needs your approval,” while
+other modes say “needs your input.” URLs, code fences, longer output, and other
+multi-event batches still use Celeris adaptation.
+One safe short `session_completed` summary may be combined directly with that
+bounded decision batch, preserving both the completed session's exact outcome
+and every structured prompt field without a model round.
+When a coordinator-managed queued message leaves the queue, the coordinator
+emits `message_delivered` only after the backend accepts the send. A lone event,
+or a bounded pair with the same session's prior-turn completion, is rendered
+directly in zero model rounds so speech preserves both the prior outcome and the
+fact that the queued message was actually sent. The same direct path may append
+a bounded unrelated `decision_needed` prompt, preserving the dispatch and the
+new approval request without trusting a lossy model paraphrase. The complete
+speech must fit 300 characters; unsafe or longer batches fall back to Celeris.
+The narrow spoken controls “say that again,” “repeat that update,” and “repeat
+the last bit” replay the exact most recent assistant speech in zero model
+rounds. They deliberately do not match provenance questions such as “repeat
+what was actually sent,” which remain grounded in the action ledger.
+The action ledger records the
+same dispatch as `message_sent` with `delivery: queued_after_turn`; an immediate
+delivery audit and current-focus question is answered from that typed evidence.
+`waiting_for_input` is a
+voice-facing filter for a nonzero pending-elicitation count, not an Omnigent
+status (the native statuses are `idle`, `running`, `waiting`, and `failed`).
+
+Celeris owns the low-latency conversation and uses its OpenAI-compatible native
+tool-call shape to invoke a real MCP client/server pair connected in memory.
+For successful `send_message`, `focus_session`, `start_session`,
+`rename_session`, `archive_session`, and `answer_prompt` results with no
+concurrent updates, the
+harness renders deterministic natural receipts from typed fields and skips the
+second Celeris request. This includes a compound model response when every tool
+call has a verified renderable action result. If one call fails, verified
+receipts for the other completed actions are spoken before the deterministic
+failure. One deliberately narrower concurrent-update path preserves the same
+guarantee: when every execution is a verified action, every event can be
+rendered by the existing exact bounded update renderer, and the combined speech
+fits 300 characters, the harness speaks the typed action receipt followed by
+the typed update in one model round. An unsafe or longer event batch still goes
+back to Celeris; this does not relax the ordinary updates-empty receipt guard.
+A compound turn that combines those action results with one safe,
+short assistant `latest_message` from `get_output` is also rendered directly:
+the typed action receipt is followed by a named session update, reducing the
+turn from two model rounds to one. The current turn's typed action receipt
+becomes `last_verified_action_outcome` even when another read still needs model
+synthesis, so a follow-up audit cannot repeat a stale older action. Do not
+weaken the success predicates or drop the updates-empty guard: unsafe reads,
+uncertain results, and composites containing a non-renderable result still need
+model synthesis. If a later synthesis round follows one or more verified
+actions, that round is buffered rather than streamed; any typed action receipt
+the model omitted is prefixed before TTS. This prevents a grounded summary from
+hiding whether the requested action actually happened or which session received
+it.
+The runtime's hidden `check_updates` call already answers a generic “did
+anything come in while I was speaking?” question at speech finalization. When
+that question accompanies an explicit named send or a clear focused-session
+pronoun instruction such as “tell it to …,” older-output tools are hidden and
+the send is forced before speech rather than letting Celeris replace it with a
+redundant read. Focused sends continue to use the coordinator's server-owned
+default and do not expose or inject a session ID. The harness also removes the
+trailing update question from the outbound instruction, so it is answered by
+the voice layer rather than being delivered to the coding agent. Any safe event
+returned by the send itself is included in the one-round typed receipt above
+and retained for later deictic cursor or decision resolution.
+Every tool-using turn also records `last_verified_tool_workflow`, an ordered,
+process-local list of successful named reads and typed actions. It contains no
+opaque IDs. The next model turn uses it to answer whether two sources were
+actually read before a send; a new read is never evidence about prior ordering.
+The action ledger remains the durable authority for what exact message was sent.
+A narrow “what exactly did you send” or “read back what you actually sent”
+follow-up is therefore rendered directly from the newest typed `message_sent`
+or `message_queued` ledger entry in zero model rounds, subject only to the normal
+speech sanitizer and 300-character bound. A compound
+“where am I still” adds the current typed focus. Visibility questions remain on
+the output-read path; they are never mistaken for an exact-message audit.
+Immediately before every human message, the harness inserts a current-turn
+action invariant: no coordinator action has happened yet, requested actions and
+required reads must use a tool before speech, prior ledger entries do not satisfy
+new/retry requests, and promises or success claims without a later successful
+tool result are forbidden. Keep this reminder adjacent to the human turn; the
+same rule in the longer base prompt was not salient enough when the model copied
+a prior send acknowledgement instead of making a second tool call. Celeris runs
+at temperature 0 with seed 7 so prompt replay and action selection are stable.
+The base prompt also resolves replies to proactive notifications against the
+notified session and requires an immediate read when a prior answer was empty or
+incorrect. The adjacent current-turn reminder makes two additional semantics
+explicit for the small fast model: a follow-up to a spoken notification reads
+the session id embedded in that notification without changing sticky focus, and
+a correction that a requested send was missing repeats `send_message` rather
+than substituting an output read. Celeris must not invent missing context or
+access as the cause of a prior bad answer; when no exact cause is established it
+states only that it misinterpreted the available data. The adjacent rule names
+common false excuses such as not having, not being shown, or being unable to
+access the right output because the base rule alone remained unstable. For an
+authentication or security question, the same adjacent evidence rule preserves
+every source-stated credential mechanism, reachability boundary, and whether a
+remote authentication layer actually exists; a generic claim that something is
+local is not sufficient.
+Concrete numeric corrections supplied by the human are direct dialogue
+evidence when current typed coordinator state does not contradict them. The
+harness deterministically preserves their value, unit, and complete conditional
+clause instead of asking the small model to rediscover those facts in a long
+history. A merged relay about the voice interface deterministically names “the
+voice coordinator” and the human so the destination cannot reverse attribution.
+For a simple question about whether an agent responded, retained backend
+notifications remain model-interpreted evidence: tools are withheld and the
+model must decide whether the notification actually answers the earlier
+question. Never restore the removed shortcut that treated any newer output from
+the same session as an answer; unrelated progress is not correlated evidence.
+`send_message` creates a user-role item in Omnigent. For normal relays Celeris
+preserves the human's intent, but a report about the voice interface's own
+mistake must explicitly name “the voice coordinator” and distinguish the human;
+an unqualified first-person self-report is forbidden because the destination
+would attribute it to the human. An attribution correction ending in “do you
+get what I mean” is an understanding check, not permission to promise or perform
+another send. This narrow identity correction is rendered deterministically
+from the typed prior `message_sent` ledger entry. If the human then explicitly
+asks to send that exact distinction, the harness converts the prior voice-owned
+first-person predicate into an unambiguous “the voice coordinator …; the human
+did not” relay before the real tool call. This protects identity when the small
+model's wording varies. A later explicit send request still requires the real
+tool.
+After a generic coordinator failure, a short “try again” or unique short session
+name inherits the nearest failed read operation and target from recent raw
+dialogue. For that narrow retry turn the harness injects the server-owned read
+target and withholds `send_message`, preventing an older successful send from
+resurfacing. Failed send retries do not take this path. A successful read of a
+clarified or nonfocused session names its typed target in speech and never
+changes sticky focus.
+Notification history records are authoritative for resolving “that one,” “the
+first one,” and “the other one”; a read copies the referenced notification's
+session ID rather than substituting sticky focus. The harness enforces this
+outside the model: a read-shaped follow-up after one spoken notification hides
+the opaque ID and injects the notification's recorded target even if Celeris
+emits sticky focus. Ordinals resolve against notification order. An unqualified
+read after multiple notifications returns an immediate zero-round clarification
+that names the candidates; it never guesses or offers a read tool. The same
+source hierarchy applies to factual follow-ups:
+an exact background-update record or typed tool result outranks prior assistant
+speech, which is only a fallible interpretation. Preserve the source's actor,
+positive and negative capabilities, and causal direction; a client that does
+not consume an event is not evidence that the backend cannot emit it.
+A detail-seeking follow-up such as “where did it leave off,” “what was the last
+thing it said,” or “give me a quick summary” forces `get_output` for the exact
+announced session. The same read is forced for any read-shaped follow-up when
+the retained notification contains only a lifecycle headline and no summary,
+output, or output delta. An ordinary question may still use a sufficiently
+informative retained summary without a redundant backend read.
+A changed `output_delta`
+directly answers “what's new” and “since then” without an older-output read.
+For the narrower question “did anything new come in while I was talking,” an
+atomically empty `updates` array plus `output_delta.changed: false` and a valid
+event cursor renders a zero-model-round negative receipt. Missing coordinator
+evidence, an expired cursor, stable focused output, or any concurrent read or
+action request fails closed to the normal harness. Compound action-plus-update
+turns still execute the action first and compose the verified action receipt
+with the typed empty-update result; the event question can never short-circuit
+the requested coordinator action.
+For a plain current/latest/progress question with no concurrent update, pending
+decision, or action language, the harness voices a short safe focused-session
+`output_delta` directly in zero model rounds. An explicit switch to the session
+that is already focused is likewise a typed zero-round receipt. These paths must
+remain narrow: compound or ambiguous turns still go to Celeris.
+A model-selected `get_output` for a plain non-mutating
+latest/status/progress/check-in question similarly voices one safe short
+assistant `latest_message` directly after the read, skipping the second Celeris
+round. An explicit question about a newer message from the human may copy a safe
+typed `role: user` latest message.
+This direct path is disabled for send, queue, focus, archive, approval, retry,
+and other compound action language.
+Imperative pronoun follow-ups after a spoken notification burst are also
+resolved by the harness. It preserves notification order since the last human
+turn, maps “first,” “second,” “third,” and “last” to the corresponding
+server-owned session ID, and injects that target into `send_message` while
+sticky focus remains unchanged. An unqualified “that one” after multiple
+sessions fails closed instead of guessing; once another human turn intervenes,
+the narrow deterministic reference expires. When the current human supplies
+the complete instruction, the same route copies its exact clause into the tool
+call, including natural ASR forms such as “tell that one rerun …”; the fast
+model may select the action but cannot shorten the dictated work.
+Two or more ordinal clauses in one turn are handled independently: each ordinal
+must resolve to a distinct notification and carry its own complete instruction,
+then every exact clause is injected into the corresponding tool call before
+speech. Missing, repeated, or incomplete ordinal clauses fail closed.
+ASR discourse repairs such as “no wait” do not select queued delivery; only an
+explicit request to queue or wait for the current turn does. For a true output
+visibility check, the response combines the action ledger's delivery evidence
+with whether the sent user item appears in the read result.
+The voice harness removes `send_message.session_id` from the model-visible
+schema. Messages default to the focused session; when one known destination is
+explicitly named, deterministic grammar resolves its server-owned ID and the
+harness injects that target without changing focus. If the human gives a clear,
+separate instruction to each of several known destinations, the voice schema
+exposes only those names as a required enum and the harness resolves each to a
+server-owned ID, deduplicates attempts, and requires every destination before
+speech. Each named clause is extracted up to the next addressed destination and
+copied exactly into that target's tool call. `now`, after-current-turn timing,
+and trailing voice-navigation controls are kept in delivery/routing semantics
+instead of leaking into the destination's message. Conversational ASR may omit
+the word “to” after each destination only when every named clause begins with a
+concrete imperative. A following conjunction or question/source prefix such as
+“what” or “whether” does not qualify, preserving ambiguity and read-first
+safety. The likewise bounded forms “send Session a message to …” and “let
+Session know …” participate in exact per-destination routing; a bare “send
+Session” remains incomplete and fails closed. Per-destination delivery is
+also harness-owned in this form: a target's
+explicit queue, wait, or after-current-turn clause forces `queued`, while every
+other target is forced to the normal `immediate` default. Clause boundaries
+prevent one destination's after-turn language from leaking onto another, and
+Celeris cannot silently omit or invert the requested timing. Merely mentioning
+several sessions without one clear instruction per target still fails closed.
+`queue` is message-action language too: ASR phrasing
+such as “when Side Worker wraps this one, queue it to …” receives the same named
+ID injection instead of silently defaulting to sticky focus. When a message
+depends on another session's output,
+Celeris must read that source before sending unless the human already supplied
+the finding in the current request. A `send_message` emitted in the same model
+completion as any output read is never executed because those results could not
+have informed it; the harness returns a typed deferral and forces a grounded send
+on the next round without repeating the reads. For an explicit multi-source
+comparison, an outbound message that omits any successfully read source name is
+also withheld and retried with the missing names. When that request explicitly
+asks for all exact numbers, counts, or metrics, the harness also compares the
+proposed message against numeric tokens and number words through twenty in every
+successful source result. An accompanying request for all exact causes also
+checks stable lexical evidence from every source, including causal phrases such
+as reconnect timeouts; corrupted variants such as “interconnects” are rejected.
+A message missing any of that evidence is not executed. Celeris receives the
+omitted facts or terms and must reissue the send without rereading, copying the
+missing source phrasing. This is a bounded evidence guard, not a deterministic
+sender: the model still composes the comparison and the real coordinator must
+confirm it. Clear dictated forms such as
+“queue it a message to …,” “tell Side Worker to …,” and the common ASR form
+“tell Side Worker rerun …” copy the exact task clause. Single-recipient
+“send Side Worker a message to …,” “message Side Worker to …,” and “let Side
+Worker know …” forms receive the same exact-copy treatment. The inverse but
+equally common “send a message to Side Worker to/that …” form is also extracted
+verbatim
+into `send_message` when no read participated, stripping only separate voice
+navigation controls such as “then switch me there” or “don't switch me.” This
+prevents the fast model from corrupting or shortening user-supplied work while
+leaving evidence-dependent messages model-composed. A read-only question that
+names exactly one known session receives the same protection: the model-visible `get_output` or
+`poll_output` schema omits `session_id`, and the harness injects the authoritative
+ID while focus remains sticky. This prevents malformed or invented read IDs.
+The harness also withholds and rejects
+`focus_session` unless the current transcript explicitly requests a
+switch/select/open/focus action or an ordinal selection. This is a runtime
+safety guard in addition to the prompt; ordinary latest/current-output language
+cannot mutate focus. Conservative name-token matching also withholds
+`focus_session` when the requested target is already focused. One explicitly
+named focus target is resolved against `known_sessions`; the model-visible
+schema omits the opaque ID and the harness injects the authoritative value even
+if Celeris emits a malformed one. Multiple named targets without a clear
+destination fail closed. A positive switch to a name absent from the fresh map
+forces `list_sessions`; if that result resolves one name, the harness injects
+its ID and requires `focus_session` before speech. Task instructions such as
+“tell it to focus on the cutoff,” “switch branches,” “open the config,” or
+“choose the safer retry” do not activate this navigation guard; an addressed
+relay keeps those phrases inside the remote work message and never changes
+sticky focus. The harness
+withholds `check_updates` from the voice model because it calls that tool
+atomically before constructing every turn and later tool results carry updates.
+When one utterance explicitly asks both to message a named session and to
+switch focus, deterministic speech cannot finish until both actions have been
+attempted. If Celeris emits only one, the next round is forced to the missing
+tool and verified results accumulate across rounds. Negated focus language such
+as “don't switch me” is excluded. This recovery adds a model round only when
+the normal one-round compound call is incomplete.
+When the previous assistant claimed a send, no retained `message_sent` receipt
+exists, and the human makes a declarative correction that the message is
+missing, a narrow evidence guard requires `send_message` for the first model
+round. It never sends by itself: Celeris still reconstructs the intended
+message and the real coordinator must confirm success. Explicit inspection
+questions and ledger-backed visibility questions are excluded from this guard.
+The ten tools are `list_sessions`, `focus_session`, `get_output`,
+`poll_output`, `send_message`, `archive_session`, `rename_session`,
+`answer_prompt`, `start_session`, and `check_updates`. `archive_session` is
+withheld unless the human makes a direct archive command, and its voice-facing
+schema can only target the focused session. `rename_session` is likewise
+withheld unless the turn directly requests renaming or calling the current
+session and supplies the new title. Natural discourse can precede either
+mutation, but an addressed outbound relay before the action word makes that
+word remote work content, not local mutation authority; those local tools are
+absent from the model request. A direct archive
+is a required verified action, while the relay path requires only its exact
+send. A rename request without a title is answered with a deterministic
+clarification and cannot reach Celeris or the tool. Its voice
+schema requires only the new title, the coordinator returns both names, and
+focus never changes. General stdio MCP clients may supply a session ID for
+either action. For a direct voice rename, the harness bounds the title at the
+next explicit coordinator-action clause, recognizes references such as “this
+temporary session” or “this side chat,” and injects only the exact title into
+`rename_session`. This prevents descriptive target words or a later phrase such
+as “switch me back to Primary Work” from becoming the title. A compound rename
+plus focused message accepts the common ASR form “tell it rerun …” without the word `to`, preserves
+that complete dictated instruction, and requires both verified actions before
+speech. An explicit named focus in the same compound turn is also required.
+The resulting action receipts and renamed focus remain authoritative for the
+next audit turn. `poll_output` accepts and returns an explicit opaque cursor,
+returns only stable newer output, and never changes focus. This makes the tool
+usable by stateless remote MCP clients; omission returns the bounded buffered
+window. `send_message` defaults to
+`delivery: immediate`, the Omnigent create-or-steer path; the backend's HTTP
+`queued: true` response means asynchronous acceptance, not deferred delivery,
+and is exposed as such. `delivery: queued` is an explicit coordinator-managed
+wait until the current session turn becomes idle. Successful deferred dispatch
+records a `queued_after_turn` action and emits `message_delivered`; a failed
+dispatch is put back into the in-process queue and emits no false success.
+For clear “start/make/create/open a session to/for …” language, the harness
+copies the user's exact task clause into `start_session.instruction`; Celeris
+still selects the tool and may choose the title, agent, and workspace. When the
+human explicitly says “session called NAME to TASK” or “chat named NAME for
+TASK,” the harness also injects that exact title rather than letting the model
+rewrite it. A trailing voice-directed concurrent-update clause such as
+“and tell me what came in while I was talking” is not part of the coding task
+and is removed before
+tool execution. When the same utterance separately addresses a known existing
+session, that relay clause is also excluded from the new session's instruction;
+the exact start and send remain two required, independently verified actions.
+Other task continuations remain intact. The explicit start is included in the
+required-action set, while any concurrent update is retained and spoken from
+the typed event after the verified start receipt.
+`get_output` reads `/v1/sessions/{id}/items`; arbitrary tmux scrollback is not
+available through the Omnigent HTTP API and must not be implied. It returns a
+JSON array instead of flattening the page into text. Page 1 contains the most
+recent page of items, but items within every page are returned in explicit
+`oldest_to_newest` order so cursor-based incremental updates continue the same
+chronology. Every retained item has a one-based position, normalized timestamp,
+preformatted age, kind, text, and message role or tool name where applicable.
+`latest_message` is the newest conversation message on the most recent page; it is
+generic and may be from either role, so consumers must still inspect `role`.
+`recent_delivery_visibility` compares the latest server-recorded sent or queued
+message for that session with typed user messages on the returned page. Its
+status is exactly `visible_on_page` or `not_visible_on_page`; absence from one
+page is not a claim about all history or whether the agent replied. The voice
+harness renders a visibility-only result directly from this typed field after
+Celeris selects `get_output`, avoiding a second model round.
+Internal terminal/tool activity remains separate from conversation messages.
+Item text is shortened by preserving both its beginning and end, and only
+complete items are admitted to the bounded result. The voice client preserves
+tool results as valid JSON and structurally compacts oversized strings/arrays
+rather than slicing serialized JSON in the middle. Structured MCP
+elicitations resolve through their dedicated endpoint and may target a child
+session. The coordinator maintains a server-owned `pending_decisions` registry
+across all watched sessions. Every snapshot and tool result repeats unresolved
+prompts with exact session IDs, prompt IDs, natural-language messages, modes,
+and schemas until successful resolution; the decision event carries the same
+prompt data. Event fingerprints include the exact prompt IDs rather than only
+the pending count, so replacing one approval with the next at a constant count
+still emits a new `decision_needed` event. Celeris must copy these opaque IDs,
+never recreate them from a
+spoken name. Form-mode prompts pass their JSON schema to Celeris;
+`answer_prompt.answers` must preserve the caller's typed field values.
+Successful resolution removes the prompt before the result is
+returned and the action ledger becomes authoritative for later verification.
+The result includes a typed `target_session`, allowing one or several
+successful prompt resolutions to be acknowledged without another model round.
+An immediate outcome audit such as “did both actually happen?” repeats only the
+last typed receipt and says that the outcomes are recorded; it never calls stale
+prompt IDs again.
+A stdio MCP entry point is available with `npm run mcp`. The same image exposes
+the separate `npm run mcp:remote` entrypoint for an authenticated, path-routed
+HTTP gateway, never a listener in the voice pod. It uses OAuth authorization
+code + PKCE, strict public-client DCR, explicit consent, ten-minute opaque
+access tokens, rotating refresh tokens with reuse revocation, and encrypted
+per-user Omnigent grants. Gateway tokens/codes are stored only as SHA-256
+digests; the upstream grant is AES-256-GCM encrypted with record-specific AAD.
+The encryption key enters only through a runtime Secret and state lives on a
+private SQLite PVC. A global service credential or impersonation header is
+forbidden.
+
+The first remote surface is deliberately only `whoami` and `list_sessions`
+under `omnigent.read`. Each tool obtains a delegated Omnigent access token, so
+the upstream account/session ACL is the authority. The gateway's issuer is the
+public HTTPS origin; its standard authorization, token, registration,
+revocation, authorization-server metadata, and path-specific protected-resource
+metadata routes are path-routed to the gateway alongside `/mcp`. Consent and
+the Omnigent return callback live below `/mcp/oauth/`. The gateway becomes the
+shared account-scoped semantic boundary after external Claude testing proves
+the contract.
+
+The Omnigent trust handoff uses its existing CLI/OIDC ticket flow. A reviewed,
+hash-guarded runtime patch makes a fulfilled ticket return to the already
+sanitized same-origin path, includes the validated OIDC issuer/subject in the
+one-time poll response, and tags the MCP grant as a scoped delegated client.
+The gateway binds `(issuer, subject)` one-to-one with Omnigent's canonical
+account identifier and fails closed on any later remap.
+For future Claude integration, do not equate MCP transport notifications with
+proactive agent turns. MCP `2026-07-28` `subscriptions/listen` carries only
+tool/prompt/resource list changes and subscribed-resource invalidations; Tasks
+remain poll-driven. Ordinary Claude MCP does not inject an arbitrary server
+notification into model context or wake an idle agent. Experimental Claude
+Channels can carry the nonstandard `notifications/claude/channel` into a
+specially launched terminal CLI, but it is a separate optional adapter with
+client-specific support, not the remote MCP contract. Keep `check_updates` and
+`poll_output` cursors as the correctness path for standard clients even if a
+future transport also publishes advisory resource-change notifications.
+
+Every Celeris turn also receives an explicit context contract. Spoken dialogue
+is append-only in the hot path. By default, the harness retains raw dialogue
+until 80 messages or 48,000 characters, then uses a tool-free Celeris request
+after five idle seconds to compact the oldest prefix. At least 24 recent
+messages remain verbatim and the compressed memory is placed before that raw
+tail. A new human turn preempts maintenance rather than waiting for it; the
+uncompacted history remains usable and compaction is retried after the turn.
+The exact thresholds are runtime configurable with the
+`CELERIS_HISTORY_*` variables. This gives appended turns a stable prompt prefix
+between infrequent compactions, although Celeris does not publicly document a
+prompt-cache guarantee. Celeris's live endpoint accepted a measured 12,015-token
+probe in August 2026; current primary documentation advertises 131,072 tokens,
+while older cookbook pages still show a stale 8,192-token value. Keep the
+defaults conservative until long-context latency is measured from real calls.
+Working memory is process-local; the full transcript remains durable in the
+private JSONL audit log but is not automatically replayed into the model after a
+restart. Focused-session state, recent actions, output cursors, and prompts stay
+authoritative regardless of conversational compaction.
+
+The process also repeats `last_verified_action_outcome`, a short receipt derived
+only from typed tool results, after an action turn. It preserves partial-failure
+evidence that cannot appear in the successful-action ledger. An immediate
+follow-up asking only which part happened and where the user is is rendered
+directly from that receipt plus `focused_session`; visibility checks and new
+actions still go through Celeris. A completion containing neither text nor a
+valid tool call is retried once because no action ran; a second empty result
+fails the turn normally.
+
+The context contract also says that
+`output_delta` is only new stable output through speech finalization, and older
+output is absent until a tool returns it. Celeris has no page/token introspection
+and must never estimate how much context it has or invent an explanation for a
+dropped utterance or delay.
+
+The model cannot create its own sleep/poll loop, but it must not deny the
+runtime's real background behavior: the coordinator already watches sessions
+and the voice loop proactively announces real output, completion, failure, and
+decision events. A question about whether the user will be told when work gets
+back is answered yes in terms of that runtime capability, without promising a
+model-owned future action. When a follow-up asks whether retained backend output
+actually answered an earlier question, the short model completion is buffered
+instead of streamed and any whole sentence offering to monitor, watch, keep an
+eye on, report back, or notify later is removed before TTS. This narrow evidence
+path preserves the existing factual comparison while preventing unsupported
+future promises from escaping as first audio. A short “nothing new” check cannot
+hide an unresolved typed prompt; one safe pending decision is rendered directly
+without a model round.
+
+Logs are newline-delimited JSON on stdout and, when `LOG_FILE` is configured,
+appended to that runtime file. `conversation.user.recognized` contains each ASR
+transcript. `conversation.assistant.generated` records the response and whether
+it was superseded before playback. `conversation.assistant.playback_started`
+records every exact speech batch whose audio actually began, its segment number,
+and its retry number. A delayed adviser answer therefore has independent
+playback evidence after the hold line.
+For `source: "background_update"`, the generated record also stores the exact
+serialized coordinator update payload so private replay can distinguish backend
+evidence from the voice model's spoken interpretation. This field can contain
+session output and decision data and is therefore as sensitive as the transcript.
+`coordinator.action.recorded` records the exact action summary, including
+outbound message text, so delivery claims can be audited after model history is
+trimmed. This is
+an intentional conversation audit trail and is sensitive private data. Keep the
+file on private runtime storage, never add it to an image or repository, and
+never log tool arguments, tokens, environment values, or credentials. The
+Kubernetes chart mounts a retained PVC at `/var/lib/omnigent-voice` and sets
+`LOG_FILE=/var/lib/omnigent-voice/events.jsonl`.
+
+Opt-in debugging audio uses `VOICE_RECORDING_ENABLED=true` plus an absolute
+`VOICE_RECORDING_DIRECTORY`; it must point at private retained runtime storage,
+never the repository or image filesystem. The public default is disabled. Each
+confirmed Discord receive stream is stored as mono 16-bit WAV at 16 kHz using
+the exact samples accepted by ASR, including meaningful unrecognized turns.
+Each staged coordinator attempt stores the native mono TTS samples passed into
+the Discord stream; KAME stores only output admitted through its verified audio
+gate. Streamed TTS batches share one turn recording. An interrupted file can
+contain a generated tail already buffered for Discord but not heard by the
+caller, so the typed `outcome` remains important. `voice.recording.saved` logs
+only a generated recording ID, generated turn ID, private basename, role,
+sample rate, duration, and outcome—never audio bytes. It shares the human turn
+ID with recognized/segment/playback records when possible. Files are mode 0600
+inside a mode 0700 directory, written atomically, and removed by both
+`VOICE_RECORDING_RETENTION_DAYS` and `VOICE_RECORDING_MAX_MIB`. Cleanup only
+matches filenames generated by this recorder and must never delete arbitrary
+files on the shared PVC.
+
+Use `npm run replay -- --log <private-jsonl> --target-time <recognized-event-time>`
+to reproduce the first Celeris decision for a late logged turn without touching
+Omnigent. Replay instantiates the production `CelerisConversation` and the same
+in-process MCP client/tool schemas as the live bot, restores up to 80 dialogue
+messages since the last process startup, and substitutes only a frozen
+coordinator executor. Pass `--tool-results-file <private-json>` to supply
+synthetic coordinator results and continue through as many as five exact
+production tool rounds; without a result, the frozen executor returns an error
+and the harness exercises its deterministic failure speech. The JSON object
+maps each tool name to one result object or an ordered array of results. Compare
+the old behavior with `--omit-action-invariant`, or replace the base prompt with
+`--system-prompt-file`. Replay output and supplied results are private because
+they can include transcripts, session output, and proposed tool arguments;
+never commit them.
+
+Use `npm run eval -- --api-key-file <private-key-file>` to run the sanitized
+ASR-style corpus in `evals/cases.json`. It uses the same production conversation
+and MCP path with a frozen coordinator per case. `--case <id>` selects a case,
+`--runs <n>` measures stability, and prompt override flags match replay. HTTP
+rate limits and transport failures are invalid trials excluded from the quality
+rate; empty model turns remain real failures. Add sanitized held-out paraphrases
+before promoting a targeted change.
+
+Use `npm run eval:scenarios -- --api-key-file <private-key-file>` for linked
+multi-session flows in `evals/scenarios.json`. One scenario preserves the real
+`CelerisConversation`, spoken history, proactive-notification history, and MCP
+event cursor across every turn while only swapping deterministic coordinator
+snapshots and tool results. This is the regression gate for notification
+references, sticky focus, incremental output, explicit focus changes, and
+archive restoration. A scenario passes only if every valid turn passes; never
+replace it with isolated case invocations when evaluating stateful behavior.
+The loader rejects `decision_needed` notification fixtures without at least one
+production-shaped prompt containing a prompt ID, message, and mode. Real
+coordinator events always carry those structured prompts, and summary-only
+fixtures would bypass the deterministic zero-round decision renderer and test a
+stochastic shape the runtime does not emit.
+Use `--json --include-trace` only with sanitized or otherwise private scenario
+data when raw completion shapes are needed to diagnose an empty model turn.
+The frozen coordinator filters `updates` against the MCP consumer cursor on
+every call, matching the production server's per-connection replay semantics;
+do not reintroduce already-consumed events into later tool fixtures.
+
+The Discord voice channel is currently part of the MVP trust boundary. Before
+using a channel with more than one trusted human, configure
+`ALLOWED_DISCORD_USER_ID`; do not rely on Celeris to authenticate callers.
+
+## PersonaPlex feasibility experiment
+
+`experiments/personaplex/benchmark_moshi.py` is an isolated measurement harness
+for evaluating whether the shared Moshi/PersonaPlex streaming architecture can
+meet its 80 ms frame deadline on the Strix Halo `gfx1151` GPU. It is not part of
+the production image or Node dependency graph. The benchmark runs current
+upstream Moshi in an existing ROCm container, uses real speech, times eager and
+HIP-graph modes, and emits sanitized JSON only. Host paths, Hugging Face cache,
+and gated model authentication enter through shell variables consumed by
+`run-benchmark.sh`; never add them to the repository.
+
+Use public `kyutai/moshiko-pytorch-bf16` as the architecture-equivalent runtime
+control before gated PersonaPlex weights. PersonaPlex requires the human to
+accept the model terms and authenticate the local Hugging Face cache. Do not
+request or print their token. The benchmark auto-detects current Kyutai versus
+NVIDIA's vendored PersonaPlex Moshi API; point `PERSONAPLEX_MOSHI_SOURCE` at the
+matching official checkout and use `--runtime personaplex` for the gated model.
+See `docs/PERSONAPLEX-EXPERIMENT.md` for the decision thresholds and current
+measurements.
+
+Measured on the target Radeon 8060S, PyTorch BF16 is 195.969 ms/frame, its best
+experimental AOTriton path is 145.876 ms/frame, and PyTorch Q8 is 198.464
+ms/frame; none can meet Moshi's 80 ms cadence. Native Vulkan Q4 completes the
+full PersonaPlex encode/model/decode loop at 14.871 fps (67.25 ms/frame mean)
+and about 7.31 GiB device memory. Tail instrumentation remains required. The
+current native backend cannot load cached BF16 voice embeddings on `gfx1151`,
+but a WAV voice prompt works. Build the guided S2S experiment on native Q4 and
+keep the existing staged voice pipeline selectable until the new Discord loop
+is verified end to end.
+
+Native KAME Q4 is faster than that control on the same device: after 20 warmup
+frames, 250 complete encode/model/decode frames measured 63.445 ms mean,
+64.335 ms p95, 64.597 ms p99, and 65.145 ms maximum (15.762 fps). The converted
+GGUF is 4,399,071,712 bytes and must remain an external private runtime mount.
+The official safetensors stores attention `in_projs`/`out_projs` separately;
+the native patch deliberately supports both that layout and Moshi's fused
+projection tensors. A paced public-audio smoke test injected oracle text after
+the caller stopped, and both KAME's generated token stream and independent
+local ASR recovered the intended guided sentence. Treat this as the native
+runtime gate, not as a substitute for a live Discord/phone test. RADV's first
+inference frame takes roughly 617 ms to compile/initialize. Twenty frames warmed
+the shader but did not reliably prime an immediate first dialogue turn, so
+`KameS2SRuntime` sends and discards 64 silent frames before the Discord bot
+connects. Do not shorten that startup priming or expose its output to callers.
+
+The guided native experiment is implemented behind `VOICE_RUNTIME=kame`; the
+default remains `staged`. Select the runtime once at process startup; never
+switch between KAME and staged voices inside a live conversation. In KAME mode,
+all Discord output is KAME audio. Piper may generate a hidden input stimulus
+for a proactive KAME turn, but that stimulus is never played to the caller and
+Piper is not an audible fallback. `native/moshi-kame.patch` adds KAME's oracle embedding
+and one-token-per-frame queue to pinned `Codes4Fun/moshi.cpp`, while
+`native/kame_bridge.cpp` exposes raw 24 kHz float32 audio over stdin/stdout and
+guidance/events on descriptors 3/4. `src/s2s.ts` owns the subprocess and
+`src/discord.ts` clocks 80 ms full-duplex frames while the existing local ASR
+runs in parallel. Local ASR sees packets immediately, while KAME receives them
+through `KAME_INPUT_DELAY_MS` (640 ms by default) so final verified Celeris
+guidance arrives before KAME observes the caller endpoint. Celeris tool results replace oracle guidance; KAME's generated
+text and rolling frame tails are retained in structured runtime logs. Model
+weights remain external runtime mounts. See `docs/S2S.md`.
+
+Native Discord output is fail-closed: all frames are dropped outside a verified
+guided transaction, and the gate closes immediately on completion, timeout,
+barge-in, abort, or shutdown. Normal completion is eight silent frames. The
+10-120 second guidance-length-scaled completion timeout is only a runaway
+watchdog; never replace normal endpointing with a fixed response-duration cap.
+Every guided transaction owns a fresh Discord raw-audio resource created before
+guidance and ended when the transaction settles. `@discordjs/voice` destroys a
+playing resource after five missing 20 ms frames, so a process-lifetime resource
+cannot survive the gated idle period between responses. Do not regress to one
+process-lifetime resource or forward unguided KAME frames as keepalive audio.
+
+Unsolicited coordinator updates retain one audible voice. Local TTS generates a
+short input-side question that is fed only into KAME after idle; the user never
+hears that trigger. The verified Celeris update is injected while the hidden
+input enters KAME. KAME output must cross the speech-energy threshold and then
+produce eight silent frames before the event cursor advances. Normal guided
+replies are tracked with the same detector for durable playback logs. Merely
+accepting oracle tokens is not evidence that Discord received speech.
+Proactive KAME output has a five-second speech-start deadline and the same
+guidance-scaled completion watchdog once speech begins. If the first hidden-input
+turn produces no speech, retry it once with a fresh hidden input. If both
+attempts fail, retain and requeue the coordinator event; never advance its
+cursor or silently discard it. A human turn may preempt this retry normally.
+Proactive delivery is strictly serialized across hidden-trigger synthesis,
+guidance, output detection, retry, and requeue. Newly arriving updates remain
+pending until the active transaction finishes; neither the KAME settle callback
+nor a queue listener may schedule a second oracle turn while one is in flight.
+A live contention probe produced three queued audible KAME transactions with no
+overlap between their `delivery_started`/`delivery_finished` intervals; the
+probe sessions were archived after verification.
+
+The first live phone rollout failed despite earlier proactive probes. Discord
+received and ASR recognized three real turns, but the implementation forwarded
+KAME's continuous unguided output from startup. Four responses timed out, seven
+were interrupted, and 52 input-backlog warnings occurred. The deployment was
+stopped. Never cite the earlier proactive probe as a live quality gate.
+
+The post-incident four-turn offline test independently transcribes gated KAME
+audio. A 720 ms input delay with a conservative 400 ms simulated guidance cost
+passed two sequences totaling seven turns with 77.8-100% guidance-word recall.
+A 28-word answer produced 12.8 seconds of audio, ended naturally, and scored
+96.4%. A 400 ms delay missed turns and is rejected. Use `npm run s2s:smoke`
+inside an isolated GPU runtime with the model path variables; Discord must stay
+disconnected during this test. A controlled live phone test remains mandatory.
+
+## Commands
+
+```bash
+npm ci
+npm run check
+npm test
+npm run build
+npm run eval -- --api-key-file /private/path/celeris-key
+npm run eval:scenarios -- --api-key-file /private/path/celeris-key
+npm run eval:persona -- --chat-api-key-file /private/path/chat-key --adviser-api-key-file /private/path/adviser-key
+npm run dev
+npm run mcp
+npm run mcp:remote
+npm run s2s:smoke
+podman build -t omnigent-voice:dev .
+experiments/personaplex/run-benchmark.sh --mode both
+```
+
+The final image runs as the unprivileged `node` user. A smoke test should reach
+`speech.models.ready`, `conversation.ready`, and `discord.voice.ready`;
+coordinator mode additionally reaches `coordinator.ready`, while persona mode
+must report `coordinatorEnabled: false`. The image
+publisher intentionally disables provenance and SBOM
+attestations because this experiment's Docker Hub page must not expose a source
+link or deployment metadata.
+
+## Development rules
+
+- Commit coherent milestones; stage only owned files.
+- Maintain the sanitized experiment record in `docs/AUTORESEARCH.md` for
+  continuous harness research. Private transcripts and fixtures remain outside
+  the repository; only generalized cases and aggregate results may be committed.
+- Keep pure state/normalization logic unit tested, but prioritize real voice-loop
+  integration.
+- Retain conversation transcripts and assistant speech only in the designated
+  private runtime JSONL log. Never log tool arguments, configuration values, or
+  credentials.
+- The Docker Hub image is public but intentionally has no Hub description,
+  README sync, source link, author label, or deployment-specific metadata.
+- Keep `**/__pycache__/**` and `**/*.pyc` excluded from the container context.
+  Python bytecode embeds the absolute compilation path; the pre-rollout image
+  scan must reject personal paths even when no credential value is present.
+- Update this file when runtime assumptions or operational procedures change.
