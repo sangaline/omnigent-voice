@@ -6488,5 +6488,115 @@
         }
       }
     ]
+  },
+  {
+    "id": "nested_open_select_is_only_a_message",
+    "description": "Treat open and select language inside an addressed coding instruction as remote work, not local session navigation.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "okay tell build worker open the reconnect config and select the latest trace",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2101, "type": "message_sent", "summary": "Sent immediately to Build Worker: Open the reconnect config and select the latest trace." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session", "get_output", "poll_output"],
+          "sessionId": "session-build",
+          "messageTerms": ["open", "reconnect", "config", "select", "latest", "trace"],
+          "delivery": "not_queued",
+          "speechTerms": ["build worker"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "nested_choose_use_is_only_a_message",
+    "description": "Treat choose and use language inside an addressed coding instruction as remote work, not local session navigation.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell build worker choose the safer retry and use the stable branch",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2102, "type": "message_sent", "summary": "Sent immediately to Build Worker: Choose the safer retry and use the stable branch." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session", "get_output", "poll_output"],
+          "sessionId": "session-build",
+          "messageTerms": ["choose", "safer", "retry", "use", "stable", "branch"],
+          "delivery": "not_queued",
+          "speechTerms": ["build worker"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

@@ -2214,3 +2214,23 @@ scenario also passed its immediate rerun. The corpus now contains 49 stateful
 scenarios and 141 specified linked turns. All executions used frozen coordinator
 results, no live Omnigent session was accessed or mutated, and the excluded ESPN
 session remained untouched.
+
+### 2026-08-29 — General navigation verbs remain scoped to addressed work
+
+Hypothesis H74 extended the addressed-task authority audit to four ordinary
+coding verbs that overlap the voice coordinator's navigation vocabulary:
+“open,” “select,” “choose,” and “use.” The first pair asked Build Worker to open
+the reconnect configuration and select the latest trace; the second asked it to
+choose a safer retry and use the stable branch. In both cases sticky focus was
+Primary Work and only one exact send to Build Worker was valid.
+
+Variants with an explicit “don't switch me” hint passed forty of forty trials.
+The stronger variants removed that hint and independently passed another forty
+of forty, always in one model round. The unchanged production harness therefore
+already scopes these words correctly and no speculative runtime change was
+made. The two stronger flows are permanent stateful regressions. Promotion used
+the same harness and frozen coordinator as production, with 162 passing unit
+tests, clean typecheck and build, and eighteen of eighteen targeted promotion
+runs across all six nested navigation cases. The corpus now contains 51
+stateful scenarios and 143 specified linked turns. No live Omnigent session was
+accessed or mutated, and the excluded ESPN session remained untouched.
