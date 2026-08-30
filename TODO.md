@@ -1,5 +1,22 @@
 # Omnigent Voice TODO
 
+## Persona model A/B candidates
+
+- Once the context and memory harness is stable, run the exact same stateful
+  persona scenarios against Cerebras Gemma 4 31B and Celeris. Do not swap the
+  live model based on advertised throughput alone. Measure p50/p95 time to first
+  content, complete voice-sized turn latency, instruction adherence, ASR repair,
+  provenance truthfulness, warmth/humor, repetition, and actual token cost.
+- Cerebras currently lists Gemma 4 31B as a medium dedicated-endpoint model and
+  positions it for low-latency chat/reasoning, but it is not in the documented
+  public shared-endpoint catalog. Confirm account access, exact model ID, price,
+  context limit, structured output, tool calling, streaming behavior, and the
+  claimed roughly 500 tokens/second before building an adapter.
+- Weight first-token latency and quality more heavily than raw decode speed:
+  Audrey usually speaks only tens of tokens, so a smarter 31B model can win even
+  at roughly twice the cost, but 500 tokens/second by itself saves little if
+  queueing or first-token latency dominates.
+
 ## Authenticated MCP integration
 
 - Treat `docs/MCP-SECURITY.md` as a release gate. Do not add a remotely
@@ -47,5 +64,5 @@
   reply is announced once, and the later stable item or a reconnect snapshot
   does not repeat it. Stable cursor polling remains the fallback; live event
   access stays inside the existing private voice trust boundary.
-- Continue the isolated multi-session autoresearch loop without accessing or
-  mutating excluded user sessions.
+- The coordinator-oriented multi-session autoresearch loop is paused at the
+  human's request; current autonomous iteration is persona-only.

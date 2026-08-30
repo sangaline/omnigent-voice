@@ -48,11 +48,18 @@ speaking; at endpoint the harness takes only the latest completed result and
 calls Celeris immediately. It never waits for an embedding or adviser request.
 
 The same partial transcript starts a DeepSeek context planner after it contains
-enough words. A ready plan contributes only a compact interpretation, relevant
-facts, response strategy, and up to two concrete response ideas. It never gates
-endpoint latency, and the final transcript overrides the partial input it saw.
-This lets the stronger model correct likely ASR substitutions and prepare
-creative material while Celeris remains the low-latency speaker.
+enough words. Reasoning is disabled for this latency-sensitive job. It streams
+a complete Audrey reply first; creative requests add two alternatives. Closed
+candidate strings are usable before the whole structured response completes.
+With `PERSONA_PREPARED_DRAFTS_ENABLED=true`, the first grounded candidate can be
+spoken directly at endpoint without another model call for an ordinary turn.
+Creative and entertainment drafts are never spoken directly; they remain useful
+planning context for the bounded candidate race. The final transcript
+remains authoritative: repairs and meaningful suffix growth reject or restart a
+partial plan. Local validation preserves named corrections and emotional open
+loops while rejecting fake trivia, invented experiences, familiar joke
+templates, and overlong creative replies. If no safe plan is ready, Celeris
+continues immediately on ordinary turns.
 
 After Celeris has produced the spoken response, a serialized background worker
 sends that completed exchange to the configured OpenAI-compatible adviser. It
@@ -72,12 +79,28 @@ runtime validation rejects user facts inferred only from Audrey's wording. Logs 
 aggregate timing and token counts but never the provider request text.
 
 The same adviser is exposed to Celeris through one narrow `ask_adviser` tool.
-Celeris answers ordinary turns directly. For a genuinely difficult creative or
-emotionally delicate request it may speak a short acknowledgment, call the
-adviser, and then finish the answer. A direct creative request forces this path
-when no prepared response idea arrived in time. Discord receives silent PCM
-between the acknowledgment and result so the delayed second batch cannot be
-dropped as an already-finished stream. The tool cannot perform external actions.
+Celeris answers ordinary turns directly. A creative or distraction request
+speaks a short acknowledgment and deliberately enters the bounded candidate
+race, even when a planning draft arrived during speech. Creative advice is a
+three-candidate structured request, and the first grounded, non-template,
+voice-sized candidate streams directly to TTS without a second Celeris rewrite.
+The hot path races that request against a separate three-candidate Celeris pass,
+selects the first safe result, records which source actually won, and aborts the
+loser. `PERSONA_ADVISER_HOT_TIMEOUT_MS` bounds this caller-facing race without
+shortening the asynchronous analysis timeout. The original transcript is
+authoritative even when Celeris paraphrases tool arguments. Discord receives
+silent PCM between the acknowledgment and result so the delayed second batch
+cannot be dropped as an already-finished stream. The tool cannot perform
+external actions.
+
+Typed generation provenance records whether background context was merely
+available, a prepared DeepSeek reply was actually used, or the adviser produced
+the answer. Immediate questions about the last reply use this record rather than
+asking the small model to infer provenance from chat history. Direct questions
+about the “deep sea flash” ASR alias receive the verified DeepSeek Flash name and
+role. Explicit present-tense corrections and retrieved open loops produce a
+required continuity anchor; a Celeris fallback is buffered and retried once if
+it omits that anchor.
 
 Required durable-memory variables are listed in `.env.example`. Database,
 embedding, and adviser failures are logged without request text or credentials;

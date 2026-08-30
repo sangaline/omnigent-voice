@@ -9,6 +9,7 @@ import {
   PersonaMemoryStore,
   PersonaTurnAnalysis,
   groundedMemoryCandidate,
+  unsafeCreativeDraft,
 } from "./persona-memory.js";
 
 class FakeStore implements PersonaMemoryStore {
@@ -66,6 +67,7 @@ const fakeEmbedder = (): PersonaEmbedder => ({
 const fakeAdviser = (analysis: PersonaTurnAnalysis = { memories: [] }): PersonaAdviser => ({
   analyzeTurn: vi.fn(async () => analysis),
   planTurn: vi.fn(async () => ({
+    draftReply: "Ask about pottery naturally.",
     interpretation: "The user is asking about pottery.",
     relevantFacts: [],
     responseStrategy: "Answer naturally.",
@@ -111,15 +113,16 @@ describe("persona memory runtime", () => {
       embedder: fakeEmbedder(),
       adviser: fakeAdviser(),
       logger: new Logger("error"),
+      backgroundModel: "deepseek/deepseek-v4-flash",
+      usePreparedDrafts: true,
     });
 
     await expect(runtime.initialize()).resolves.toHaveLength(2);
     expect(store.initialized).toBe(true);
-    expect(runtime.contextFor("What kind of mornings do I like?")).toBeUndefined();
-    await vi.waitFor(() =>
-      expect(runtime.contextFor("What kind of mornings do I like?"))
-        .toContain("The user likes rainy mornings"),
-    );
+    runtime.prepare("What kind of mornings do I like?");
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(runtime.contextFor("What kind of mornings do I like?"))
+      .toContain("The user likes rainy mornings");
     await vi.waitFor(() => expect(store.consumed).toContain("4"));
     await runtime.close();
   });
@@ -148,6 +151,7 @@ describe("persona memory runtime", () => {
         };
       }),
       planTurn: vi.fn(async () => ({
+        draftReply: "Pottery sounds like a good kind of mess.",
         interpretation: "The user is talking about pottery.",
         relevantFacts: [],
         responseStrategy: "Respond warmly.",
@@ -163,6 +167,8 @@ describe("persona memory runtime", () => {
       embedder: fakeEmbedder(),
       adviser,
       logger: new Logger("error"),
+      backgroundModel: "deepseek/deepseek-v4-flash",
+      usePreparedDrafts: true,
     });
     await runtime.initialize();
 
@@ -189,6 +195,7 @@ describe("persona memory runtime", () => {
     const adviser: PersonaAdviser = {
       analyzeTurn: vi.fn(async () => ({ memories: [] })),
       planTurn: vi.fn(async () => ({
+        draftReply: "DeepSeek Flash prepares context while you speak.",
         interpretation: "The user means the DeepSeek Flash background model.",
         relevantFacts: ["Background planning can contribute private context."],
         responseStrategy: "Answer the architecture question directly.",
@@ -204,24 +211,72 @@ describe("persona memory runtime", () => {
       embedder: fakeEmbedder(),
       adviser,
       logger: new Logger("error"),
+      backgroundModel: "deepseek/deepseek-v4-flash",
+      usePreparedDrafts: true,
     });
     await runtime.initialize();
 
     runtime.prepare("what is that deep sea flash stuff", [
       { role: "assistant", content: "A background model can prepare response ideas." },
     ]);
-    await vi.waitFor(() =>
-      expect(runtime.contextFor("what is that deep sea flash stuff in background"))
-        .toContain("DeepSeek Flash"),
-    );
-    expect(runtime.hasPreparedResponseIdea(
+    await vi.waitFor(() => expect(runtime.hasPreparedResponseIdea(
       "what is that deep sea flash stuff in background",
-    )).toBe(true);
+    )).toBe(true));
+    expect(runtime.preparedDraftFor("what is that deep sea flash stuff in background"))
+      .toBe("DeepSeek Flash prepares context while you speak.");
+    expect(runtime.contextFor("what is that deep sea flash stuff in background"))
+      .toContain("DeepSeek Flash");
+    expect(runtime.speechReferenceHint("what is the deep sea flash thing"))
+      .toContain("DeepSeek Flash");
     await runtime.close();
   });
 });
 
 describe("OpenAI-compatible persona adviser", () => {
+  it("rejects stock or purportedly factual joke drafts", () => {
+    expect(unsafeCreativeDraft(
+      "tell me a weird joke",
+      "Why did the scarecrow win? He was outstanding in his field.",
+    )).toBe(true);
+    expect(unsafeCreativeDraft(
+      "tell me a weird joke",
+      "Okay, weird fact: octopuses have three hearts.",
+    )).toBe(true);
+    expect(unsafeCreativeDraft(
+      "tell me a weird joke",
+      "A sock developed existential dread because its twin kept finishing its sentences.",
+    )).toBe(true);
+    expect(unsafeCreativeDraft(
+      "tell me a weird joke",
+      "Imagine a sock developing existential dread because its twin keeps finishing its sentences.",
+    )).toBe(false);
+    expect(unsafeCreativeDraft(
+      "tell me something ordinary",
+      "Did you know crows remember faces?",
+    )).toBe(false);
+  });
+
+  it("does not speak creative planner drafts directly", async () => {
+    const store = new FakeStore();
+    const adviser = fakeAdviser();
+    const runtime = new PersonaMemoryRuntime({
+      ownerKey: "test",
+      store,
+      embedder: fakeEmbedder(),
+      adviser,
+      logger: new Logger("error"),
+      usePreparedDrafts: true,
+    });
+    await runtime.initialize();
+    runtime.prepare("tell me a genuinely weird little joke", []);
+    await vi.waitFor(() => {
+      expect(adviser.planTurn).toHaveBeenCalled();
+    });
+    expect(runtime.preparedDraftFor("tell me a genuinely weird little joke"))
+      .toBeUndefined();
+    await runtime.close();
+  });
+
   it("rejects a user fact inferred only from Audrey's own words", () => {
     expect(groundedMemoryCandidate(
       {
@@ -309,5 +364,50 @@ describe("OpenAI-compatible persona adviser", () => {
     };
     expect(body.response_format?.type).toBe("json_schema");
     expect(JSON.stringify(body)).not.toContain("private-test-key");
+  });
+
+  it("selects the first safe candidate from structured creative advice", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  candidates: [
+                    "A scarecrow was outstanding in his field.",
+                    "Imagine a sock developing existential dread because its twin keeps finishing its sentences.",
+                    "Picture this: a moonbeam files a noise complaint against the stars.",
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adviser = new OpenAiPersonaAdviser({
+      baseUrl: "https://adviser.invalid/v1",
+      apiKey: "private-test-key",
+      model: "test-model",
+      timeoutMs: 1_000,
+      logger: new Logger("error"),
+    });
+    const fragments: string[] = [];
+
+    await expect(adviser.advise(
+      "tell me a weird joke",
+      { memories: [], recentDialogue: [] },
+      (fragment) => fragments.push(fragment),
+    )).resolves.toContain("sock developing existential dread");
+    expect(fragments).toEqual([
+      "Imagine a sock developing existential dread because its twin keeps finishing its sentences.",
+    ]);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      response_format?: { type?: string };
+    };
+    expect(body.response_format?.type).toBe("json_schema");
   });
 });

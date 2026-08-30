@@ -45,6 +45,7 @@ export interface Config {
   personaMemoryDatabaseSsl: boolean;
   personaMemoryRetrievalLimit: number;
   personaMemoryRestoreTurns: number;
+  personaPreparedDraftsEnabled: boolean;
   personaEmbeddingBaseUrl?: string | undefined;
   personaEmbeddingModel?: string | undefined;
   personaEmbeddingDimensions: number;
@@ -54,6 +55,7 @@ export interface Config {
   personaAdviserModel?: string | undefined;
   personaMemoryAnalysisModel?: string | undefined;
   personaAdviserTimeoutMs: number;
+  personaAdviserHotTimeoutMs: number;
   sherpaAsrModelDir: string;
   sherpaTtsModelDir: string;
   sherpaAsrThreads: number;
@@ -318,12 +320,17 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     personaMemoryRetrievalLimit: positiveInteger(
       env,
       "PERSONA_MEMORY_RETRIEVAL_LIMIT",
-      6,
+      4,
     ),
     personaMemoryRestoreTurns: positiveInteger(
       env,
       "PERSONA_MEMORY_RESTORE_TURNS",
       12,
+    ),
+    personaPreparedDraftsEnabled: boolean(
+      env,
+      "PERSONA_PREPARED_DRAFTS_ENABLED",
+      false,
     ),
     personaEmbeddingBaseUrl: personaMemoryEnabled
       ? required(env, "PERSONA_EMBEDDING_BASE_URL")
@@ -355,6 +362,11 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
       env,
       "PERSONA_ADVISER_TIMEOUT_MS",
       30_000,
+    ),
+    personaAdviserHotTimeoutMs: positiveInteger(
+      env,
+      "PERSONA_ADVISER_HOT_TIMEOUT_MS",
+      6_000,
     ),
     sherpaAsrModelDir: required(env, "SHERPA_ASR_MODEL_DIR"),
     sherpaTtsModelDir: required(env, "SHERPA_TTS_MODEL_DIR"),

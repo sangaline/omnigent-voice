@@ -102,6 +102,7 @@ if (config.conversationMode === "persona") {
       backgroundModel: config.personaAdviserModel,
       retrievalLimit: config.personaMemoryRetrievalLimit,
       restoreTurns: config.personaMemoryRestoreTurns,
+      usePreparedDrafts: config.personaPreparedDraftsEnabled,
     });
   }
   conversation = new PersonaConversation({
@@ -112,6 +113,7 @@ if (config.conversationMode === "persona") {
     systemPrompt: config.personaSystemPrompt,
     maxResponseCharacters: config.personaMaxResponseCharacters,
     temperature: config.personaTemperature,
+    adviserHotTimeoutMs: config.personaAdviserHotTimeoutMs,
     memoryPolicy,
     ...(personaMemory ? { persistentMemory: personaMemory } : {}),
   });

@@ -12,6 +12,7 @@
     "dev": "tsx src/index.ts",
     "eval": "tsx src/eval.ts",
     "eval:scenarios": "tsx src/scenario-eval.ts",
+    "eval:persona": "tsx src/persona-scenario-eval.ts",
     "mcp": "node dist/mcp-server.js",
     "mcp:remote": "node dist/remote-mcp-server.js",
     "replay": "tsx src/replay.ts",

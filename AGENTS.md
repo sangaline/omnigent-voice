@@ -65,35 +65,61 @@ keys, or embeddings.
 
 The memory harness exposes only `ask_adviser` to Celeris. Routine conversation
 must answer directly. A deliberate escalation first speaks a short natural
-acknowledgment, then calls the configured conversational adviser and returns to
-Celeris for final Audrey-style wording. The adviser cannot perform external
-actions. `PERSONA_MEMORY_ANALYSIS_MODEL` and `PERSONA_ADVISER_MODEL` may differ;
+acknowledgment, then calls the configured conversational adviser. Adviser text
+is already generated as final Audrey speech and is segmented directly into TTS;
+do not reintroduce a lossy second Celeris rewrite. Creative adviser calls return
+three structured candidates and the harness selects the first candidate that
+passes novelty, grounding, and length checks. The original human transcript,
+not Celeris's tool-argument paraphrase, is authoritative for safety routing. The
+adviser cannot perform external actions. `PERSONA_MEMORY_ANALYSIS_MODEL` and
+`PERSONA_ADVISER_MODEL` may differ;
 an external provider receives the completed private dialogue and must be an
 explicit deployment choice. Local Ollama remains a valid OpenAI-compatible
 alternative. See `docs/PERSONA.md`.
 
 Partial ASR also starts one nonblocking DeepSeek turn-plan request once the
-utterance has enough content. If it finishes before endpoint, Celeris receives a
-small brief containing an ASR-aware interpretation, selected facts, response
-strategy, and up to two response ideas; if it is late, Celeris proceeds without
-it. Completed transcripts always override a brief based on partial speech.
-Direct creative requests such as jokes require `ask_adviser` only when no
-prepared response idea is ready. A continuous silent PCM gap keeps Discord's raw
-audio resource alive between the short hold line and delayed final answer.
+utterance has enough content. Pareto reasoning is explicitly disabled for these
+bounded jobs. The response puts a complete candidate first; creative requests
+add two alternatives. Closed JSON strings become usable before the rest of the
+object finishes. With `PERSONA_PREPARED_DRAFTS_ENABLED=true`, a safe prefix-
+related ordinary candidate can be spoken directly in zero endpoint model rounds.
+Creative and entertainment candidates remain planning context and always go
+through the bounded hot candidate race; never speak them directly as purported
+facts or shared experiences. The
+completed transcript always overrides partial speech: meaningful suffix growth
+restarts planning, corrections and repairs reject stale drafts, explicit open-
+loop anchors must survive, and local gates reject fake trivia, invented first-
+person experiences, familiar joke templates, and oversized creative output. If
+no safe candidate is ready, ordinary Celeris response remains immediate;
+explicit creative or distraction requests may use `ask_adviser` behind the hold
+line. That hot escalation races the adviser against a separate three-candidate
+Celeris fallback, applies the same safety gate to both, records the actual
+winner for provenance, and aborts the loser. `PERSONA_ADVISER_HOT_TIMEOUT_MS`
+defaults to 6,000 ms and bounds only this caller-facing race; the longer analysis
+timeout remains available for asynchronous memory work. A continuous silent PCM
+gap keeps Discord's raw audio resource alive between the short hold line and
+delayed final answer.
 
 Every extracted durable memory has a stable canonical key, declared source
 speaker, and an exact evidence quote that must appear in that speaker's turn.
 User facts cannot be grounded in Audrey's own claims. Repeated canonical keys
 supersede older active values, retrieval filters semantic matches below 0.40,
 and short-lived thoughts become eligible at confidence 0.55. The structured
-analysis cap is 768 tokens, turn plans 512, advice 192, and logs contain only
-aggregate duration/token usage.
+analysis cap is 768 tokens. Ordinary prepared replies use a 144-token budget;
+creative candidate pools and structured advice use 384. Logs contain only
+aggregate duration and token usage.
 
 The live prompt also receives verified runtime capabilities and a compact
-generation record after a turn that had background context or used the adviser.
-Audrey should not volunteer these internals, but must answer direct provenance
-or memory questions truthfully. Do not restore an absolute instruction to deny
-or hide mechanisms that were actually used.
+generation record after a turn that had background context, used a prepared
+draft, or used the adviser. Immediate reply-specific provenance questions use
+that typed record directly; capability questions remain distinct from “was a
+draft used?” questions. The exact DeepSeek Flash ASR alias is also rendered from
+verified runtime facts rather than lossy model recall. Audrey should not
+volunteer these internals, but must answer direct provenance or memory questions
+truthfully. Explicit current-turn corrections and retrieved emotional open loops
+produce required lexical anchors; Celeris fallback is buffered and retried once
+if it drops the anchor. Do not restore an absolute instruction to deny or hide
+mechanisms that were actually used.
 
 The bundled runtime models are the int8 0.6B Nemotron English streaming
 transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the

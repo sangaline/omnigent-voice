@@ -2482,3 +2482,60 @@ capability and per-turn provenance records replace blanket secrecy: Audrey
 should not volunteer internals, but a direct question must receive a truthful
 answer. Focused typecheck and 15 tests pass; live latency and behavioral
 scenario results remain the promotion gate.
+
+### 2026-08-30 — Persona prepared replies, provenance, and stateful scenarios
+
+The first stateful persona corpus turned the live observations into seven
+sanitized linked scenarios: memory truth, a garbled DeepSeek reference, creative
+generation plus provenance and criticism, grounded async memory, a correction
+overriding stale memory, emotional open-loop continuity plus distraction, and
+the speech-only sensory boundary. Every scenario instantiates the production
+`PersonaConversation`, memory runtime, streaming callbacks, chronological hot
+history, and ASR-style partial revisions. The coordinator and all real user
+sessions remain outside this suite.
+
+The initial four-of-seven pass showed that a good DeepSeek interpretation could
+still be lost in a second Celeris rewrite. The planner now streams a complete
+candidate first and, when enabled, the harness speaks a safe candidate directly.
+Ordinary DeepSeek draft availability measured about 1.4–2.3 seconds during
+simulated speech; once prepared, endpoint response measured 0–5 milliseconds.
+Ordinary Celeris fallbacks measured roughly 110–575 milliseconds. Direct typed
+answers for generation provenance and the verified DeepSeek Flash alias remove
+two recurring small-model truth failures.
+
+Single creative candidates were not robust: DeepSeek and Celeris both produced
+stock scarecrow or library jokes, alleged trivia, and fabricated first-person
+anecdotes. Creative planning and adviser fallback now generate three candidates;
+the harness rejects known templates, factual framing, invented experiences, and
+answers over fifty words. The original ASR transcript controls classification so
+a Celeris tool paraphrase cannot erase a word such as “distract.” Three linked
+creative runs passed after this change. Directly speaking creative planner
+drafts proved unsafe when a later probe presented purported animal trivia as a
+joke, so those requests now always use the bounded candidate race. Ordinary
+prepared replies retain the 0–5 millisecond endpoint path. Adviser fallbacks have an
+immediate hold line and usually completed in about 2–4 seconds, but one Pareto
+tail reached 19 seconds. A later hot-path experiment raced structured DeepSeek
+advice against a separate three-candidate Celeris pass and capped the adviser at
+six seconds. After adding the same grounding and novelty filter to both sides,
+the Celeris fallback won three of three linked creative runs in 402–956
+milliseconds total, including the initial tool-routing round; typed provenance
+correctly identified the fast background candidate. The slower asynchronous
+memory-analysis timeout remains separate.
+
+Explicit preference corrections and selected emotional open loops now expose a
+required lexical anchor to the hot path. A Celeris fallback is buffered and
+retried once if it omits that anchor. The stale espresso correction passed three
+of three runs at 291–489 milliseconds, and the presentation or distraction flow
+passed three of three linked runs after the anchor and creative-safety changes.
+Memory capability or provenance passed two of two linked runs. Promotion still
+requires one final full-corpus pass, clean typecheck and build, and the complete
+unit suite before deployment.
+
+The promotion run completed with all seven stateful scenarios passing and no
+invalid trials. Prepared ordinary replies completed in 0–2 milliseconds at the
+endpoint, ordinary Celeris replies in 147–487 milliseconds, and the bounded
+creative/distraction race in 613–684 milliseconds after its immediate hold
+line. Typecheck and build were clean, and all 180 unit and integration tests
+passed. The next corpus expansion should emphasize longitudinal friendship:
+subtle preference callbacks, resolving emotional open loops, sparse memory use,
+initiative without constant questions, and refusing invented shared history.

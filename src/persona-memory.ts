@@ -1,5 +1,8 @@
 import pg from "pg";
-import type { CelerisHistoryMessage } from "./celeris.js";
+import {
+  consumeCompletionStream,
+  type CelerisHistoryMessage,
+} from "./celeris.js";
 import { Logger } from "./log.js";
 
 const { Pool } = pg;
@@ -38,6 +41,7 @@ export interface PersonaTurnAnalysis {
 }
 
 export interface PersonaTurnPlan {
+  draftReply: string;
   interpretation: string;
   relevantFacts: string[];
   responseStrategy: string;
@@ -97,6 +101,8 @@ export interface PersonaAdviser {
       thought?: PersonaThoughtRecord | undefined;
       recentDialogue: readonly CelerisHistoryMessage[];
     },
+    onPartial?: ((plan: PersonaTurnPlan) => void) | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<PersonaTurnPlan>;
   advise(
     request: string,
@@ -104,6 +110,8 @@ export interface PersonaAdviser {
       memories: readonly PersonaMemoryRecord[];
       recentDialogue: readonly CelerisHistoryMessage[];
     },
+    onPartial?: ((fragment: string) => void) | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<string>;
 }
 
@@ -591,29 +599,29 @@ const turnPlanSchema = {
     type: "object",
     additionalProperties: false,
     properties: {
-      interpretation: { type: "string" },
-      relevant_facts: {
-        type: "array",
-        maxItems: 5,
-        items: { type: "string" },
-      },
-      response_strategy: { type: "string" },
-      response_ideas: {
-        type: "array",
-        maxItems: 2,
-        items: { type: "string" },
-      },
-      needs_adviser: { type: "boolean" },
-      should_clarify: { type: "boolean" },
+      draft_reply: { type: "string", maxLength: 300 },
+      alternate_reply_1: { type: "string", maxLength: 300 },
+      alternate_reply_2: { type: "string", maxLength: 300 },
     },
-    required: [
-      "interpretation",
-      "relevant_facts",
-      "response_strategy",
-      "response_ideas",
-      "needs_adviser",
-      "should_clarify",
-    ],
+    required: ["draft_reply", "alternate_reply_1", "alternate_reply_2"],
+  },
+} as const;
+
+const creativeAdviceSchema = {
+  name: "persona_creative_candidates",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      candidates: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: { type: "string", maxLength: 300 },
+      },
+    },
+    required: ["candidates"],
   },
 } as const;
 
@@ -641,6 +649,26 @@ const evidenceAppearsIn = (quote: string, source: string): boolean => {
   const normalizedQuote = normalizedMemoryText(quote);
   return normalizedQuote.length >= 2 && normalizedMemoryText(source).includes(normalizedQuote);
 };
+
+const partialJsonString = (content: string, key: string): string | undefined => {
+  const match = new RegExp(`"${key}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`).exec(
+    content,
+  );
+  if (!match?.[1]) return undefined;
+  try {
+    return cleanText(JSON.parse(match[1]), 400);
+  } catch {
+    return undefined;
+  }
+};
+
+const creativePersonaRequest = (input: string): boolean =>
+  /\b(?:joke|punchline|make me laugh|tell me a story|poem|roast|(?:distract|entertain|amuse) me|cheer me up)\b/i.test(
+    input,
+  );
+
+const jokePersonaRequest = (input: string): boolean =>
+  /\b(?:joke|punchline|make me laugh)\b/i.test(input);
 
 export const groundedMemoryCandidate = (
   raw: Record<string, unknown>,
@@ -740,30 +768,50 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
       thought?: PersonaThoughtRecord | undefined;
       recentDialogue: readonly CelerisHistoryMessage[];
     },
+    onPartial?: ((plan: PersonaTurnPlan) => void) | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<PersonaTurnPlan> {
+    const creativeRequest = creativePersonaRequest(partialInput);
+    let streamedContent = "";
+    let lastPartialInterpretation: string | undefined;
     const content = await this.complete(
       [
         {
           role: "system",
           content:
-            "You prepare a tiny just-in-time context brief for Audrey, a realistic spoken companion. " +
+            "You prepare one just-in-time reply for Audrey, a realistic spoken companion. " +
             "The current speech transcript may be partial or contain ASR substitutions. Infer its likely meaning from " +
             "the recent chronological dialogue, especially phonetically plausible names such as DeepSeek becoming deep sea. " +
-            "Select only facts that materially help this exact turn. Never invent visual activity, sensory access, actions, " +
-            "events, or relationship history. Response ideas are optional strong lines or concrete creative material, not " +
-            "a full generic answer. Mark needs_adviser only when a fresh deeper pass after the completed request is truly " +
-            "worth several seconds. Mark should_clarify only when no safe likely interpretation exists.",
+            "Return draft_reply plus two alternate reply fields. For an ordinary turn, put the strongest complete spoken " +
+            "reply in draft_reply and return empty alternate strings. For a joke, humor, story, poem, or roast request, " +
+            "write three genuinely distinct candidates, strongest first. Every nonempty reply must be in Audrey's natural voice, usually " +
+            "one or two concise sentences. Preserve the exact named person, event, preference, correction, or emotional " +
+            "open loop needed to demonstrate continuity. Trust the newest speech over stale memory. Fulfill direct requests " +
+            "inside the reply: if asked to distract or entertain, provide the distraction instead of asking the human for " +
+            "another task. A distraction reply must be a self-contained amusing observation, tiny story, or playful riff, " +
+            "not a question or conversation prompt. Resolve conversational shorthand before writing: when the human says something like today's " +
+            "the day, it happened, or that one, name the concrete event from recent dialogue or an open-loop memory. For " +
+            "example, if the established event is an interview, say interview rather than giving generic encouragement. " +
+            "Respond to nerves with specific continuity rather than a stock pep talk. For jokes or creative requests, " +
+            "write fresh material rather than a familiar joke template or internet chestnut. Keep fictional humor clearly " +
+            "fictional; never package an invented anecdote, study, historical event, or animal fact as true trivia. Never invent visual activity, sensory access, physical co-presence, shared possessions, external " +
+            "actions, events, or relationship history. If the likely meaning remains genuinely ambiguous, ask one brief " +
+            "clarifying question in draft_reply rather than guessing.",
         },
         {
           role: "user",
           content: JSON.stringify({
             partial_current_speech: partialInput,
             recent_dialogue: context.recentDialogue.slice(-16),
-            selected_memories: context.memories.map(({ kind, text, confidence }) => ({
+            selected_memories: context.memories.map(({ kind, canonicalKey, text, confidence }) => ({
               kind,
+              canonical_key: canonicalKey,
               text,
               confidence,
             })),
+            required_continuity_terms_if_relevant: openLoopContinuityAnchors(
+              context.memories,
+            ),
             ...(context.thought
               ? {
                   optional_background_thought: {
@@ -778,32 +826,60 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
               "Selected memories and private background suggestions can be injected into her turn context.",
               "She cannot perform external actions in persona mode.",
             ],
+            ...(creativeRequest
+              ? {
+                  creative_constraints: [
+                    "Under 45 spoken words.",
+                    "Clearly fictional, not alleged trivia or personal experience.",
+                    "No walks-into-a-bar-or-library setup, famous joke, or stock template.",
+                    "Prefer one specific surreal image and a clean turn or punchline.",
+                  ],
+                }
+              : {}),
           }),
         },
       ],
-      512,
+      creativeRequest ? 384 : 144,
       { type: "json_schema", json_schema: turnPlanSchema },
       this.options.model,
-      "turn_plan",
+      creativeRequest ? "turn_plan_creative" : "turn_plan",
+      (fragment) => {
+        streamedContent += fragment;
+        const draftReply = partialJsonString(streamedContent, "draft_reply");
+        const alternatives = [
+          partialJsonString(streamedContent, "alternate_reply_1"),
+          partialJsonString(streamedContent, "alternate_reply_2"),
+        ].filter((value): value is string => Boolean(value));
+        const partialKey = `${draftReply ?? ""}\n${alternatives.join("\n")}`;
+        if (!draftReply || partialKey === lastPartialInterpretation) return;
+        lastPartialInterpretation = partialKey;
+        onPartial?.({
+          draftReply,
+          interpretation: partialInput,
+          relevantFacts: [],
+          responseStrategy: "Use the prepared reply if the completed transcript still matches.",
+          responseIdeas: alternatives,
+          needsAdviser: false,
+          shouldClarify: false,
+        });
+      },
+      signal,
     );
     const parsed = JSON.parse(content) as Record<string, unknown>;
+    const draftReply = cleanText(parsed.draft_reply, 500) ?? "";
+    const responseIdeas = [parsed.alternate_reply_1, parsed.alternate_reply_2]
+      .flatMap((value) => {
+        const text = cleanText(value, 500);
+        return text ? [text] : [];
+      });
     return {
-      interpretation: cleanText(parsed.interpretation, 400) ?? partialInput,
-      relevantFacts: Array.isArray(parsed.relevant_facts)
-        ? parsed.relevant_facts.flatMap((value) => {
-            const text = cleanText(value, 300);
-            return text ? [text] : [];
-          }).slice(0, 5)
-        : [],
-      responseStrategy: cleanText(parsed.response_strategy, 400) ?? "Respond naturally.",
-      responseIdeas: Array.isArray(parsed.response_ideas)
-        ? parsed.response_ideas.flatMap((value) => {
-            const text = cleanText(value, 500);
-            return text ? [text] : [];
-          }).slice(0, 2)
-        : [],
-      needsAdviser: parsed.needs_adviser === true,
-      shouldClarify: parsed.should_clarify === true,
+      draftReply,
+      interpretation: partialInput,
+      relevantFacts: [],
+      responseStrategy: "Use the prepared reply if the completed transcript still matches.",
+      responseIdeas,
+      needsAdviser: false,
+      shouldClarify: false,
     };
   }
 
@@ -813,15 +889,24 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
       memories: readonly PersonaMemoryRecord[];
       recentDialogue: readonly CelerisHistoryMessage[];
     },
+    onPartial?: ((fragment: string) => void) | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<string> {
-    return this.complete(
-      [
+    const creativeRequest = creativePersonaRequest(request);
+    const messages: Array<{ role: "system" | "user"; content: string }> = [
         {
           role: "system",
           content:
             "You are the private creative adviser for Audrey, a playful, perceptive spoken companion. " +
-            "Produce one strong, concise response idea grounded only in the request and supplied context. " +
-            "Do not claim actions or memories that are absent. Return plain spoken wording with no preamble or analysis.",
+            "For humor or another creative request, avoid famous jokes, familiar internet chestnuts, generic templates, " +
+            "and obvious puns unless the human asks for them. For a joke or other explicit creative request, write exactly " +
+            "three genuinely distinct candidates under forty-five spoken words each so the harness can reject weak material. " +
+            "Otherwise write one strongest, genuinely fresh, concise final reply " +
+            "with specific imagery in Audrey's natural spoken voice. For emotional or factual reflection, be precise. " +
+            "For a direct joke request, start every candidate with 'Imagine' or 'Picture this' so invented material is unmistakably fictional. " +
+            "Keep fictional humor clearly fictional; never present an invented anecdote, study, historical event, or animal " +
+            "fact as true trivia. Do not claim actions, sensory access, or memories that are absent. Return only the complete words Audrey " +
+            "should speak, with no alternatives, preamble, or analysis.",
         },
         {
           role: "user",
@@ -831,11 +916,38 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
             recent_dialogue: context.recentDialogue.slice(-12),
           }),
         },
-      ],
+      ];
+    if (creativeRequest) {
+      const content = await this.complete(
+        messages,
+        384,
+        { type: "json_schema", json_schema: creativeAdviceSchema },
+        this.options.model,
+        "advice",
+        undefined,
+        signal,
+      );
+      const parsed = JSON.parse(content) as { candidates?: unknown };
+      const candidates = Array.isArray(parsed.candidates)
+        ? parsed.candidates.flatMap((value) => {
+            const text = cleanText(value, 500);
+            return text ? [text] : [];
+          })
+        : [];
+      const selected = candidates.find((candidate) =>
+        !unsafeCreativeDraft(request, candidate));
+      if (!selected) throw new Error("Persona adviser returned no safe creative candidate");
+      onPartial?.(selected);
+      return selected;
+    }
+    return this.complete(
+      messages,
       192,
       undefined,
       this.options.model,
       "advice",
+      onPartial,
+      signal,
     );
   }
 
@@ -845,6 +957,8 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
     responseFormat?: Record<string, unknown>,
     model = this.options.model,
     phase = "unknown",
+    onContentDelta?: ((fragment: string) => void) | undefined,
+    externalSignal?: AbortSignal | undefined,
   ): Promise<string> {
     const started = performance.now();
     const controller = new AbortController();
@@ -863,15 +977,43 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
           body: JSON.stringify({
             model,
             messages,
-            temperature: 0,
+            temperature: phase === "advice" || phase === "turn_plan_creative" ? 0.7 : 0,
             max_completion_tokens: maxTokens,
-            reasoning_effort: "low",
+            // Pareto's OpenAI-compatible DeepSeek endpoint accepts `none` to
+            // disable the otherwise expensive reasoning pass. These bounded
+            // companion jobs need low latency and explicit output instead.
+            reasoning_effort: "none",
             ...(responseFormat ? { response_format: responseFormat } : {}),
+            ...(onContentDelta
+              ? { stream: true, stream_options: { include_usage: true } }
+              : {}),
           }),
-          signal: controller.signal,
+          signal: externalSignal
+            ? AbortSignal.any([controller.signal, externalSignal])
+            : controller.signal,
         },
       );
       if (!response.ok) throw new Error(`Persona adviser returned HTTP ${response.status}`);
+      if (
+        onContentDelta &&
+        response.headers.get("content-type")?.toLocaleLowerCase().includes(
+          "text/event-stream",
+        )
+      ) {
+        const streamed = await consumeCompletionStream(response, onContentDelta);
+        const content = streamed.message.content;
+        if (typeof content !== "string" || !content.trim()) {
+          throw new Error("Persona adviser returned no content");
+        }
+        this.options.logger.info("persona.adviser.usage", {
+          phase,
+          durationMs: Math.round(performance.now() - started),
+          promptTokens: streamed.promptTokens,
+          completionTokens: streamed.completionTokens,
+          streamed: true,
+        });
+        return content.trim();
+      }
       const payload = (await response.json()) as {
         choices?: Array<{ message?: { content?: unknown } }>;
         usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
@@ -880,6 +1022,7 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
       if (typeof content !== "string" || !content.trim()) {
         throw new Error("Persona adviser returned no content");
       }
+      onContentDelta?.(content);
       this.options.logger.info("persona.adviser.usage", {
         phase,
         durationMs: Math.round(performance.now() - started),
@@ -891,6 +1034,7 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
           typeof payload.usage?.completion_tokens === "number"
             ? payload.usage.completion_tokens
             : undefined,
+        streamed: false,
       });
       return content.trim();
     } finally {
@@ -908,6 +1052,8 @@ export interface PersonaMemoryRuntimeOptions {
   backgroundModel?: string | undefined;
   retrievalLimit?: number | undefined;
   restoreTurns?: number | undefined;
+  analyzeCompletedTurns?: boolean | undefined;
+  usePreparedDrafts?: boolean | undefined;
 }
 
 interface PreparedMemory {
@@ -919,12 +1065,46 @@ interface PreparedTurnPlan {
   normalizedQuery: string;
   sourceInput: string;
   plan: PersonaTurnPlan;
+  continuityAnchors: string[];
+  draftComplete: boolean;
+  complete: boolean;
 }
 
 const relatedQuery = (prepared: string, current: string): boolean =>
   prepared.length >= 8 &&
   current.length >= 8 &&
   (prepared.startsWith(current) || current.startsWith(prepared));
+
+export const unsafeCreativeDraft = (input: string, draft: string): boolean => {
+  if (!creativePersonaRequest(input)) {
+    return false;
+  }
+  const words = draft.trim().split(/\s+/).filter(Boolean).length;
+  return words > 50 ||
+    (jokePersonaRequest(input) &&
+      !/^(?:okay[,.]?\s+)?(?:imagine\b|picture this\b)/i.test(draft.trim())) ||
+    /\b(?:weird|fun|strange|random)\s+fact\s*:/i.test(draft) ||
+    /\b(?:why did|what do you call|here(?:'s| is) (?:a )?(?:weird |fun |strange )?fact|i once(?: read| watched| saw| heard)?|i (?:watched|saw|heard)|my pet|when i was|did you know|scientists?|researchers?|first coined|in (?:18|19|20)\d{2}|species of|biologically|theoretically|scarecrow|outstanding in (?:his|her|their|the) field|knock knock|cross(?:ed|es|ing)? the road|books? on paranoia|(?:a|an|two)\s+[^.!?]{0,32}\s+walk(?:s|ed)? into (?:a\s+)?(?:bar|library))\b/i.test(
+      draft,
+    );
+};
+
+const openLoopContinuityAnchors = (
+  memories: readonly PersonaMemoryRecord[],
+): string[] => Array.from(new Set(memories.flatMap((memory) => {
+  if (memory.kind !== "open_loop") return [];
+  const suffix = memory.canonicalKey.replace(
+    /^user[.:-]+open(?:[-_.:]?loop)?[.:-]+/i,
+    "",
+  );
+  const candidate = suffix === memory.canonicalKey
+    ? memory.canonicalKey.split(/[.:-]+/).at(-1) ?? ""
+    : suffix;
+  return candidate
+    .split(/[._:-]+/)
+    .map((term) => term.trim().toLocaleLowerCase())
+    .filter((term) => term.length >= 4 && !["user", "open", "loop"].includes(term));
+})));
 
 export class PersonaMemoryRuntime {
   private prepared: PreparedMemory | undefined;
@@ -933,6 +1113,7 @@ export class PersonaMemoryRuntime {
   private prepareGeneration = 0;
   private planGeneration = 0;
   private prepareController: AbortController | undefined;
+  private planController: AbortController | undefined;
   private backgroundTail: Promise<void> = Promise.resolve();
   private readonly retrievalLimit: number;
   private readonly restoreTurns: number;
@@ -966,7 +1147,6 @@ export class PersonaMemoryRuntime {
     const query = input.replace(/\s+/g, " ").trim();
     const normalizedQuery = normalizedMemoryText(query);
     if (normalizedQuery.length < 8) return;
-    this.preparePlan(query, normalizedQuery, recentDialogue);
     const generation = ++this.prepareGeneration;
     this.prepareController?.abort();
     const controller = new AbortController();
@@ -985,6 +1165,7 @@ export class PersonaMemoryRuntime {
       .then((selection) => {
         if (generation !== this.prepareGeneration || controller.signal.aborted) return;
         this.prepared = { normalizedQuery, selection };
+        this.preparePlan(query, normalizedQuery, recentDialogue, selection);
         this.options.logger.info("persona.memory.prefetch.ready", {
           durationMs: Math.round(performance.now() - started),
           memories: selection.memories.length,
@@ -1000,7 +1181,12 @@ export class PersonaMemoryRuntime {
   public contextFor(input: string): string | undefined {
     const normalizedQuery = normalizedMemoryText(input);
     const prepared = this.prepared;
-    this.prepare(input);
+    // Endpoint freezes the context. Work that has not produced even a partial
+    // brief cannot help this response and should not keep spending tokens.
+    this.planController?.abort();
+    this.planController = undefined;
+    this.planningQuery = undefined;
+    this.planGeneration += 1;
     const memoryReady = Boolean(
       prepared && relatedQuery(prepared.normalizedQuery, normalizedQuery),
     );
@@ -1036,6 +1222,13 @@ export class PersonaMemoryRuntime {
         confidence: memory.confidence,
         recorded_at: memory.createdAt,
       })),
+      ...(openLoopContinuityAnchors(selection.memories).length > 0
+        ? {
+            required_continuity_anchors: openLoopContinuityAnchors(
+              selection.memories,
+            ),
+          }
+        : {}),
       ...(selection.thought
         ? {
             optional_private_thought: {
@@ -1052,6 +1245,8 @@ export class PersonaMemoryRuntime {
         ? {
             background_turn_brief: {
               based_on_partial_speech: this.preparedPlan.sourceInput,
+              draft_reply: this.preparedPlan.plan.draftReply,
+              complete: this.preparedPlan.complete,
               interpretation: this.preparedPlan.plan.interpretation,
               relevant_facts: this.preparedPlan.plan.relevantFacts,
               response_strategy: this.preparedPlan.plan.responseStrategy,
@@ -1069,31 +1264,108 @@ export class PersonaMemoryRuntime {
     return Boolean(
       this.preparedPlan &&
       relatedQuery(this.preparedPlan.normalizedQuery, normalizedQuery) &&
-      this.preparedPlan.plan.responseIdeas.length > 0,
+      (Boolean(this.preparedPlan.plan.draftReply) ||
+        this.preparedPlan.plan.responseIdeas.length > 0),
     );
   }
 
+  public continuityAnchorFor(input: string): string | undefined {
+    const normalizedQuery = normalizedMemoryText(input);
+    const prepared = this.prepared;
+    if (!prepared || !relatedQuery(prepared.normalizedQuery, normalizedQuery)) {
+      return undefined;
+    }
+    return openLoopContinuityAnchors(prepared.selection.memories)[0];
+  }
+
+  public preparedDraftFor(input: string): string | undefined {
+    if (!this.options.usePreparedDrafts) return undefined;
+    // Creative drafts are useful preparation, but they are too easy for a fast
+    // planner to phrase as purported trivia or shared experience. Keep them as
+    // context for the bounded candidate race instead of speaking them directly.
+    if (creativePersonaRequest(input)) return undefined;
+    const prepared = this.preparedPlan;
+    if (!prepared?.draftComplete || !prepared.plan.draftReply) return undefined;
+    if (prepared.plan.needsAdviser || prepared.plan.shouldClarify) return undefined;
+    const candidate = [prepared.plan.draftReply, ...prepared.plan.responseIdeas].find(
+      (draft) =>
+        Boolean(draft) &&
+        !unsafeCreativeDraft(input, draft) &&
+        !(
+          /\b(?:(?:distract|entertain|amuse) me|cheer me up)\b/i.test(input) &&
+          draft.includes("?")
+        ) &&
+        (prepared.continuityAnchors.length === 0 ||
+          prepared.continuityAnchors.some((anchor) =>
+            normalizedMemoryText(draft).includes(anchor))),
+    );
+    if (!candidate) return undefined;
+    const current = normalizedMemoryText(input);
+    const source = prepared.normalizedQuery;
+    if (!relatedQuery(source, current)) return undefined;
+    const coverage = Math.min(source.length, current.length) /
+      Math.max(source.length, current.length);
+    if (coverage < 0.3) return undefined;
+    const suffix = current.startsWith(source) ? current.slice(source.length).trim() : "";
+    if (
+      suffix &&
+      /\b(?:actually|but|instead|no wait|wait|don t|do not|just|please|tell me|give me|can you|could you)\b/i.test(
+        suffix,
+      )
+    ) {
+      return undefined;
+    }
+    return candidate;
+  }
+
   public runtimeContext(): string {
+    const backgroundModel = this.options.backgroundModel;
     return JSON.stringify({
       durable_memory_enabled: true,
       background_context_planning_enabled: true,
       post_turn_memory_reflection_enabled: true,
       creative_adviser_available: true,
-      ...(this.options.backgroundModel
-        ? { background_model: this.options.backgroundModel }
+      ...(backgroundModel
+        ? { background_model: backgroundModel }
+        : {}),
+      ...(backgroundModel?.toLocaleLowerCase().includes("deepseek")
+        ? {
+            likely_speech_aliases: {
+              "deep sea flash": "DeepSeek Flash",
+              "deep seek flash": "DeepSeek Flash",
+            },
+          }
         : {}),
       external_actions_available: false,
       visual_or_sensory_access: false,
     });
   }
 
+  public speechReferenceHint(input: string): string | undefined {
+    if (
+      this.options.backgroundModel?.toLocaleLowerCase().includes("deepseek") &&
+      /\bdeep\s+(?:sea|seek)(?:\s+flash)?\b/i.test(input)
+    ) {
+      return (
+        "The ASR phrase 'deep sea flash' or 'deep seek flash' in this turn refers to the verified " +
+        "background component DeepSeek Flash. Use that exact name. It reads the live partial transcript together " +
+        "with recent dialogue and selected memory, then prepares a candidate reply or useful context while the " +
+        "human is still speaking. It does not pre-read unknown future topics."
+      );
+    }
+    return undefined;
+  }
+
   public rememberTurn(user: string, assistant: string): void {
     this.prepareController?.abort();
+    this.planController?.abort();
     this.prepareController = undefined;
+    this.planController = undefined;
     this.prepared = undefined;
     this.preparedPlan = undefined;
     this.planningQuery = undefined;
     this.planGeneration += 1;
+    if (this.options.analyzeCompletedTurns === false) return;
     this.backgroundTail = this.backgroundTail
       .then(() => this.processTurn(user, assistant))
       .catch((error) => this.options.logger.error("persona.memory.turn.failed", error));
@@ -1102,6 +1374,8 @@ export class PersonaMemoryRuntime {
   public async askAdviser(
     request: string,
     recentDialogue: readonly CelerisHistoryMessage[],
+    onPartial?: ((fragment: string) => void) | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<string> {
     let memories: PersonaMemoryRecord[] = [];
     try {
@@ -1116,11 +1390,17 @@ export class PersonaMemoryRuntime {
     } catch (error) {
       this.options.logger.error("persona.adviser.memory.failed", error);
     }
-    return this.options.adviser.advise(request, { memories, recentDialogue });
+    return this.options.adviser.advise(
+      request,
+      { memories, recentDialogue },
+      onPartial,
+      signal,
+    );
   }
 
   public async close(): Promise<void> {
     this.prepareController?.abort();
+    this.planController?.abort();
     await this.backgroundTail;
     await this.options.store.close();
   }
@@ -1162,36 +1442,65 @@ export class PersonaMemoryRuntime {
     input: string,
     normalizedQuery: string,
     recentDialogue: readonly CelerisHistoryMessage[],
+    selection: PersonaMemorySelection,
   ): void {
     const words = normalizedQuery.split(" ").filter(Boolean).length;
-    if (normalizedQuery.length < 20 || words < 4) return;
-    if (this.planningQuery && relatedQuery(this.planningQuery, normalizedQuery)) return;
+    if (normalizedQuery.length < 14 || words < 3) return;
+    if (
+      this.planningQuery &&
+      relatedQuery(this.planningQuery, normalizedQuery) &&
+      normalizedQuery.length < this.planningQuery.length + 24
+    ) {
+      return;
+    }
     if (
       this.preparedPlan &&
       relatedQuery(this.preparedPlan.normalizedQuery, normalizedQuery) &&
-      normalizedQuery.length < this.preparedPlan.normalizedQuery.length + 48
+      normalizedQuery.length < this.preparedPlan.normalizedQuery.length + 24
     ) {
       return;
     }
 
     const generation = ++this.planGeneration;
+    this.planController?.abort();
+    const controller = new AbortController();
+    this.planController = controller;
     this.planningQuery = normalizedQuery;
-    const selected = this.prepared && relatedQuery(
-      this.prepared.normalizedQuery,
-      normalizedQuery,
-    )
-      ? this.prepared.selection
-      : { memories: [] };
     const started = performance.now();
+    const continuityAnchors = openLoopContinuityAnchors(selection.memories);
+    let partialLogged = false;
     void this.options.adviser
       .planTurn(input, {
-        memories: selected.memories,
-        ...(selected.thought ? { thought: selected.thought } : {}),
+        memories: selection.memories,
+        ...(selection.thought ? { thought: selection.thought } : {}),
         recentDialogue,
-      })
+      }, (plan) => {
+        if (generation !== this.planGeneration) return;
+        this.preparedPlan = {
+          normalizedQuery,
+          sourceInput: input,
+          plan,
+          continuityAnchors,
+          draftComplete: Boolean(plan.draftReply),
+          complete: false,
+        };
+        if (!partialLogged) {
+          partialLogged = true;
+          this.options.logger.info("persona.turn_plan.partial_ready", {
+            durationMs: Math.round(performance.now() - started),
+          });
+        }
+      }, controller.signal)
       .then((plan) => {
         if (generation !== this.planGeneration) return;
-        this.preparedPlan = { normalizedQuery, sourceInput: input, plan };
+        this.preparedPlan = {
+          normalizedQuery,
+          sourceInput: input,
+          plan,
+          continuityAnchors,
+          draftComplete: Boolean(plan.draftReply),
+          complete: true,
+        };
         this.options.logger.info("persona.turn_plan.ready", {
           durationMs: Math.round(performance.now() - started),
           responseIdeas: plan.responseIdeas.length,
@@ -1200,11 +1509,15 @@ export class PersonaMemoryRuntime {
         });
       })
       .catch((error) => {
+        if (controller.signal.aborted) return;
         if (generation !== this.planGeneration) return;
         this.options.logger.error("persona.turn_plan.failed", error);
       })
       .finally(() => {
-        if (generation === this.planGeneration) this.planningQuery = undefined;
+        if (generation === this.planGeneration) {
+          this.planningQuery = undefined;
+          if (this.planController === controller) this.planController = undefined;
+        }
       });
   }
 }

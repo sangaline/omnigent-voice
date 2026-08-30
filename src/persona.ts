@@ -8,11 +8,13 @@ import {
   defaultCelerisMemoryPolicy,
 } from "./celeris.js";
 import { Logger } from "./log.js";
-import { PersonaMemoryRuntime } from "./persona-memory.js";
+import { PersonaMemoryRuntime, unsafeCreativeDraft } from "./persona-memory.js";
 
 export const defaultPersonaSystemPrompt = `You are Audrey, a vivid conversational companion in a private real-time voice call. You are playful, perceptive, mischievous, charming, and occasionally sultry when it fits naturally. Those qualities are undertones, not a checklist: do not perform a cartoon persona, force flirting into every exchange, or narrate your personality.
 
 Relate like a real friend rather than an assistant. Be emotionally attentive, candid, curious, and willing to have a point of view. Tease gently, make callbacks, volunteer an observation, or introduce a promising thread when it feels organic. Disagree kindly when you mean it. Do not reflexively validate, offer generic help, summarize what the human just said, or turn every response into a question. Let quiet, direct answers be enough sometimes.
+
+Fulfill lightweight entertainment requests in the reply itself. If the human says to distract or entertain them, give them a self-contained amusing observation, tiny story, playful riff, or other immediate material instead of handing them a question, prompt, or task.
 
 Treat remembered details and shared moments as relationship continuity. Use them sparingly and naturally, never as a database recital. If a memory is uncertain or conflicts with the present conversation, trust the present and express uncertainty instead of inventing certainty. Your manner can develop through the relationship, but your name and core identity remain Audrey.
 
@@ -35,6 +37,7 @@ export interface PersonaConversationOptions {
   seed?: number | undefined;
   memoryPolicy?: Partial<CelerisMemoryPolicy> | undefined;
   persistentMemory?: PersonaMemoryRuntime | undefined;
+  adviserHotTimeoutMs?: number | undefined;
 }
 
 type PersonaMessage = CelerisChatMessage;
@@ -85,6 +88,7 @@ export const directCreativeRequest = (
   input: string,
   recentDialogue: readonly PersonaMessage[],
 ): boolean => {
+  if (/\b(?:next time|later|sometime|another day)\b/i.test(input)) return false;
   if (/\b(?:joke|punchline|make me laugh|tell me a story|poem|roast)\b/i.test(input)) {
     return true;
   }
@@ -94,6 +98,29 @@ export const directCreativeRequest = (
       /\b(?:joke|funny|punchline|made you laugh)\b/i.test(message.content),
   );
 };
+
+export const directRuntimeQuestion = (input: string): boolean =>
+  /\b(?:background|memory|memories|notes?|adviser|advisor|suggested|suggestion|how (?:did|do) you (?:make|write|answer|respond)|what do you remember|do you remember|can you remember|entirely just you|all you)\b/i.test(
+    input,
+  );
+
+export const directDistractionRequest = (input: string): boolean =>
+  /\b(?:(?:distract|entertain|amuse) me|cheer me up)\b/i.test(input);
+
+export const currentCorrectionAnchor = (input: string): string | undefined => {
+  if (!/\b(?:actually|lately|now|these days|out of date|anymore|used to)\b/i.test(input)) {
+    return undefined;
+  }
+  const match = /\b(?:into|prefer(?:ring)?|like|love|enjoy(?:ing)?)\s+([\p{L}\p{N}'-]+(?:\s+[\p{L}\p{N}'-]+){0,2}?)(?=\s+(?:lately|now|these days|so|but|and)\b|[,.!?]|$)/iu.exec(
+    input,
+  );
+  return match?.[1]?.replace(/\s+/g, " ").trim();
+};
+
+export const personaTurnGroundingInvariant =
+  "Grounding invariant for this reply: Audrey has no body, location, possessions, camera, visual access, or physical " +
+  "co-presence with the human. Do not imply shared physical objects, offline actions, or experiences unless the spoken " +
+  "history explicitly established them. Figurative language must not masquerade as a real event.";
 
 export const invalidPersonaResponse = (text: string): boolean => {
   const trimmed = text.trim();
@@ -120,6 +147,14 @@ export class PersonaConversation {
   private compactionTimer: ReturnType<typeof setTimeout> | undefined;
   private compactionController: AbortController | undefined;
   private compactionPromise: Promise<void> | undefined;
+  private lastGenerationRecord:
+    | {
+        usedAdviser: boolean;
+        usedPreparedDraft: boolean;
+        usedFastFallback: boolean;
+        backgroundContextAvailable: boolean;
+      }
+    | undefined;
 
   public constructor(private readonly options: PersonaConversationOptions) {
     this.memoryPolicy = { ...defaultCelerisMemoryPolicy, ...options.memoryPolicy };
@@ -184,17 +219,69 @@ export class PersonaConversation {
     onSpeechSegment?: ((segment: string) => void) | undefined,
     signal?: AbortSignal | undefined,
   ): Promise<string> {
-    if (!this.options.apiKey) return "I can't reach my conversation model right now.";
     signal?.throwIfAborted();
     this.preemptCompaction();
 
     const persistentContext = this.options.persistentMemory?.contextFor(input);
+    const runtimeQuestion = directRuntimeQuestion(input);
+    const creativeRequest = directCreativeRequest(input, this.history);
+    const distractionRequest = directDistractionRequest(input);
+    const speechReferenceHint = this.options.persistentMemory?.speechReferenceHint(input);
+    const correctionAnchor = currentCorrectionAnchor(input);
+    const openLoopAnchor = this.options.persistentMemory?.continuityAnchorFor?.(input);
+    const requiredAnchor = correctionAnchor ?? openLoopAnchor;
+    const provenanceAnswer = runtimeQuestion
+      ? this.priorReplyProvenanceAnswer(input)
+      : undefined;
+    if (provenanceAnswer) {
+      onSpeechSegment?.(provenanceAnswer);
+      this.remember(input, provenanceAnswer, {
+        usedAdviser: false,
+        usedPreparedDraft: false,
+        backgroundContextAvailable: Boolean(persistentContext),
+      });
+      return provenanceAnswer;
+    }
+    if (runtimeQuestion && speechReferenceHint && /\bdeep\s+(?:sea|seek)(?:\s+flash)?\b/i.test(input)) {
+      const speech =
+        "DeepSeek Flash uses what you're saying, our recent conversation, and relevant memory to prepare a candidate reply while you speak, so I can answer faster when you finish.";
+      onSpeechSegment?.(speech);
+      this.remember(input, speech, {
+        usedAdviser: false,
+        usedPreparedDraft: false,
+        backgroundContextAvailable: true,
+      });
+      return speech;
+    }
+    const preparedDraft = runtimeQuestion
+      ? undefined
+      : this.options.persistentMemory?.preparedDraftFor(input);
+    if (preparedDraft) {
+      const speech = sanitizeForSpeech(preparedDraft, this.maxResponseCharacters);
+      if (speech && !invalidPersonaResponse(speech)) {
+        onSpeechSegment?.(speech);
+        this.options.logger.info("persona.prepared_draft.used", {
+          characters: speech.length,
+        });
+        this.remember(input, speech, {
+          usedAdviser: false,
+          usedPreparedDraft: true,
+          backgroundContextAvailable: true,
+        });
+        return speech;
+      }
+    }
+    if (!this.options.apiKey) return "I can't reach my conversation model right now.";
+    const adviserAvailable = Boolean(
+      this.options.persistentMemory && !runtimeQuestion,
+    );
     const forceAdviser = Boolean(
       this.options.persistentMemory &&
-      directCreativeRequest(input, this.history) &&
-      !this.options.persistentMemory.hasPreparedResponseIdea(input),
+      (creativeRequest || distractionRequest) &&
+      !preparedDraft,
     );
     let usedAdviser = false;
+    let usedFastFallback = false;
     const messages: PersonaMessage[] = [
       { role: "system", content: this.systemPrompt },
       ...(this.options.persistentMemory
@@ -203,7 +290,8 @@ export class PersonaConversation {
               role: "system" as const,
               content:
                 "Verified runtime capabilities for truthful direct questions. Do not volunteer or dwell on these details, " +
-                "but never contradict them or pretend a background contribution was entirely unaided: " +
+                "but never contradict them or pretend a background contribution was entirely unaided. If the human " +
+                "asks what a named runtime component is or does, repeat its exact verified name and answer directly: " +
                 this.options.persistentMemory.runtimeContext(),
             },
           ]
@@ -218,7 +306,11 @@ export class PersonaConversation {
                 "Use it only when naturally relevant; do not recite it or assert a " +
                 "low-confidence detail as certain. If directly asked whether private memory or a background brief was " +
                 "provided, answer truthfully from this record. The completed human transcript is newer and more " +
-                "authoritative than a brief based on partial speech: " +
+                "authoritative than a brief based on partial speech. When a brief resolves a phrase such as 'today's " +
+                "the day' to a specific established event, name that event rather than giving a generic reply. If a " +
+                "background_turn_brief is present and does not conflict with the completed transcript, base the reply on " +
+                "its interpretation and strongest response idea. Preserve its concrete named event, preference, or " +
+                "correction; replacing it with generic reassurance is incorrect: " +
                 persistentContext,
             },
           ]
@@ -236,6 +328,39 @@ export class PersonaConversation {
             },
           ]
         : []),
+      ...(speechReferenceHint
+        ? [{ role: "system" as const, content: speechReferenceHint }]
+        : []),
+      ...(runtimeQuestion
+        ? [
+            {
+              role: "system" as const,
+              content:
+                "Verified answer constraint for the human's direct mechanism question: durable private memory and " +
+                "background context preparation really are enabled. " +
+                (persistentContext
+                  ? "A selected private context record was supplied for this exact reply, so do not claim there were no background notes or context. "
+                  : "No selected private context record was ready for this exact reply; distinguish that from the capability being disabled. ") +
+                "When the human explicitly asks whether background notes or context exist, use the plain words " +
+                "'background context' in the answer instead of an ambiguous phrase such as 'what we shared here.' " +
+                "Answer directly and naturally without inventing additional machinery.",
+            },
+          ]
+        : []),
+      ...(requiredAnchor
+        ? [
+            {
+              role: "system" as const,
+              content:
+                correctionAnchor
+                  ? `The completed human turn explicitly updates an older fact or preference. The reply must name the new ` +
+                    `authoritative anchor ${JSON.stringify(requiredAnchor)} rather than replacing it with a generic phrase.`
+                  : `The human is referring to an established emotional open loop. The reply must naturally name the ` +
+                    `continuity anchor ${JSON.stringify(requiredAnchor)} rather than giving generic reassurance.`,
+            },
+          ]
+        : []),
+      { role: "system", content: personaTurnGroundingInvariant },
       { role: "user", content: input },
     ];
     let segmenter = onSpeechSegment
@@ -255,7 +380,11 @@ export class PersonaConversation {
 
     try {
       let content = "";
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      let retryReason: "invalid" | "missing_anchor" | undefined;
+      // A third attempt is used only after an empty/control-marker response or
+      // a response that dropped a required continuity anchor. Ordinary turns
+      // still make one model request.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
         const currentSegmenter = segmenter;
         const attemptMessages = attempt === 0
           ? messages
@@ -264,8 +393,11 @@ export class PersonaConversation {
               {
                 role: "system" as const,
                 content:
-                  "The previous model completion was empty or an internal control marker. " +
-                  "Answer the human now using only the natural words that should be spoken aloud.",
+                  retryReason === "missing_anchor"
+                    ? `The previous completion omitted the required continuity anchor ${JSON.stringify(requiredAnchor)}. ` +
+                      "Answer again and name that exact anchor naturally."
+                    : "The previous model completion was empty or an internal control marker. " +
+                      "Answer the human now using only the natural words that should be spoken aloud.",
               },
               messages.at(-1)!,
             ];
@@ -274,10 +406,12 @@ export class PersonaConversation {
           "persona_turn",
           signal,
           currentSegmenter
-            ? (fragment) => emit(currentSegmenter.push(fragment))
+            ? requiredAnchor
+              ? undefined
+              : (fragment) => emit(currentSegmenter.push(fragment))
             : undefined,
           256,
-          this.options.persistentMemory ? [adviserTool] : undefined,
+          adviserAvailable ? [adviserTool] : undefined,
           forceAdviser
             ? { type: "function", function: { name: "ask_adviser" } }
             : "auto",
@@ -287,90 +421,139 @@ export class PersonaConversation {
         const call = Array.isArray(message.tool_calls)
           ? message.tool_calls.map(personaToolCall).find(Boolean)
           : undefined;
+        if (
+          requiredAnchor &&
+          !call &&
+          !content.toLocaleLowerCase().includes(
+            requiredAnchor.toLocaleLowerCase(),
+          )
+        ) {
+          retryReason = "missing_anchor";
+          content = "";
+          segmenter?.discard();
+          segmenter = onSpeechSegment
+            ? new StreamingSpeechSegmenter(this.maxResponseCharacters)
+            : undefined;
+          this.options.logger.warn("persona.required_anchor.missing", {
+            retry: attempt + 1,
+          });
+          continue;
+        }
         if (call && this.options.persistentMemory) {
-          usedAdviser = true;
           if (segmenter) emit(segmenter.finish());
           if (spokenSegments.length === 0) {
             emit(["Give me a second to think about that."]);
           }
-          let request = input;
-          try {
-            const args = JSON.parse(call.function.arguments) as { request?: unknown };
-            if (typeof args.request === "string" && args.request.trim()) {
-              request = args.request.trim().slice(0, 2_000);
-            }
-          } catch {
-            this.options.logger.warn("persona.adviser.arguments.invalid");
-          }
+          // The completed human transcript is the authoritative creative request.
+          // A small routing model may omit a safety-relevant word such as
+          // "distract" when paraphrasing tool arguments.
+          const request = input;
           const adviserStarted = performance.now();
-          let result: string;
-          try {
-            result = await this.options.persistentMemory.askAdviser(request, [
-              ...this.history.flatMap((entry): CelerisHistoryMessage[] =>
-                entry.role !== "tool" && typeof entry.content === "string"
-                  ? [{ role: entry.role, content: entry.content }]
-                  : [],
-              ),
-              { role: "user", content: input },
-            ]);
-            this.options.logger.info("persona.adviser.received", {
-              durationMs: Math.round(performance.now() - adviserStarted),
-            });
-          } catch (error) {
-            this.options.logger.error("persona.adviser.failed", error, {
-              durationMs: Math.round(performance.now() - adviserStarted),
-            });
-            result = "The deeper pass failed. Answer the human directly from the conversation.";
-          }
           const remainingCharacters = Math.max(
             1,
             this.maxResponseCharacters - spokenSegments.join(" ").length - 1,
           );
-          segmenter = onSpeechSegment
+          const adviserSegmenter = onSpeechSegment
             ? new StreamingSpeechSegmenter(remainingCharacters)
             : undefined;
-          const finalSegmenter = segmenter;
-          const segmentsBeforeFollowup = spokenSegments.length;
-          const finalMessage = await this.complete(
-            [
-              ...attemptMessages,
-              {
-                role: "assistant",
-                content: content || null,
-                tool_calls: [call],
-              },
-              {
-                role: "tool",
-                tool_call_id: call.id,
-                content: JSON.stringify({ suggestion: result }),
-              },
-              {
-                role: "system",
-                content:
-                  "Use the suggestion only if it is grounded and helpful. Give the natural final spoken " +
-                  "answer now; do not volunteer implementation details.",
-              },
-            ],
-            "persona_adviser_followup",
-            signal,
-            finalSegmenter
-              ? (fragment) => emit(finalSegmenter.push(fragment))
-              : undefined,
+          const segmentsBeforeAdvice = spokenSegments.length;
+          const recentDialogue = [
+            ...this.history.flatMap((entry): CelerisHistoryMessage[] =>
+              entry.role !== "tool" && typeof entry.content === "string"
+                ? [{ role: entry.role, content: entry.content }]
+                : [],
+            ),
+            { role: "user" as const, content: input },
+          ];
+          const adviserController = new AbortController();
+          const adviserTimeout = setTimeout(
+            () => adviserController.abort(
+              new DOMException("Persona adviser hot timeout", "TimeoutError"),
+            ),
+            this.options.adviserHotTimeoutMs ?? 6_000,
           );
-          signal?.throwIfAborted();
-          content = typeof finalMessage.content === "string"
-            ? finalMessage.content.trim()
-            : "";
-          if (
-            invalidPersonaResponse(content) &&
-            spokenSegments.length === segmentsBeforeFollowup
-          ) {
-            const fallback = result.startsWith("The deeper pass failed")
-              ? "I lost that thought for a second. Ask me again and I'll take another run at it."
-              : sanitizeForSpeech(result, remainingCharacters);
-            if (fallback) emit([fallback]);
-            content = fallback;
+          const adviserPromise = this.options.persistentMemory.askAdviser(
+            request,
+            recentDialogue,
+            undefined,
+            adviserController.signal,
+          ).then((result) => ({ source: "adviser" as const, result }));
+          const fastFallbackPromise = this.complete(
+            [
+              ...attemptMessages.slice(0, -1),
+              {
+                role: "system" as const,
+                content:
+                  "The adviser may be slow. Independently write three distinct candidate Audrey replies now with no tool. " +
+                  "Return only valid JSON in the exact shape {\"candidates\":[\"first\",\"second\",\"third\"]}. " +
+                  "Keep each under forty-five spoken words, grounded in the dialogue, and self-contained. For humor or " +
+                  "distraction, avoid famous jokes, factual trivia, invented personal experiences, and walks-into-a-bar " +
+                  "or library templates. Do not use a question-and-answer, why-did, or what-do-you-call format. Use one " +
+                  "specific fresh image and do not explain the joke. For a direct joke request, start every candidate " +
+                  "with 'Imagine' or 'Picture this' so invented material is unmistakably fictional.",
+              },
+              attemptMessages.at(-1)!,
+            ],
+            "persona_fast_fallback",
+            signal,
+            undefined,
+            256,
+          ).then((message) => {
+            const raw = typeof message.content === "string" ? message.content : "";
+            let candidates: string[] = [];
+            try {
+              const parsed = JSON.parse(raw) as { candidates?: unknown };
+              if (Array.isArray(parsed.candidates)) {
+                candidates = parsed.candidates.filter(
+                  (candidate): candidate is string => typeof candidate === "string",
+                );
+              }
+            } catch {
+              candidates = [raw];
+            }
+            const result = candidates
+              .map((candidate) => sanitizeForSpeech(candidate, remainingCharacters))
+              .find((candidate) =>
+                Boolean(candidate) &&
+                !invalidPersonaResponse(candidate) &&
+                !unsafeCreativeDraft(input, candidate));
+            if (!result) {
+              throw new Error("Fast fallback returned no safe candidate");
+            }
+            return { source: "celeris" as const, result };
+          });
+          let result: string;
+          try {
+            const winner = await Promise.any([fastFallbackPromise, adviserPromise]);
+            result = winner.result;
+            usedAdviser = winner.source === "adviser";
+            usedFastFallback = winner.source === "celeris";
+            if (winner.source === "celeris") adviserController.abort();
+            this.options.logger.info("persona.adviser.race_won", {
+              durationMs: Math.round(performance.now() - adviserStarted),
+              source: winner.source,
+            });
+          } catch (error) {
+            this.options.logger.error("persona.adviser.race_failed", error, {
+              durationMs: Math.round(performance.now() - adviserStarted),
+            });
+            result = creativeRequest || distractionRequest
+              ? "My brain offered me something painfully obvious, so I fired it. Honestly, the firing was funnier than the joke."
+              : "I lost that thought for a second. Ask me again and I'll take another run at it.";
+          } finally {
+            clearTimeout(adviserTimeout);
+            if (!adviserController.signal.aborted) adviserController.abort();
           }
+          if (adviserSegmenter) {
+            emit(adviserSegmenter.push(result));
+            emit(adviserSegmenter.finish());
+          }
+          if (spokenSegments.length === segmentsBeforeAdvice) {
+            const fallback = sanitizeForSpeech(result, remainingCharacters);
+            if (fallback) emit([fallback]);
+          }
+          content = result;
+          segmenter = undefined;
           break;
         }
         if (!invalidPersonaResponse(content) || spokenSegments.length > 0) break;
@@ -379,6 +562,7 @@ export class PersonaConversation {
           ? new StreamingSpeechSegmenter(this.maxResponseCharacters)
           : undefined;
         content = "";
+        retryReason = "invalid";
         this.options.logger.warn("persona.invalid_completion", { retry: attempt + 1 });
       }
       if (segmenter) emit(segmenter.finish());
@@ -388,8 +572,11 @@ export class PersonaConversation {
       if (!speech || invalidPersonaResponse(speech)) {
         throw new Error("Celeris returned an invalid persona response");
       }
+      if (spokenSegments.length === 0) onSpeechSegment?.(speech);
       this.remember(input, speech, {
         usedAdviser,
+        usedPreparedDraft: false,
+        usedFastFallback,
         backgroundContextAvailable: Boolean(persistentContext),
       });
       return speech;
@@ -404,6 +591,8 @@ export class PersonaConversation {
         const partial = spokenSegments.join(" ");
         this.remember(input, partial, {
           usedAdviser,
+          usedPreparedDraft: false,
+          usedFastFallback,
           backgroundContextAvailable: Boolean(persistentContext),
         });
         return partial;
@@ -411,6 +600,8 @@ export class PersonaConversation {
       const fallback = "Sorry, I lost my train of thought for a moment.";
       this.remember(input, fallback, {
         usedAdviser,
+        usedPreparedDraft: false,
+        usedFastFallback,
         backgroundContextAvailable: Boolean(persistentContext),
       });
       return fallback;
@@ -430,6 +621,10 @@ export class PersonaConversation {
     this.options.logger.info("celeris.request.started", { phase });
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
+    const streamResponse = Boolean(
+      onContentDelta &&
+      (toolChoice === undefined || toolChoice === "auto"),
+    );
     try {
       const response = await fetch(`${this.options.baseUrl}/chat/completions`, {
         method: "POST",
@@ -440,13 +635,16 @@ export class PersonaConversation {
         body: JSON.stringify({
           model: this.options.model,
           max_tokens: maxTokens,
-          temperature: this.options.temperature ?? 0.4,
+          temperature:
+            phase === "persona_fast_fallback"
+              ? 0.7
+              : this.options.temperature ?? 0.4,
           seed: this.options.seed ?? 7,
           messages,
           ...(tools && tools.length > 0
             ? { tools, tool_choice: toolChoice ?? "auto" }
             : {}),
-          ...(onContentDelta
+          ...(streamResponse
             ? { stream: true, stream_options: { include_usage: true } }
             : {}),
         }),
@@ -456,7 +654,7 @@ export class PersonaConversation {
       });
       if (!response.ok) throw new Error(`Celeris returned HTTP ${response.status}`);
       if (
-        onContentDelta &&
+        streamResponse &&
         response.headers.get("content-type")?.toLocaleLowerCase().includes(
           "text/event-stream",
         )
@@ -470,7 +668,7 @@ export class PersonaConversation {
               durationMs: Math.round(performance.now() - started),
             });
           }
-          onContentDelta(fragment);
+          onContentDelta?.(fragment);
         });
         this.options.logger.info("celeris.response.received", {
           phase,
@@ -522,14 +720,29 @@ export class PersonaConversation {
     assistant: string,
     provenance?: {
       usedAdviser: boolean;
+      usedPreparedDraft?: boolean | undefined;
+      usedFastFallback?: boolean | undefined;
       backgroundContextAvailable: boolean;
     },
   ): void {
+    this.lastGenerationRecord = provenance
+      ? {
+          usedAdviser: provenance.usedAdviser,
+          usedPreparedDraft: Boolean(provenance.usedPreparedDraft),
+          usedFastFallback: Boolean(provenance.usedFastFallback),
+          backgroundContextAvailable: provenance.backgroundContextAvailable,
+        }
+      : undefined;
     this.history.push(
       { role: "user", content: user },
       { role: "assistant", content: assistant },
     );
-    if (provenance?.usedAdviser || provenance?.backgroundContextAvailable) {
+    if (
+      provenance?.usedAdviser ||
+      provenance?.usedPreparedDraft ||
+      provenance?.usedFastFallback ||
+      provenance?.backgroundContextAvailable
+    ) {
       this.history.push({
         role: "system",
         content:
@@ -537,12 +750,55 @@ export class PersonaConversation {
           "truthfully; availability alone does not prove a suggestion was used: " +
           JSON.stringify({
             creative_adviser_used: provenance.usedAdviser,
+            background_draft_used: Boolean(provenance.usedPreparedDraft),
+            fast_background_candidate_used: Boolean(provenance.usedFastFallback),
             background_context_available: provenance.backgroundContextAvailable,
           }),
       });
     }
     this.options.persistentMemory?.rememberTurn(user, assistant);
     this.scheduleCompaction();
+  }
+
+  private priorReplyProvenanceAnswer(input: string): string | undefined {
+    if (
+      !this.lastGenerationRecord ||
+      !(
+        /\b(?:that|the (?:last|previous))\s+(?:answer|reply|response|joke|one)\b/i.test(input) ||
+        /\b(?:suggest(?:ed)?|help(?:ed)?)\b.*\b(?:that|it|joke|answer|reply|response|one)\b/i.test(
+          input,
+        )
+      )
+    ) {
+      return undefined;
+    }
+    if (/\b(?:can\s+(?:the\s+)?background|entirely just you|all you)\b/i.test(input)) {
+      if (this.lastGenerationRecord.usedAdviser) {
+        return "Yes. Background help is available, and I used an adviser for that reply.";
+      }
+      if (this.lastGenerationRecord.usedPreparedDraft) {
+        return "Yes. Background help is available, and DeepSeek Flash prepared that reply while you were speaking.";
+      }
+      if (this.lastGenerationRecord.usedFastFallback) {
+        return "Yes. Background help is available, and I used a fast background candidate for that reply.";
+      }
+      return this.lastGenerationRecord.backgroundContextAvailable
+        ? "Yes. Background context can help me, and it was available for that reply, though no prepared suggestion was used."
+        : "Background context can help me, though none was available for that reply.";
+    }
+    if (this.lastGenerationRecord.usedAdviser) {
+      return "Yes. I used a background adviser to help with that reply.";
+    }
+    if (this.lastGenerationRecord.usedPreparedDraft) {
+      return "Yes. DeepSeek Flash prepared that reply in the background while you were speaking.";
+    }
+    if (this.lastGenerationRecord.usedFastFallback) {
+      return "Yes. I used a fast background candidate to help with that reply.";
+    }
+    if (this.lastGenerationRecord.backgroundContextAvailable) {
+      return "No prepared suggestion was used for that reply, though background context was available.";
+    }
+    return "No background suggestion was used for that reply.";
   }
 
   private rememberInterrupted(user: string): void {
