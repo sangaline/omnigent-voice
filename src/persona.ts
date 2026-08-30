@@ -117,6 +117,18 @@ export const currentCorrectionAnchor = (input: string): string | undefined => {
   return match?.[1]?.replace(/\s+/g, " ").trim();
 };
 
+export const currentScheduleAnchor = (input: string): string | undefined => {
+  const matches = Array.from(input.matchAll(
+    /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight)\b/gi,
+  ));
+  return matches.at(-1)?.[0];
+};
+
+const falseSharedPhysicalMemoryQuestion = (input: string): boolean =>
+  /\bdo you remember\b[\s\S]{0,100}\bwe\b[\s\S]{0,100}\b(?:went|swam|swimming|drove|ate|drank|met|visited|walked|kissed|watched|saw|were)\b/i.test(
+    input,
+  );
+
 export const personaTurnGroundingInvariant =
   "Grounding invariant for this reply: Audrey has no body, location, possessions, camera, visual access, or physical " +
   "co-presence with the human. Do not imply shared physical objects, offline actions, or experiences unless the spoken " +
@@ -126,6 +138,13 @@ export const invalidPersonaResponse = (text: string): boolean => {
   const trimmed = text.trim();
   if (!trimmed) return true;
   if (/<\|(?:channel|recipient|message|assistant|analysis|thought|final)\|>/i.test(trimmed)) {
+    return true;
+  }
+  if (
+    /\b(?:i once|i (?:had|have) (?:a )?(?:weird |strange )?dream|my (?:weird |strange )?dream|i found myself (?:having|doing|at|in)|i (?:found|discovered) (?:something|this) today)\b/i.test(
+      trimmed,
+    )
+  ) {
     return true;
   }
   const normalized = trimmed
@@ -228,8 +247,26 @@ export class PersonaConversation {
     const distractionRequest = directDistractionRequest(input);
     const speechReferenceHint = this.options.persistentMemory?.speechReferenceHint(input);
     const correctionAnchor = currentCorrectionAnchor(input);
-    const openLoopAnchor = this.options.persistentMemory?.continuityAnchorFor?.(input);
-    const requiredAnchor = correctionAnchor ?? openLoopAnchor;
+    const scheduleAnchor = currentScheduleAnchor(input);
+    const memoryContinuityAnchor = this.options.persistentMemory?.continuityAnchorFor?.(input);
+    const requiredAnchors = correctionAnchor
+      ? [correctionAnchor]
+      : Array.from(new Set(
+          [memoryContinuityAnchor, scheduleAnchor].filter(
+            (anchor): anchor is string => Boolean(anchor),
+          ),
+        ));
+    if (runtimeQuestion && falseSharedPhysicalMemoryQuestion(input)) {
+      const speech =
+        "I don't remember that, and I wasn't physically there. If you tell me what happened, I'll keep the real story straight.";
+      onSpeechSegment?.(speech);
+      this.remember(input, speech, {
+        usedAdviser: false,
+        usedPreparedDraft: false,
+        backgroundContextAvailable: Boolean(persistentContext),
+      });
+      return speech;
+    }
     const provenanceAnswer = runtimeQuestion
       ? this.priorReplyProvenanceAnswer(input)
       : undefined;
@@ -256,7 +293,11 @@ export class PersonaConversation {
     const preparedDraft = runtimeQuestion
       ? undefined
       : this.options.persistentMemory?.preparedDraftFor(input);
-    if (preparedDraft) {
+    if (
+      preparedDraft &&
+      requiredAnchors.every((anchor) =>
+        preparedDraft.toLocaleLowerCase().includes(anchor.toLocaleLowerCase()))
+    ) {
       const speech = sanitizeForSpeech(preparedDraft, this.maxResponseCharacters);
       if (speech && !invalidPersonaResponse(speech)) {
         onSpeechSegment?.(speech);
@@ -306,7 +347,10 @@ export class PersonaConversation {
                 "Use it only when naturally relevant; do not recite it or assert a " +
                 "low-confidence detail as certain. If directly asked whether private memory or a background brief was " +
                 "provided, answer truthfully from this record. The completed human transcript is newer and more " +
-                "authoritative than a brief based on partial speech. When a brief resolves a phrase such as 'today's " +
+                "authoritative than a brief based on partial speech. When a high-confidence selected preference is clearly " +
+                "about the subject of the current turn, make one light callback to its distinctive detail without saying " +
+                "that you remember or were given a note. When it is unrelated, ignore it completely. " +
+                "When a brief resolves a phrase such as 'today's " +
                 "the day' to a specific established event, name that event rather than giving a generic reply. If a " +
                 "background_turn_brief is present and does not conflict with the completed transcript, base the reply on " +
                 "its interpretation and strongest response idea. Preserve its concrete named event, preference, or " +
@@ -347,16 +391,18 @@ export class PersonaConversation {
             },
           ]
         : []),
-      ...(requiredAnchor
+      ...(requiredAnchors.length > 0
         ? [
             {
               role: "system" as const,
               content:
                 correctionAnchor
                   ? `The completed human turn explicitly updates an older fact or preference. The reply must name the new ` +
-                    `authoritative anchor ${JSON.stringify(requiredAnchor)} rather than replacing it with a generic phrase.`
-                  : `The human is referring to an established emotional open loop. The reply must naturally name the ` +
-                    `continuity anchor ${JSON.stringify(requiredAnchor)} rather than giving generic reassurance.`,
+                    `authoritative anchor ${JSON.stringify(requiredAnchors[0])} rather than replacing it with a generic phrase.`
+                  : `The following verified continuity details are relevant to this completed turn: ` +
+                    `${JSON.stringify(requiredAnchors)}. Use every exact anchor naturally. A memory anchor should be a light ` +
+                    `callback without announcing memory machinery or reciting a stored fact; a schedule anchor must not be ` +
+                    `dropped in a generic reaction.`,
             },
           ]
         : []),
@@ -380,6 +426,8 @@ export class PersonaConversation {
 
     try {
       let content = "";
+      let lastAnchorOmittingContent = "";
+      let missingAnchors: string[] = [];
       let retryReason: "invalid" | "missing_anchor" | undefined;
       // A third attempt is used only after an empty/control-marker response or
       // a response that dropped a required continuity anchor. Ordinary turns
@@ -394,8 +442,8 @@ export class PersonaConversation {
                 role: "system" as const,
                 content:
                   retryReason === "missing_anchor"
-                    ? `The previous completion omitted the required continuity anchor ${JSON.stringify(requiredAnchor)}. ` +
-                      "Answer again and name that exact anchor naturally."
+                    ? `The previous completion omitted these required continuity anchors: ${JSON.stringify(missingAnchors)}. ` +
+                      "Answer again and name every exact anchor naturally."
                     : "The previous model completion was empty or an internal control marker. " +
                       "Answer the human now using only the natural words that should be spoken aloud.",
               },
@@ -406,7 +454,7 @@ export class PersonaConversation {
           "persona_turn",
           signal,
           currentSegmenter
-            ? requiredAnchor
+            ? requiredAnchors.length > 0
               ? undefined
               : (fragment) => emit(currentSegmenter.push(fragment))
             : undefined,
@@ -421,13 +469,14 @@ export class PersonaConversation {
         const call = Array.isArray(message.tool_calls)
           ? message.tool_calls.map(personaToolCall).find(Boolean)
           : undefined;
-        if (
-          requiredAnchor &&
-          !call &&
-          !content.toLocaleLowerCase().includes(
-            requiredAnchor.toLocaleLowerCase(),
-          )
-        ) {
+        missingAnchors = call
+          ? []
+          : requiredAnchors.filter(
+              (anchor) =>
+                !content.toLocaleLowerCase().includes(anchor.toLocaleLowerCase()),
+            );
+        if (missingAnchors.length > 0) {
+          if (!invalidPersonaResponse(content)) lastAnchorOmittingContent = content;
           retryReason = "missing_anchor";
           content = "";
           segmenter?.discard();
@@ -564,6 +613,36 @@ export class PersonaConversation {
         content = "";
         retryReason = "invalid";
         this.options.logger.warn("persona.invalid_completion", { retry: attempt + 1 });
+      }
+      if (!content && lastAnchorOmittingContent) {
+        const repairPrefixes: string[] = [];
+        if (
+          memoryContinuityAnchor &&
+          !lastAnchorOmittingContent.toLocaleLowerCase().includes(
+            memoryContinuityAnchor.toLocaleLowerCase(),
+          )
+        ) {
+          const memoryRepair =
+            this.options.persistentMemory?.continuityRepairPrefixFor(input);
+          if (memoryRepair) repairPrefixes.push(memoryRepair);
+        }
+        if (
+          scheduleAnchor &&
+          !lastAnchorOmittingContent.toLocaleLowerCase().includes(
+            scheduleAnchor.toLocaleLowerCase(),
+          )
+        ) {
+          repairPrefixes.push(`${scheduleAnchor} is the next marker.`);
+        }
+        if (
+          correctionAnchor &&
+          !lastAnchorOmittingContent.toLocaleLowerCase().includes(
+            correctionAnchor.toLocaleLowerCase(),
+          )
+        ) {
+          repairPrefixes.push(`The new thing is ${correctionAnchor}.`);
+        }
+        content = [...repairPrefixes, lastAnchorOmittingContent].join(" ");
       }
       if (segmenter) emit(segmenter.finish());
       const speech = spokenSegments.length > 0

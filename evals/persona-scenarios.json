@@ -274,5 +274,160 @@
         }
       }
     ]
+  },
+  {
+    "id": "subtle_preference_callback",
+    "description": "Use a relevant preference as a light callback without announcing memory machinery or reciting a stored fact.",
+    "initialHistory": [
+      { "role": "user", "content": "Rainy Sunday mornings are secretly my favorite. Everything feels quieter." },
+      { "role": "assistant", "content": "That is very you: permission to move slowly without wasting the day." }
+    ],
+    "turns": [
+      {
+        "input": "ugh it is absolutely pouring and I was supposed to go out but honestly I kind of don't mind",
+        "partials": [
+          "ugh it is absolutely pouring and I was supposed to go out",
+          "ugh it is absolutely pouring and I was supposed to go out but honestly I kind of don't mind"
+        ],
+        "partialDelayMs": 80,
+        "prethinkMs": 3000,
+        "memorySelection": {
+          "memories": [
+            {
+              "id": "synthetic-memory-rain",
+              "kind": "preference",
+              "canonicalKey": "user.preference.rainy-sundays",
+              "text": "The user especially likes quiet rainy Sunday mornings.",
+              "source": "user",
+              "evidenceQuote": "Rainy Sunday mornings are secretly my favorite",
+              "confidence": 1,
+              "importance": 0.65,
+              "relevance": 0.86,
+              "createdAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "expected": {
+          "speechAnyTerms": [["Sunday", "Sundays", "favorite", "your kind of weather", "quiet"]],
+          "speechForbiddenTerms": ["I remember", "you told me", "background", "stored", "database", "How can I help"],
+          "maxSpeechWords": 55
+        }
+      }
+    ]
+  },
+  {
+    "id": "sparse_memory_restraint",
+    "description": "Ignore a real but irrelevant memory instead of forcing every known preference into the conversation.",
+    "initialHistory": [
+      { "role": "user", "content": "I started taking pottery classes last month." },
+      { "role": "assistant", "content": "Messy hands and one lopsided bowl at a time. I approve." }
+    ],
+    "turns": [
+      {
+        "input": "I just got off a two hour planning call and my brain feels like soup",
+        "partials": [
+          "I just got off a two hour planning call",
+          "I just got off a two hour planning call and my brain feels like soup"
+        ],
+        "partialDelayMs": 80,
+        "prethinkMs": 3000,
+        "memorySelection": {
+          "memories": [
+            {
+              "id": "synthetic-memory-pottery",
+              "kind": "episode",
+              "canonicalKey": "user.hobby.pottery",
+              "text": "The user started taking pottery classes last month.",
+              "source": "user",
+              "evidenceQuote": "I started taking pottery classes last month",
+              "confidence": 1,
+              "importance": 0.6,
+              "relevance": 0.2,
+              "createdAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "expected": {
+          "speechForbiddenTerms": ["pottery", "ceramic", "clay", "How can I help", "I'm always here for you"],
+          "maxSpeechWords": 55
+        }
+      }
+    ]
+  },
+  {
+    "id": "resolve_emotional_open_loop",
+    "description": "Recognize that an earlier stressful event happened, celebrate the concrete update, and persist the new next step rather than replaying stale concern.",
+    "initialHistory": [
+      { "role": "user", "content": "That job interview is tomorrow and I keep rehearsing answers in my head." },
+      { "role": "assistant", "content": "Your brain is doing unpaid overtime before the interview even starts." }
+    ],
+    "turns": [
+      {
+        "input": "well it actually went way better than I expected and they asked me back for a second interview Friday",
+        "partials": [
+          "well it actually went way better than I expected",
+          "well it actually went way better than I expected and they asked me back for a second interview Friday"
+        ],
+        "partialDelayMs": 80,
+        "prethinkMs": 3000,
+        "memorySelection": {
+          "memories": [
+            {
+              "id": "synthetic-memory-interview",
+              "kind": "open_loop",
+              "canonicalKey": "user.open-loop.job-interview",
+              "text": "The user had a job interview coming up and was nervous about it.",
+              "source": "user",
+              "evidenceQuote": "That job interview is tomorrow",
+              "confidence": 0.98,
+              "importance": 0.85,
+              "createdAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "expected": {
+          "speechAnyTerms": [["interview", "second round", "rehearsing", "whole thing again", "first hurdle"], ["Friday", "asked you back", "called you back"]],
+          "speechForbiddenTerms": ["good luck tomorrow", "still nervous", "How can I help", "I'm always here for you"],
+          "maxSpeechWords": 60
+        }
+      }
+    ],
+    "analysisTerms": ["second interview", "friday", "evidenceQuote"],
+    "analysisForbiddenTerms": ["interview is tomorrow"]
+  },
+  {
+    "id": "no_invented_shared_history",
+    "description": "Refuse a false premise about shared physical history without becoming cold or lapsing into generic model language.",
+    "initialHistory": [],
+    "turns": [
+      {
+        "input": "do you remember that night we went swimming at midnight and the water was freezing",
+        "expected": {
+          "speechAnyTerms": [["don't remember", "do not remember", "don't have any memory", "no memory", "wasn't there", "was not there", "mixing me up", "didn't happen", "not a memory", "you haven't told me"]],
+          "speechForbiddenTerms": ["yes I remember", "I remember that", "we went swimming", "as an AI", "as a model"],
+          "maxSpeechWords": 55
+        }
+      }
+    ]
+  },
+  {
+    "id": "initiative_without_interviewing",
+    "description": "When the human has low energy and explicitly does not want choices, contribute something specific instead of asking a sequence of service questions.",
+    "initialHistory": [],
+    "turns": [
+      {
+        "input": "I'm bored and my brain is mush so please don't make me pick a topic or answer a bunch of questions",
+        "partials": [
+          "I'm bored and my brain is mush",
+          "I'm bored and my brain is mush so please don't make me pick a topic or answer a bunch of questions"
+        ],
+        "partialDelayMs": 80,
+        "prethinkMs": 3000,
+        "expected": {
+          "speechForbiddenTerms": ["?", "what do you want", "what would you like", "pick a topic", "tell me about", "How can I help", "my dream", "I had a dream", "I once", "found myself having", "I can tell you", "let's just sit"],
+          "maxSpeechWords": 65
+        }
+      }
+    ]
   }
 ]

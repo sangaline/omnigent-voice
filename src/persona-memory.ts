@@ -42,6 +42,8 @@ export interface PersonaTurnAnalysis {
 
 export interface PersonaTurnPlan {
   draftReply: string;
+  memoryAnchor: string;
+  memoryAnchorDecided: boolean;
   interpretation: string;
   relevantFacts: string[];
   responseStrategy: string;
@@ -56,6 +58,7 @@ export interface PersonaMemoryRecord
   createdAt: string;
   source: PersonaMemorySource | "legacy";
   evidenceQuote: string;
+  relevance?: number | undefined;
 }
 
 export interface PersonaThoughtRecord extends PersonaThoughtCandidate {
@@ -322,10 +325,15 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
       evidence_quote: string;
       confidence: number;
       importance: number;
+      retrieval_relevance: number;
       created_at: Date;
     }>(
       `SELECT id::text, kind, canonical_key, text, evidence_speaker,
-              evidence_quote, confidence, importance, created_at
+              evidence_quote, confidence, importance, created_at,
+              GREATEST(
+                semantic_similarity,
+                CASE WHEN lexical_similarity > 0 THEN 0.75 ELSE 0 END
+              ) AS retrieval_relevance
        FROM (
          SELECT *,
            CASE
@@ -391,6 +399,7 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
         evidenceQuote: row.evidence_quote,
         confidence: row.confidence,
         importance: row.importance,
+        relevance: row.retrieval_relevance,
         createdAt: row.created_at.toISOString(),
       })),
       ...(selectedThought ? { thought: selectedThought } : {}),
@@ -599,11 +608,12 @@ const turnPlanSchema = {
     type: "object",
     additionalProperties: false,
     properties: {
+      memory_anchor: { type: "string", maxLength: 80 },
       draft_reply: { type: "string", maxLength: 300 },
       alternate_reply_1: { type: "string", maxLength: 300 },
       alternate_reply_2: { type: "string", maxLength: 300 },
     },
-    required: ["draft_reply", "alternate_reply_1", "alternate_reply_2"],
+    required: ["memory_anchor", "draft_reply", "alternate_reply_1", "alternate_reply_2"],
   },
 } as const;
 
@@ -659,6 +669,25 @@ const partialJsonString = (content: string, key: string): string | undefined => 
     return cleanText(JSON.parse(match[1]), 400);
   } catch {
     return undefined;
+  }
+};
+
+const partialJsonStringAllowEmpty = (
+  content: string,
+  key: string,
+): { decided: boolean; value: string } => {
+  const match = new RegExp(`"${key}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`).exec(
+    content,
+  );
+  if (!match?.[1]) return { decided: false, value: "" };
+  try {
+    const parsed = JSON.parse(match[1]);
+    return {
+      decided: typeof parsed === "string",
+      value: typeof parsed === "string" ? parsed.replace(/\s+/g, " ").trim().slice(0, 80) : "",
+    };
+  } catch {
+    return { decided: false, value: "" };
   }
 };
 
@@ -721,7 +750,9 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
             "user.preference.rain, shared.episode.pottery, or audrey.preference.music so corrections replace stale values. " +
             "Use one short atomic sentence per memory. " +
             "A thought is a private, short-lived idea that could improve a related future turn: a callback, better joke, " +
-            "gentle question, or useful conversational angle. It is a suggestion, never a fact. Return null when none is worthwhile.",
+            "gentle question, or useful conversational angle. It is a suggestion, never a fact. Return null when none is worthwhile. " +
+            "A question, hypothetical, joke premise, or false shared-memory test is not evidence that an event happened. " +
+            "If Audrey denies a purported event, do not extract that event as memory.",
         },
         {
           role: "user",
@@ -782,10 +813,13 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
             "You prepare one just-in-time reply for Audrey, a realistic spoken companion. " +
             "The current speech transcript may be partial or contain ASR substitutions. Infer its likely meaning from " +
             "the recent chronological dialogue, especially phonetically plausible names such as DeepSeek becoming deep sea. " +
-            "Return draft_reply plus two alternate reply fields. For an ordinary turn, put the strongest complete spoken " +
+            "Return memory_anchor first, then draft_reply and two alternate reply fields. For an ordinary turn, put the strongest complete spoken " +
             "reply in draft_reply and return empty alternate strings. For a joke, humor, story, poem, or roast request, " +
             "write three genuinely distinct candidates, strongest first. Every nonempty reply must be in Audrey's natural voice, usually " +
-            "one or two concise sentences. Preserve the exact named person, event, preference, correction, or emotional " +
+            "one or two concise sentences. Set memory_anchor to one to three exact distinctive words copied from a selected " +
+            "memory only when that memory is clearly relevant to the current speech and would make a natural subtle callback; " +
+            "the draft must contain those words. Otherwise set memory_anchor to an empty string and do not force any memory. " +
+            "Preserve the exact named person, event, preference, correction, or emotional " +
             "open loop needed to demonstrate continuity. Trust the newest speech over stale memory. Fulfill direct requests " +
             "inside the reply: if asked to distract or entertain, provide the distraction instead of asking the human for " +
             "another task. A distraction reply must be a self-contained amusing observation, tiny story, or playful riff, " +
@@ -803,13 +837,14 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
           content: JSON.stringify({
             partial_current_speech: partialInput,
             recent_dialogue: context.recentDialogue.slice(-16),
-            selected_memories: context.memories.map(({ kind, canonicalKey, text, confidence }) => ({
+            selected_memories: context.memories.map(({ kind, canonicalKey, text, confidence, relevance }) => ({
               kind,
               canonical_key: canonicalKey,
               text,
               confidence,
+              ...(relevance !== undefined ? { retrieval_relevance: relevance } : {}),
             })),
-            required_continuity_terms_if_relevant: openLoopContinuityAnchors(
+            required_continuity_terms_if_relevant: memoryContinuityAnchors(
               context.memories,
             ),
             ...(context.thought
@@ -839,22 +874,28 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
           }),
         },
       ],
-      creativeRequest ? 384 : 144,
+      creativeRequest ? 384 : 192,
       { type: "json_schema", json_schema: turnPlanSchema },
       this.options.model,
       creativeRequest ? "turn_plan_creative" : "turn_plan",
       (fragment) => {
         streamedContent += fragment;
         const draftReply = partialJsonString(streamedContent, "draft_reply");
+        const memoryAnchor = partialJsonStringAllowEmpty(
+          streamedContent,
+          "memory_anchor",
+        );
         const alternatives = [
           partialJsonString(streamedContent, "alternate_reply_1"),
           partialJsonString(streamedContent, "alternate_reply_2"),
         ].filter((value): value is string => Boolean(value));
-        const partialKey = `${draftReply ?? ""}\n${alternatives.join("\n")}`;
+        const partialKey = `${draftReply ?? ""}\n${memoryAnchor.decided}:${memoryAnchor.value}\n${alternatives.join("\n")}`;
         if (!draftReply || partialKey === lastPartialInterpretation) return;
         lastPartialInterpretation = partialKey;
         onPartial?.({
           draftReply,
+          memoryAnchor: memoryAnchor.value,
+          memoryAnchorDecided: memoryAnchor.decided,
           interpretation: partialInput,
           relevantFacts: [],
           responseStrategy: "Use the prepared reply if the completed transcript still matches.",
@@ -867,6 +908,7 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
     );
     const parsed = JSON.parse(content) as Record<string, unknown>;
     const draftReply = cleanText(parsed.draft_reply, 500) ?? "";
+    const memoryAnchor = cleanText(parsed.memory_anchor, 80) ?? "";
     const responseIdeas = [parsed.alternate_reply_1, parsed.alternate_reply_2]
       .flatMap((value) => {
         const text = cleanText(value, 500);
@@ -874,6 +916,8 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
       });
     return {
       draftReply,
+      memoryAnchor,
+      memoryAnchorDecided: true,
       interpretation: partialInput,
       relevantFacts: [],
       responseStrategy: "Use the prepared reply if the completed transcript still matches.",
@@ -1066,6 +1110,7 @@ interface PreparedTurnPlan {
   sourceInput: string;
   plan: PersonaTurnPlan;
   continuityAnchors: string[];
+  hasSelectedPreference: boolean;
   draftComplete: boolean;
   complete: boolean;
 }
@@ -1105,6 +1150,33 @@ const openLoopContinuityAnchors = (
     .map((term) => term.trim().toLocaleLowerCase())
     .filter((term) => term.length >= 4 && !["user", "open", "loop"].includes(term));
 })));
+
+const preferenceCallbackAnchors = (
+  memories: readonly PersonaMemoryRecord[],
+): string[] => Array.from(new Set(memories.flatMap((memory) => {
+  if (
+    memory.kind !== "preference" ||
+    memory.confidence < 0.8 ||
+    (memory.relevance ?? 0) < 0.55
+  ) {
+    return [];
+  }
+  const anchor = memory.canonicalKey
+    .split(/[._:-]+/)
+    .map((term) => term.trim().toLocaleLowerCase())
+    .filter((term) =>
+      term.length >= 4 &&
+      !["user", "preference", "preferences", "favorite", "likes"].includes(term))
+    .at(-1);
+  return anchor ? [anchor] : [];
+})));
+
+const memoryContinuityAnchors = (
+  memories: readonly PersonaMemoryRecord[],
+): string[] => Array.from(new Set([
+  ...openLoopContinuityAnchors(memories),
+  ...preferenceCallbackAnchors(memories),
+]));
 
 export class PersonaMemoryRuntime {
   private prepared: PreparedMemory | undefined;
@@ -1164,11 +1236,18 @@ export class PersonaMemoryRuntime {
       )
       .then((selection) => {
         if (generation !== this.prepareGeneration || controller.signal.aborted) return;
-        this.prepared = { normalizedQuery, selection };
-        this.preparePlan(query, normalizedQuery, recentDialogue, selection);
+        const highValueSelection: PersonaMemorySelection = {
+          memories: selection.memories.filter(
+            (memory) => memory.relevance === undefined || memory.relevance >= 0.55,
+          ),
+          ...(selection.thought ? { thought: selection.thought } : {}),
+        };
+        this.prepared = { normalizedQuery, selection: highValueSelection };
+        this.preparePlan(query, normalizedQuery, recentDialogue, highValueSelection);
         this.options.logger.info("persona.memory.prefetch.ready", {
           durationMs: Math.round(performance.now() - started),
-          memories: selection.memories.length,
+          memories: highValueSelection.memories.length,
+          memoriesRejected: selection.memories.length - highValueSelection.memories.length,
           thoughtReady: Boolean(selection.thought),
         });
       })
@@ -1203,6 +1282,9 @@ export class PersonaMemoryRuntime {
       return undefined;
     }
     const selection = memoryReady ? prepared!.selection : { memories: [] };
+    const frozenContinuityAnchors = planReady
+      ? this.preparedPlan!.continuityAnchors
+      : memoryContinuityAnchors(selection.memories);
     this.options.logger.info("persona.memory.snapshot", {
       ready: true,
       memories: selection.memories.length,
@@ -1222,11 +1304,9 @@ export class PersonaMemoryRuntime {
         confidence: memory.confidence,
         recorded_at: memory.createdAt,
       })),
-      ...(openLoopContinuityAnchors(selection.memories).length > 0
+      ...(frozenContinuityAnchors.length > 0
         ? {
-            required_continuity_anchors: openLoopContinuityAnchors(
-              selection.memories,
-            ),
+            required_continuity_anchors: frozenContinuityAnchors,
           }
         : {}),
       ...(selection.thought
@@ -1275,7 +1355,37 @@ export class PersonaMemoryRuntime {
     if (!prepared || !relatedQuery(prepared.normalizedQuery, normalizedQuery)) {
       return undefined;
     }
-    return openLoopContinuityAnchors(prepared.selection.memories)[0];
+    const planned = this.preparedPlan;
+    if (
+      planned &&
+      relatedQuery(planned.normalizedQuery, normalizedQuery) &&
+      planned.continuityAnchors.length > 0
+    ) {
+      return planned.continuityAnchors[0];
+    }
+    return planned?.continuityAnchors[0] ??
+      memoryContinuityAnchors(prepared.selection.memories)[0];
+  }
+
+  public continuityRepairPrefixFor(input: string): string | undefined {
+    const normalizedQuery = normalizedMemoryText(input);
+    const prepared = this.prepared;
+    if (!prepared || !relatedQuery(prepared.normalizedQuery, normalizedQuery)) {
+      return undefined;
+    }
+    const preference = prepared.selection.memories.find(
+      (memory) =>
+        memory.kind === "preference" &&
+        preferenceCallbackAnchors([memory]).length > 0,
+    );
+    if (preference) {
+      const detail = /\b(?:likes?|prefers?)\s+(.+?)[.!?]?$/i.exec(preference.text)?.[1]
+        ?.replace(/\s+/g, " ")
+        .trim();
+      if (detail) return `That tracks; you have a soft spot for ${detail}.`;
+    }
+    const anchor = memoryContinuityAnchors(prepared.selection.memories).at(-1);
+    return anchor ? `The ${anchor} is the thread here.` : undefined;
   }
 
   public preparedDraftFor(input: string): string | undefined {
@@ -1287,6 +1397,13 @@ export class PersonaMemoryRuntime {
     const prepared = this.preparedPlan;
     if (!prepared?.draftComplete || !prepared.plan.draftReply) return undefined;
     if (prepared.plan.needsAdviser || prepared.plan.shouldClarify) return undefined;
+    if (
+      prepared.hasSelectedPreference &&
+      !prepared.plan.memoryAnchorDecided &&
+      prepared.continuityAnchors.length === 0
+    ) {
+      return undefined;
+    }
     const candidate = [prepared.plan.draftReply, ...prepared.plan.responseIdeas].find(
       (draft) =>
         Boolean(draft) &&
@@ -1467,7 +1584,10 @@ export class PersonaMemoryRuntime {
     this.planController = controller;
     this.planningQuery = normalizedQuery;
     const started = performance.now();
-    const continuityAnchors = openLoopContinuityAnchors(selection.memories);
+    const continuityAnchors = memoryContinuityAnchors(selection.memories);
+    const hasSelectedPreference = selection.memories.some(
+      (memory) => memory.kind === "preference",
+    );
     let partialLogged = false;
     void this.options.adviser
       .planTurn(input, {
@@ -1480,7 +1600,13 @@ export class PersonaMemoryRuntime {
           normalizedQuery,
           sourceInput: input,
           plan,
-          continuityAnchors,
+          continuityAnchors: Array.from(new Set([
+            ...continuityAnchors,
+            ...(continuityAnchors.length === 0 && plan.memoryAnchor
+              ? [normalizedMemoryText(plan.memoryAnchor)]
+              : []),
+          ])),
+          hasSelectedPreference,
           draftComplete: Boolean(plan.draftReply),
           complete: false,
         };
@@ -1497,7 +1623,13 @@ export class PersonaMemoryRuntime {
           normalizedQuery,
           sourceInput: input,
           plan,
-          continuityAnchors,
+          continuityAnchors: Array.from(new Set([
+            ...continuityAnchors,
+            ...(continuityAnchors.length === 0 && plan.memoryAnchor
+              ? [normalizedMemoryText(plan.memoryAnchor)]
+              : []),
+          ])),
+          hasSelectedPreference,
           draftComplete: Boolean(plan.draftReply),
           complete: true,
         };

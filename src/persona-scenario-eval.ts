@@ -92,8 +92,14 @@ const required = (value: string | undefined, description: string): string => {
 };
 const pause = (durationMs: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, durationMs));
-const includes = (value: string, term: string): boolean =>
-  value.toLocaleLowerCase().includes(term.toLocaleLowerCase());
+const includes = (value: string, term: string): boolean => {
+  const escaped = term
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s+");
+  const left = /^[\p{L}\p{N}]/u.test(term) ? "(?<![\\p{L}\\p{N}])" : "";
+  const right = /[\p{L}\p{N}]$/u.test(term) ? "(?![\\p{L}\\p{N}])" : "";
+  return new RegExp(`${left}${escaped}${right}`, "iu").test(value);
+};
 const transientFailure = (message: string): boolean =>
   /(?:HTTP 429|HTTP 5\d\d|fetch failed|aborted|timeout)/i.test(message);
 

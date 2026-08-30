@@ -61,6 +61,19 @@ loops while rejecting fake trivia, invented experiences, familiar joke
 templates, and overlong creative replies. If no safe plan is ready, Celeris
 continues immediately on ordinary turns.
 
+The ordinary structured plan budget is 192 tokens. This leaves enough room for
+the memory-anchor field and closing JSON after a voice-sized draft while still
+keeping the completed candidate near the front of the stream.
+
+The typed memory anchor and retrieval score keep memory use selective. Scored
+memories below 0.55 are omitted from the hot context. A high-confidence relevant
+preference derives one canonical callback anchor, while unrelated memories stay
+silent. Concrete next-step days such as Friday are independent anchors, so a
+relationship callback cannot erase the user's new schedule. If the small model
+drops a verified anchor three times, the harness keeps its useful answer and
+adds a short grounded repair prefix. Direct false premises about shared physical
+history are refused locally and are not eligible for durable-memory extraction.
+
 After Celeris has produced the spoken response, a serialized background worker
 sends that completed exchange to the configured OpenAI-compatible adviser. It
 extracts explicit durable memories and an optional short-lived conversational

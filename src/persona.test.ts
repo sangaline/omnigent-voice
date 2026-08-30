@@ -4,6 +4,7 @@ import type { PersonaMemoryRuntime } from "./persona-memory.js";
 import {
   PersonaConversation,
   currentCorrectionAnchor,
+  currentScheduleAnchor,
   defaultPersonaSystemPrompt,
   invalidPersonaResponse,
   personaTurnGroundingInvariant,
@@ -46,6 +47,7 @@ describe("persona conversation", () => {
   it("rejects leaked model control markers", () => {
     expect(invalidPersonaResponse("< channel thought")).toBe(true);
     expect(invalidPersonaResponse("<|channel|>analysis")).toBe(true);
+    expect(invalidPersonaResponse("I had a weird dream about a tiny orchestra.")).toBe(true);
     expect(invalidPersonaResponse("That is a thoughtful answer.")).toBe(false);
   });
 
@@ -54,6 +56,12 @@ describe("persona conversation", () => {
       "I've actually gotten really into espresso lately so the old coffee thing is out of date",
     )).toBe("espresso");
     expect(currentCorrectionAnchor("I like espresso")).toBeUndefined();
+  });
+
+  it("preserves the latest explicit schedule anchor", () => {
+    expect(currentScheduleAnchor("they asked me back for a second interview Friday"))
+      .toBe("Friday");
+    expect(currentScheduleAnchor("not Friday, Monday instead")).toBe("Monday");
   });
 
   it("streams natural speech through a tool-free static prompt", async () => {
@@ -330,7 +338,7 @@ describe("persona conversation", () => {
     };
     expect(retryBody.messages).toContainEqual({
       role: "system",
-      content: expect.stringContaining("omitted the required continuity anchor"),
+      content: expect.stringContaining("omitted these required continuity anchors"),
     });
   });
 

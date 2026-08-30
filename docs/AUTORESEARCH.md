@@ -2539,3 +2539,33 @@ line. Typecheck and build were clean, and all 180 unit and integration tests
 passed. The next corpus expansion should emphasize longitudinal friendship:
 subtle preference callbacks, resolving emotional open loops, sparse memory use,
 initiative without constant questions, and refusing invented shared history.
+
+### 2026-08-30 — Broader companion continuity corpus
+
+Five non-work companion scenarios expanded the corpus beyond creative prompts:
+a subtle preference callback, restraint with an irrelevant real memory,
+resolution of an anxious interview thread plus its Friday follow-up, refusal of
+invented shared physical history, and low-energy initiative without turning the
+reply into an interview. The first baseline passed ten of twelve. It either
+ignored the useful rainy-Sunday detail or forced unrelated pottery into a tired
+work-call response; it also varied between preserving the interview and its
+new Friday next step.
+
+Retrieved records now retain their similarity score. The hot context excludes
+scored memories below 0.55 even though the database's broader candidate floor
+remains 0.40. High-confidence relevant preferences derive a canonical callback
+anchor, while DeepSeek emits its own typed memory decision before the candidate.
+The voice layer preserves every applicable memory and schedule anchor, validates
+prepared drafts against them, and uses a short grounded repair prefix only after
+three model misses. False shared physical memories use a deterministic truthful
+response, and the async extractor is explicitly told that questions and denied
+premises are not evidence. The eval matcher now uses token boundaries rather
+than allowing accidental substrings such as `rain` inside `train`.
+
+Targeted callback and open-loop tests each passed three of three after the
+change. The complete twelve-scenario promotion corpus then passed twelve of
+twelve with no invalid trials. In that run, prepared ordinary turns completed
+in 3–8 milliseconds, normal Celeris turns in 141–404 milliseconds, the open-loop
+composition in 364 milliseconds, and the bounded creative path in 589
+milliseconds after its immediate hold line. All 181 unit and integration tests,
+typecheck, and build passed before promotion.

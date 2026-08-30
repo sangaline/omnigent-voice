@@ -68,6 +68,8 @@ const fakeAdviser = (analysis: PersonaTurnAnalysis = { memories: [] }): PersonaA
   analyzeTurn: vi.fn(async () => analysis),
   planTurn: vi.fn(async () => ({
     draftReply: "Ask about pottery naturally.",
+    memoryAnchor: "",
+    memoryAnchorDecided: true,
     interpretation: "The user is asking about pottery.",
     relevantFacts: [],
     responseStrategy: "Answer naturally.",
@@ -152,6 +154,8 @@ describe("persona memory runtime", () => {
       }),
       planTurn: vi.fn(async () => ({
         draftReply: "Pottery sounds like a good kind of mess.",
+        memoryAnchor: "pottery",
+        memoryAnchorDecided: true,
         interpretation: "The user is talking about pottery.",
         relevantFacts: [],
         responseStrategy: "Respond warmly.",
@@ -196,6 +200,8 @@ describe("persona memory runtime", () => {
       analyzeTurn: vi.fn(async () => ({ memories: [] })),
       planTurn: vi.fn(async () => ({
         draftReply: "DeepSeek Flash prepares context while you speak.",
+        memoryAnchor: "",
+        memoryAnchorDecided: true,
         interpretation: "The user means the DeepSeek Flash background model.",
         relevantFacts: ["Background planning can contribute private context."],
         responseStrategy: "Answer the architecture question directly.",

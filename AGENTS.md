@@ -89,7 +89,11 @@ facts or shared experiences. The
 completed transcript always overrides partial speech: meaningful suffix growth
 restarts planning, corrections and repairs reject stale drafts, explicit open-
 loop anchors must survive, and local gates reject fake trivia, invented first-
-person experiences, familiar joke templates, and oversized creative output. If
+person experiences, familiar joke templates, and oversized creative output.
+The planner emits a typed memory anchor before its draft. A high-confidence
+preference retrieved at score 0.55 or above also derives a stable canonical
+anchor locally, so late planning cannot silently erase a relevant callback;
+lower-scoring memories never enter the hot context. If
 no safe candidate is ready, ordinary Celeris response remains immediate;
 explicit creative or distraction requests may use `ask_adviser` behind the hold
 line. That hot escalation races the adviser against a separate three-candidate
@@ -103,9 +107,10 @@ delayed final answer.
 Every extracted durable memory has a stable canonical key, declared source
 speaker, and an exact evidence quote that must appear in that speaker's turn.
 User facts cannot be grounded in Audrey's own claims. Repeated canonical keys
-supersede older active values, retrieval filters semantic matches below 0.40,
-and short-lived thoughts become eligible at confidence 0.55. The structured
-analysis cap is 768 tokens. Ordinary prepared replies use a 144-token budget;
+supersede older active values. The database rejects semantic matches below 0.40,
+the hot context applies a stricter 0.55 scored-memory floor, and short-lived
+thoughts become eligible at confidence 0.55. The structured
+analysis cap is 768 tokens. Ordinary prepared replies use a 192-token budget;
 creative candidate pools and structured advice use 384. Logs contain only
 aggregate duration and token usage.
 
@@ -117,8 +122,12 @@ draft used?” questions. The exact DeepSeek Flash ASR alias is also rendered fr
 verified runtime facts rather than lossy model recall. Audrey should not
 volunteer these internals, but must answer direct provenance or memory questions
 truthfully. Explicit current-turn corrections and retrieved emotional open loops
-produce required lexical anchors; Celeris fallback is buffered and retried once
-if it drops the anchor. Do not restore an absolute instruction to deny or hide
+produce required lexical anchors. Concrete upcoming day names are retained as
+separate anchors, and all applicable anchors must survive the reply. Celeris
+fallback is buffered and retried; after three misses a small extractive prefix
+preserves the verified relationship detail without discarding the otherwise
+useful answer. False claims of shared physical history receive a typed refusal
+and are excluded from memory extraction. Do not restore an absolute instruction to deny or hide
 mechanisms that were actually used.
 
 The bundled runtime models are the int8 0.6B Nemotron English streaming
