@@ -47,6 +47,13 @@ semantic retrieval. Live ASR partials start retrieval while the caller is still
 speaking; at endpoint the harness takes only the latest completed result and
 calls Celeris immediately. It never waits for an embedding or adviser request.
 
+The same partial transcript starts a DeepSeek context planner after it contains
+enough words. A ready plan contributes only a compact interpretation, relevant
+facts, response strategy, and up to two concrete response ideas. It never gates
+endpoint latency, and the final transcript overrides the partial input it saw.
+This lets the stronger model correct likely ASR substitutions and prepare
+creative material while Celeris remains the low-latency speaker.
+
 After Celeris has produced the spoken response, a serialized background worker
 sends that completed exchange to the configured OpenAI-compatible adviser. It
 extracts explicit durable memories and an optional short-lived conversational
@@ -58,16 +65,19 @@ The adviser can be a local Ollama OpenAI endpoint or an external provider. An
 external provider receives the completed user and assistant text, so treat its
 configuration as an explicit privacy decision. Keep its API key in a runtime
 secret. `PERSONA_MEMORY_ANALYSIS_MODEL` may use a precise structured-output
-model while `PERSONA_ADVISER_MODEL` uses a faster conversational model.
-Only one structured analysis request runs per completed turn. The normal reply
-does not ask the external adviser for response candidates, and an explicit
-adviser call is the only path that incurs a second provider request. Logs retain
+model while `PERSONA_ADVISER_MODEL` supplies turn planning and deeper advice.
+Only one structured memory analysis request runs per completed turn. Every
+memory carries a stable key and an exact quote from its declared source;
+runtime validation rejects user facts inferred only from Audrey's wording. Logs retain
 aggregate timing and token counts but never the provider request text.
 
 The same adviser is exposed to Celeris through one narrow `ask_adviser` tool.
 Celeris answers ordinary turns directly. For a genuinely difficult creative or
 emotionally delicate request it may speak a short acknowledgment, call the
-adviser, and then finish the answer. The tool cannot perform external actions.
+adviser, and then finish the answer. A direct creative request forces this path
+when no prepared response idea arrived in time. Discord receives silent PCM
+between the acknowledgment and result so the delayed second batch cannot be
+dropped as an already-finished stream. The tool cannot perform external actions.
 
 Required durable-memory variables are listed in `.env.example`. Database,
 embedding, and adviser failures are logged without request text or credentials;

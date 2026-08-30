@@ -2453,3 +2453,32 @@ invalid trials. This cycle changed evaluation fidelity rather than production
 runtime behavior. All coordinator execution was frozen; no live Omnigent
 session was accessed or mutated, and the excluded ESPN session remained
 untouched. The live Audrey persona pod was not redeployed.
+
+### 2026-08-30 — Persona context quality and delayed-answer playback
+
+The retained live transcript showed three distinct failures rather than one
+generic model-quality problem. A creative adviser returned after 3.4 seconds,
+and Pocket synthesized the final joke, but Discord had already moved the raw
+player to idle after the hold line; the caller heard no answer. Direct questions
+about memory and idea provenance then received false denials because the prompt
+required Audrey to hide the very mechanisms whose records were in context. A
+phonetic “deep sea flash” reference was also interpreted as an invented visual
+effect even though recent dialogue supported DeepSeek Flash. Prompt size was
+only about 2,210 tokens, so compaction was not the cause.
+
+The first corrective hypothesis is that high-value context must be prepared
+before endpoint without becoming a latency dependency. Partial ASR now launches
+one DeepSeek structured turn brief, while local embedding retrieval continues in
+parallel. A ready prefix-related brief supplies an interpretation, selected
+facts, response strategy, and at most two response ideas; a late brief is simply
+omitted. Creative requests fall back to the explicit adviser, and a silent PCM
+keepalive preserves the Discord stream between its acknowledgment and result.
+
+Memory extraction now requires a canonical key, source speaker, and exact
+evidence quote. Runtime validation rejects source mismatches and assistant-only
+claims about the human. Weak memory matches below 0.40 are excluded, and the
+observed 0.60-confidence background thoughts are now eligible. Verified
+capability and per-turn provenance records replace blanket secrecy: Audrey
+should not volunteer internals, but a direct question must receive a truthful
+answer. Focused typecheck and 15 tests pass; live latency and behavioral
+scenario results remain the promotion gate.

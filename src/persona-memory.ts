@@ -14,10 +14,14 @@ export const personaMemoryKinds = [
 ] as const;
 
 export type PersonaMemoryKind = (typeof personaMemoryKinds)[number];
+export type PersonaMemorySource = "user" | "assistant";
 
 export interface PersonaMemoryCandidate {
   kind: PersonaMemoryKind;
+  canonicalKey: string;
   text: string;
+  source: PersonaMemorySource;
+  evidenceQuote: string;
   confidence: number;
   importance: number;
 }
@@ -33,9 +37,21 @@ export interface PersonaTurnAnalysis {
   thought?: PersonaThoughtCandidate | undefined;
 }
 
-export interface PersonaMemoryRecord extends PersonaMemoryCandidate {
+export interface PersonaTurnPlan {
+  interpretation: string;
+  relevantFacts: string[];
+  responseStrategy: string;
+  responseIdeas: string[];
+  needsAdviser: boolean;
+  shouldClarify: boolean;
+}
+
+export interface PersonaMemoryRecord
+  extends Omit<PersonaMemoryCandidate, "source" | "evidenceQuote"> {
   id: string;
   createdAt: string;
+  source: PersonaMemorySource | "legacy";
+  evidenceQuote: string;
 }
 
 export interface PersonaThoughtRecord extends PersonaThoughtCandidate {
@@ -74,6 +90,14 @@ export interface PersonaEmbedder {
 
 export interface PersonaAdviser {
   analyzeTurn(user: string, assistant: string): Promise<PersonaTurnAnalysis>;
+  planTurn(
+    partialInput: string,
+    context: {
+      memories: readonly PersonaMemoryRecord[];
+      thought?: PersonaThoughtRecord | undefined;
+      recentDialogue: readonly CelerisHistoryMessage[];
+    },
+  ): Promise<PersonaTurnPlan>;
   advise(
     request: string,
     context: {
@@ -167,6 +191,9 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
         )),
         text text NOT NULL,
         normalized_text text NOT NULL,
+        canonical_key text,
+        evidence_speaker text,
+        evidence_quote text,
         confidence real NOT NULL CHECK (confidence BETWEEN 0 AND 1),
         importance real NOT NULL CHECK (importance BETWEEN 0 AND 1),
         source_turn_id bigint NOT NULL REFERENCES persona_turns(id) ON DELETE CASCADE,
@@ -202,6 +229,29 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
       CREATE INDEX IF NOT EXISTS persona_thoughts_owner_pending_idx
         ON persona_thoughts (owner_key, expires_at DESC)
         WHERE consumed_at IS NULL;
+    `);
+    await this.pool.query(`
+      ALTER TABLE persona_memories
+        ADD COLUMN IF NOT EXISTS canonical_key text,
+        ADD COLUMN IF NOT EXISTS evidence_speaker text,
+        ADD COLUMN IF NOT EXISTS evidence_quote text;
+
+      UPDATE persona_memories
+      SET canonical_key = kind || ':legacy:' || id::text,
+          evidence_speaker = 'legacy',
+          evidence_quote = text
+      WHERE canonical_key IS NULL
+         OR evidence_speaker IS NULL
+         OR evidence_quote IS NULL;
+
+      ALTER TABLE persona_memories
+        ALTER COLUMN canonical_key SET NOT NULL,
+        ALTER COLUMN evidence_speaker SET NOT NULL,
+        ALTER COLUMN evidence_quote SET NOT NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS persona_memories_owner_canonical_active_idx
+        ON persona_memories (owner_key, canonical_key)
+        WHERE valid_to IS NULL;
     `);
     this.options.logger.info("persona.memory.store.ready", {
       embeddingDimensions: dimensions,
@@ -259,24 +309,37 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
       id: string;
       kind: PersonaMemoryKind;
       text: string;
+      canonical_key: string;
+      evidence_speaker: PersonaMemorySource | "legacy";
+      evidence_quote: string;
       confidence: number;
       importance: number;
       created_at: Date;
     }>(
-      `SELECT id::text, kind, text, confidence, importance, created_at
-       FROM persona_memories
-       WHERE owner_key = $1 AND valid_to IS NULL
+      `SELECT id::text, kind, canonical_key, text, evidence_speaker,
+              evidence_quote, confidence, importance, created_at
+       FROM (
+         SELECT *,
+           CASE
+             WHEN $3::text IS NULL OR embedding IS NULL THEN 0
+             ELSE 1 - (embedding <=> $3::vector)
+           END AS semantic_similarity,
+           ts_rank_cd(
+             to_tsvector('english', text),
+             websearch_to_tsquery('english', $2)
+           ) AS lexical_similarity
+         FROM persona_memories
+         WHERE owner_key = $1 AND valid_to IS NULL
+       ) ranked
+       WHERE semantic_similarity >= $5 OR lexical_similarity > 0
        ORDER BY (
-         CASE
-           WHEN $3::text IS NULL OR embedding IS NULL THEN 0
-           ELSE (1 - (embedding <=> $3::vector)) * 0.60
-         END
-         + ts_rank_cd(to_tsvector('english', text), websearch_to_tsquery('english', $2)) * 0.20
+         semantic_similarity * 0.60
+         + lexical_similarity * 0.20
          + importance * 0.15
          + (1 / (1 + extract(epoch FROM (now() - updated_at)) / 2592000)) * 0.05
        ) DESC, updated_at DESC
        LIMIT $4`,
-      [ownerKey, query, vectorLiteral(embedding), limit],
+      [ownerKey, query, vectorLiteral(embedding), limit, 0.4],
     );
 
     const thoughtResult = await this.pool.query<{
@@ -301,7 +364,7 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
     );
     const thought = thoughtResult.rows[0];
     const selectedThought = thought &&
-      thought.confidence >= 0.65 &&
+      thought.confidence >= 0.55 &&
       (thought.similarity === null || thought.similarity >= 0.35)
       ? {
           id: thought.id,
@@ -314,7 +377,10 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
       memories: memoryResult.rows.map((row) => ({
         id: row.id,
         kind: row.kind,
+        canonicalKey: row.canonical_key,
         text: row.text,
+        source: row.evidence_speaker,
+        evidenceQuote: row.evidence_quote,
         confidence: row.confidence,
         importance: row.importance,
         createdAt: row.created_at.toISOString(),
@@ -337,11 +403,22 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
         const normalized = normalizedMemoryText(memory.text);
         if (!normalized) continue;
         await client.query(
+          `UPDATE persona_memories
+           SET valid_to = now(), updated_at = now()
+           WHERE owner_key = $1 AND canonical_key = $2 AND valid_to IS NULL`,
+          [ownerKey, memory.canonicalKey],
+        );
+        await client.query(
           `INSERT INTO persona_memories (
-             owner_key, kind, text, normalized_text, confidence, importance,
+             owner_key, kind, text, normalized_text, canonical_key,
+             evidence_speaker, evidence_quote, confidence, importance,
              source_turn_id, embedding
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector)
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::vector)
            ON CONFLICT (owner_key, kind, normalized_text) DO UPDATE SET
+             canonical_key = EXCLUDED.canonical_key,
+             text = EXCLUDED.text,
+             evidence_speaker = EXCLUDED.evidence_speaker,
+             evidence_quote = EXCLUDED.evidence_quote,
              confidence = GREATEST(persona_memories.confidence, EXCLUDED.confidence),
              importance = GREATEST(persona_memories.importance, EXCLUDED.importance),
              source_turn_id = EXCLUDED.source_turn_id,
@@ -353,6 +430,9 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
             memory.kind,
             memory.text,
             normalized,
+            memory.canonicalKey,
+            memory.source,
+            memory.evidenceQuote,
             boundedScore(memory.confidence, 0.5),
             boundedScore(memory.importance, 0.5),
             turnId,
@@ -466,11 +546,22 @@ const analysisSchema = {
           additionalProperties: false,
           properties: {
             kind: { type: "string", enum: personaMemoryKinds },
+            canonical_key: { type: "string" },
             text: { type: "string" },
+            source: { type: "string", enum: ["user", "assistant"] },
+            evidence_quote: { type: "string" },
             confidence: { type: "number" },
             importance: { type: "number" },
           },
-          required: ["kind", "text", "confidence", "importance"],
+          required: [
+            "kind",
+            "canonical_key",
+            "text",
+            "source",
+            "evidence_quote",
+            "confidence",
+            "importance",
+          ],
         },
       },
       thought: {
@@ -493,6 +584,39 @@ const analysisSchema = {
   },
 } as const;
 
+const turnPlanSchema = {
+  name: "persona_turn_plan",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      interpretation: { type: "string" },
+      relevant_facts: {
+        type: "array",
+        maxItems: 5,
+        items: { type: "string" },
+      },
+      response_strategy: { type: "string" },
+      response_ideas: {
+        type: "array",
+        maxItems: 2,
+        items: { type: "string" },
+      },
+      needs_adviser: { type: "boolean" },
+      should_clarify: { type: "boolean" },
+    },
+    required: [
+      "interpretation",
+      "relevant_facts",
+      "response_strategy",
+      "response_ideas",
+      "needs_adviser",
+      "should_clarify",
+    ],
+  },
+} as const;
+
 const isMemoryKind = (value: unknown): value is PersonaMemoryKind =>
   typeof value === "string" && (personaMemoryKinds as readonly string[]).includes(value);
 
@@ -500,6 +624,55 @@ const cleanText = (value: unknown, maximum: number): string | undefined => {
   if (typeof value !== "string") return undefined;
   const text = value.replace(/\s+/g, " ").trim();
   return text ? text.slice(0, maximum) : undefined;
+};
+
+const cleanCanonicalKey = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const key = value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9_.:-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  return key || undefined;
+};
+
+const evidenceAppearsIn = (quote: string, source: string): boolean => {
+  const normalizedQuote = normalizedMemoryText(quote);
+  return normalizedQuote.length >= 2 && normalizedMemoryText(source).includes(normalizedQuote);
+};
+
+export const groundedMemoryCandidate = (
+  raw: Record<string, unknown>,
+  user: string,
+  assistant: string,
+): PersonaMemoryCandidate | undefined => {
+  const kind = raw.kind;
+  const canonicalKey = cleanCanonicalKey(raw.canonical_key);
+  const text = cleanText(raw.text, 500);
+  const source = raw.source === "user" || raw.source === "assistant"
+    ? raw.source
+    : undefined;
+  const evidenceQuote = cleanText(raw.evidence_quote, 500);
+  if (!isMemoryKind(kind) || !canonicalKey || !text || !source || !evidenceQuote) {
+    return undefined;
+  }
+  if (kind === "audrey_self" && source !== "assistant") return undefined;
+  if (kind !== "audrey_self" && kind !== "episode" && source !== "user") {
+    return undefined;
+  }
+  if (!evidenceAppearsIn(evidenceQuote, source === "user" ? user : assistant)) {
+    return undefined;
+  }
+  return {
+    kind,
+    canonicalKey,
+    text,
+    source,
+    evidenceQuote,
+    confidence: boundedScore(Number(raw.confidence), 0.5),
+    importance: boundedScore(Number(raw.importance), 0.5),
+  };
 };
 
 export class OpenAiPersonaAdviser implements PersonaAdviser {
@@ -515,7 +688,10 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
             "Store only information explicitly stated in the supplied dialogue and useful in a future personal conversation. " +
             "Never add sensory details, motives, emotions, causes, names, experiences, or implications that were not stated. " +
             "Facts about the human come only from the user text. Audrey's own expressed preference may use audrey_self, " +
-            "but a polite reaction is not a durable preference. Use one short atomic sentence per memory. " +
+            "but a polite reaction is not a durable preference. Every memory must identify its source speaker and copy a " +
+            "short exact evidence quote from that speaker. Use a stable semantic canonical_key such as user.name, " +
+            "user.preference.rain, shared.episode.pottery, or audrey.preference.music so corrections replace stale values. " +
+            "Use one short atomic sentence per memory. " +
             "A thought is a private, short-lived idea that could improve a related future turn: a callback, better joke, " +
             "gentle question, or useful conversational angle. It is a suggestion, never a fact. Return null when none is worthwhile.",
         },
@@ -524,7 +700,7 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
           content: JSON.stringify({ user, assistant }),
         },
       ],
-      384,
+      768,
       { type: "json_schema", json_schema: analysisSchema },
       this.options.analysisModel ?? this.options.model,
       "analysis",
@@ -533,15 +709,12 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
     const memories = Array.isArray(parsed.memories)
       ? parsed.memories.flatMap((raw): PersonaMemoryCandidate[] => {
           if (!raw || typeof raw !== "object") return [];
-          const candidate = raw as Record<string, unknown>;
-          const text = cleanText(candidate.text, 500);
-          if (!isMemoryKind(candidate.kind) || !text) return [];
-          return [{
-            kind: candidate.kind,
-            text,
-            confidence: boundedScore(Number(candidate.confidence), 0.5),
-            importance: boundedScore(Number(candidate.importance), 0.5),
-          }];
+          const candidate = groundedMemoryCandidate(
+            raw as Record<string, unknown>,
+            user,
+            assistant,
+          );
+          return candidate ? [candidate] : [];
         }).slice(0, 6)
       : [];
     let thought: PersonaThoughtCandidate | undefined;
@@ -558,6 +731,80 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
       }
     }
     return { memories, ...(thought ? { thought } : {}) };
+  }
+
+  public async planTurn(
+    partialInput: string,
+    context: {
+      memories: readonly PersonaMemoryRecord[];
+      thought?: PersonaThoughtRecord | undefined;
+      recentDialogue: readonly CelerisHistoryMessage[];
+    },
+  ): Promise<PersonaTurnPlan> {
+    const content = await this.complete(
+      [
+        {
+          role: "system",
+          content:
+            "You prepare a tiny just-in-time context brief for Audrey, a realistic spoken companion. " +
+            "The current speech transcript may be partial or contain ASR substitutions. Infer its likely meaning from " +
+            "the recent chronological dialogue, especially phonetically plausible names such as DeepSeek becoming deep sea. " +
+            "Select only facts that materially help this exact turn. Never invent visual activity, sensory access, actions, " +
+            "events, or relationship history. Response ideas are optional strong lines or concrete creative material, not " +
+            "a full generic answer. Mark needs_adviser only when a fresh deeper pass after the completed request is truly " +
+            "worth several seconds. Mark should_clarify only when no safe likely interpretation exists.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            partial_current_speech: partialInput,
+            recent_dialogue: context.recentDialogue.slice(-16),
+            selected_memories: context.memories.map(({ kind, text, confidence }) => ({
+              kind,
+              text,
+              confidence,
+            })),
+            ...(context.thought
+              ? {
+                  optional_background_thought: {
+                    text: context.thought.text,
+                    topic: context.thought.topic,
+                    confidence: context.thought.confidence,
+                  },
+                }
+              : {}),
+            verified_runtime_facts: [
+              "Audrey is a speech-only companion with no visual interface or sensory access.",
+              "Selected memories and private background suggestions can be injected into her turn context.",
+              "She cannot perform external actions in persona mode.",
+            ],
+          }),
+        },
+      ],
+      512,
+      { type: "json_schema", json_schema: turnPlanSchema },
+      this.options.model,
+      "turn_plan",
+    );
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    return {
+      interpretation: cleanText(parsed.interpretation, 400) ?? partialInput,
+      relevantFacts: Array.isArray(parsed.relevant_facts)
+        ? parsed.relevant_facts.flatMap((value) => {
+            const text = cleanText(value, 300);
+            return text ? [text] : [];
+          }).slice(0, 5)
+        : [],
+      responseStrategy: cleanText(parsed.response_strategy, 400) ?? "Respond naturally.",
+      responseIdeas: Array.isArray(parsed.response_ideas)
+        ? parsed.response_ideas.flatMap((value) => {
+            const text = cleanText(value, 500);
+            return text ? [text] : [];
+          }).slice(0, 2)
+        : [],
+      needsAdviser: parsed.needs_adviser === true,
+      shouldClarify: parsed.should_clarify === true,
+    };
   }
 
   public async advise(
@@ -658,6 +905,7 @@ export interface PersonaMemoryRuntimeOptions {
   embedder: PersonaEmbedder;
   adviser: PersonaAdviser;
   logger: Logger;
+  backgroundModel?: string | undefined;
   retrievalLimit?: number | undefined;
   restoreTurns?: number | undefined;
 }
@@ -667,6 +915,12 @@ interface PreparedMemory {
   selection: PersonaMemorySelection;
 }
 
+interface PreparedTurnPlan {
+  normalizedQuery: string;
+  sourceInput: string;
+  plan: PersonaTurnPlan;
+}
+
 const relatedQuery = (prepared: string, current: string): boolean =>
   prepared.length >= 8 &&
   current.length >= 8 &&
@@ -674,7 +928,10 @@ const relatedQuery = (prepared: string, current: string): boolean =>
 
 export class PersonaMemoryRuntime {
   private prepared: PreparedMemory | undefined;
+  private preparedPlan: PreparedTurnPlan | undefined;
+  private planningQuery: string | undefined;
   private prepareGeneration = 0;
+  private planGeneration = 0;
   private prepareController: AbortController | undefined;
   private backgroundTail: Promise<void> = Promise.resolve();
   private readonly retrievalLimit: number;
@@ -702,10 +959,14 @@ export class PersonaMemoryRuntime {
     return history;
   }
 
-  public prepare(input: string): void {
+  public prepare(
+    input: string,
+    recentDialogue: readonly CelerisHistoryMessage[] = [],
+  ): void {
     const query = input.replace(/\s+/g, " ").trim();
     const normalizedQuery = normalizedMemoryText(query);
     if (normalizedQuery.length < 8) return;
+    this.preparePlan(query, normalizedQuery, recentDialogue);
     const generation = ++this.prepareGeneration;
     this.prepareController?.abort();
     const controller = new AbortController();
@@ -740,7 +1001,14 @@ export class PersonaMemoryRuntime {
     const normalizedQuery = normalizedMemoryText(input);
     const prepared = this.prepared;
     this.prepare(input);
-    if (!prepared || !relatedQuery(prepared.normalizedQuery, normalizedQuery)) {
+    const memoryReady = Boolean(
+      prepared && relatedQuery(prepared.normalizedQuery, normalizedQuery),
+    );
+    const planReady = Boolean(
+      this.preparedPlan &&
+      relatedQuery(this.preparedPlan.normalizedQuery, normalizedQuery),
+    );
+    if (!memoryReady && !planReady) {
       this.options.logger.info("persona.memory.snapshot", {
         ready: false,
         memories: 0,
@@ -748,39 +1016,84 @@ export class PersonaMemoryRuntime {
       });
       return undefined;
     }
+    const selection = memoryReady ? prepared!.selection : { memories: [] };
     this.options.logger.info("persona.memory.snapshot", {
       ready: true,
-      memories: prepared.selection.memories.length,
-      thoughtReady: Boolean(prepared.selection.thought),
+      memories: selection.memories.length,
+      thoughtReady: Boolean(selection.thought),
+      turnPlanReady: planReady,
     });
-    if (prepared.selection.thought) {
+    if (selection.thought) {
       void this.options.store
-        .consumeThought(this.options.ownerKey, prepared.selection.thought.id)
+        .consumeThought(this.options.ownerKey, selection.thought.id)
         .catch((error) => this.options.logger.error("persona.thought.consume.failed", error));
     }
-    if (prepared.selection.memories.length === 0 && !prepared.selection.thought) {
-      return undefined;
-    }
     return JSON.stringify({
-      relevant_memories: prepared.selection.memories.map((memory) => ({
+      relevant_memories: selection.memories.map((memory) => ({
         kind: memory.kind,
         text: memory.text,
+        source: memory.source,
         confidence: memory.confidence,
         recorded_at: memory.createdAt,
       })),
-      ...(prepared.selection.thought
+      ...(selection.thought
         ? {
             optional_private_thought: {
-              text: prepared.selection.thought.text,
-              topic: prepared.selection.thought.topic,
-              confidence: prepared.selection.thought.confidence,
+              text: selection.thought.text,
+              topic: selection.thought.topic,
+              confidence: selection.thought.confidence,
+            },
+          }
+        : {}),
+      ...(this.preparedPlan && relatedQuery(
+        this.preparedPlan.normalizedQuery,
+        normalizedQuery,
+      )
+        ? {
+            background_turn_brief: {
+              based_on_partial_speech: this.preparedPlan.sourceInput,
+              interpretation: this.preparedPlan.plan.interpretation,
+              relevant_facts: this.preparedPlan.plan.relevantFacts,
+              response_strategy: this.preparedPlan.plan.responseStrategy,
+              response_ideas: this.preparedPlan.plan.responseIdeas,
+              needs_adviser: this.preparedPlan.plan.needsAdviser,
+              should_clarify: this.preparedPlan.plan.shouldClarify,
             },
           }
         : {}),
     });
   }
 
+  public hasPreparedResponseIdea(input: string): boolean {
+    const normalizedQuery = normalizedMemoryText(input);
+    return Boolean(
+      this.preparedPlan &&
+      relatedQuery(this.preparedPlan.normalizedQuery, normalizedQuery) &&
+      this.preparedPlan.plan.responseIdeas.length > 0,
+    );
+  }
+
+  public runtimeContext(): string {
+    return JSON.stringify({
+      durable_memory_enabled: true,
+      background_context_planning_enabled: true,
+      post_turn_memory_reflection_enabled: true,
+      creative_adviser_available: true,
+      ...(this.options.backgroundModel
+        ? { background_model: this.options.backgroundModel }
+        : {}),
+      external_actions_available: false,
+      visual_or_sensory_access: false,
+    });
+  }
+
   public rememberTurn(user: string, assistant: string): void {
+    this.prepareController?.abort();
+    this.prepareController = undefined;
+    this.prepared = undefined;
+    this.preparedPlan = undefined;
+    this.planningQuery = undefined;
+    this.planGeneration += 1;
     this.backgroundTail = this.backgroundTail
       .then(() => this.processTurn(user, assistant))
       .catch((error) => this.options.logger.error("persona.memory.turn.failed", error));
@@ -843,5 +1156,55 @@ export class PersonaMemoryRuntime {
       memories: analysis.memories.length,
       thoughtCreated: Boolean(analysis.thought),
     });
+  }
+
+  private preparePlan(
+    input: string,
+    normalizedQuery: string,
+    recentDialogue: readonly CelerisHistoryMessage[],
+  ): void {
+    const words = normalizedQuery.split(" ").filter(Boolean).length;
+    if (normalizedQuery.length < 20 || words < 4) return;
+    if (this.planningQuery && relatedQuery(this.planningQuery, normalizedQuery)) return;
+    if (
+      this.preparedPlan &&
+      relatedQuery(this.preparedPlan.normalizedQuery, normalizedQuery) &&
+      normalizedQuery.length < this.preparedPlan.normalizedQuery.length + 48
+    ) {
+      return;
+    }
+
+    const generation = ++this.planGeneration;
+    this.planningQuery = normalizedQuery;
+    const selected = this.prepared && relatedQuery(
+      this.prepared.normalizedQuery,
+      normalizedQuery,
+    )
+      ? this.prepared.selection
+      : { memories: [] };
+    const started = performance.now();
+    void this.options.adviser
+      .planTurn(input, {
+        memories: selected.memories,
+        ...(selected.thought ? { thought: selected.thought } : {}),
+        recentDialogue,
+      })
+      .then((plan) => {
+        if (generation !== this.planGeneration) return;
+        this.preparedPlan = { normalizedQuery, sourceInput: input, plan };
+        this.options.logger.info("persona.turn_plan.ready", {
+          durationMs: Math.round(performance.now() - started),
+          responseIdeas: plan.responseIdeas.length,
+          needsAdviser: plan.needsAdviser,
+          shouldClarify: plan.shouldClarify,
+        });
+      })
+      .catch((error) => {
+        if (generation !== this.planGeneration) return;
+        this.options.logger.error("persona.turn_plan.failed", error);
+      })
+      .finally(() => {
+        if (generation === this.planGeneration) this.planningQuery = undefined;
+      });
   }
 }

@@ -142,6 +142,8 @@ describe("persona conversation", () => {
     const persistentMemory = {
       prepare: vi.fn(),
       contextFor: vi.fn(() => undefined),
+      hasPreparedResponseIdea: vi.fn(() => false),
+      runtimeContext: vi.fn(() => JSON.stringify({ durable_memory_enabled: true })),
       rememberTurn: vi.fn(),
       askAdviser: vi.fn(async () => "Use a joke about not handling the pressure."),
     } as unknown as PersonaMemoryRuntime;

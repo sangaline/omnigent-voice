@@ -11,6 +11,7 @@ import {
   entersState,
   joinVoiceChannel,
 } from "@discordjs/voice";
+import { PcmSilenceKeepalive } from "./audio-keepalive.js";
 import {
   ChannelType,
   Client,
@@ -531,6 +532,19 @@ export class DiscordVoiceBot {
       return;
     }
     if (!transcript) {
+      this.options.logger.info("conversation.user.unrecognized", {
+        audioMs,
+        endpoint: endpointReason,
+      });
+      if (
+        inputEpoch !== undefined &&
+        audioMs >= 500 &&
+        !this.pendingTranscript &&
+        this.activeRecordings.size === 0
+      ) {
+        void this.deliverSpeech("I missed that. Say it once more?", inputEpoch)
+          .catch((error) => this.options.logger.error("asr.retry_speech.failed", error));
+      }
       this.scheduleTranscriptFlush();
       return;
     }
@@ -672,15 +686,27 @@ export class DiscordVoiceBot {
     let accepting = true;
     let queuedSegments = 0;
     let synthesisBatches = 0;
-
     const active = (): boolean =>
       accepting &&
       epoch === this.responseEpoch &&
       playbackEpoch === this.playbackEpoch;
 
+    // Discord's player treats a starved raw stream as complete even when the
+    // PassThrough remains open. Keep the resource alive between a spoken hold
+    // line and a delayed adviser/tool result, then stop padding before the next
+    // real batch is appended.
+    const gapSilence = new PcmSilenceKeepalive(
+      (frame) => {
+        if (active()) audioStream.write(frame);
+      },
+      48_000 * 2 * 2 * 20 / 1_000,
+      20,
+    );
+
     const segmentBatcher = new SpeechSegmentBatcher(
       async (segment) => {
         if (!active()) return;
+        gapSilence.pause();
         synthesisBatches += 1;
         this.options.logger.info("tts.text_segment.started", {
           segment: synthesisBatches,
@@ -704,6 +730,7 @@ export class DiscordVoiceBot {
           }
           return true;
         });
+        if (active() && playbackStarted !== undefined) gapSilence.resume();
       },
       15,
     );
@@ -719,6 +746,7 @@ export class DiscordVoiceBot {
       if (!accepting) return;
       accepting = false;
       segmentBatcher.cancel();
+      gapSilence.close();
       audioStream.destroy();
     };
 
@@ -730,6 +758,7 @@ export class DiscordVoiceBot {
           return false;
         }
         accepting = false;
+        gapSilence.close();
         audioStream.end();
         if (playbackStarted === undefined) return false;
         await entersState(this.player, AudioPlayerStatus.Idle, 15 * 60_000);

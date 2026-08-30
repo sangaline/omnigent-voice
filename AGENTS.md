@@ -72,12 +72,28 @@ an external provider receives the completed private dialogue and must be an
 explicit deployment choice. Local Ollama remains a valid OpenAI-compatible
 alternative. See `docs/PERSONA.md`.
 
-The first production memory deployment uses Pareto `z-ai/glm-5.3` for the one
-structured post-turn analysis and `deepseek/deepseek-v4-flash` only for an
-explicit conversational escalation. This is intentional: measured Celeris
-first-content latency remained substantially lower and more consistent, so it
-stays on every normal turn. The analysis request is capped at 384 completion
-tokens, advice at 192, and logs contain only aggregate duration/token usage.
+Partial ASR also starts one nonblocking DeepSeek turn-plan request once the
+utterance has enough content. If it finishes before endpoint, Celeris receives a
+small brief containing an ASR-aware interpretation, selected facts, response
+strategy, and up to two response ideas; if it is late, Celeris proceeds without
+it. Completed transcripts always override a brief based on partial speech.
+Direct creative requests such as jokes require `ask_adviser` only when no
+prepared response idea is ready. A continuous silent PCM gap keeps Discord's raw
+audio resource alive between the short hold line and delayed final answer.
+
+Every extracted durable memory has a stable canonical key, declared source
+speaker, and an exact evidence quote that must appear in that speaker's turn.
+User facts cannot be grounded in Audrey's own claims. Repeated canonical keys
+supersede older active values, retrieval filters semantic matches below 0.40,
+and short-lived thoughts become eligible at confidence 0.55. The structured
+analysis cap is 768 tokens, turn plans 512, advice 192, and logs contain only
+aggregate duration/token usage.
+
+The live prompt also receives verified runtime capabilities and a compact
+generation record after a turn that had background context or used the adviser.
+Audrey should not volunteer these internals, but must answer direct provenance
+or memory questions truthfully. Do not restore an absolute instruction to deny
+or hide mechanisms that were actually used.
 
 The bundled runtime models are the int8 0.6B Nemotron English streaming
 transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the

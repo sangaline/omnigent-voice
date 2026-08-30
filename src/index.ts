@@ -99,6 +99,7 @@ if (config.conversationMode === "persona") {
       embedder,
       adviser,
       logger,
+      backgroundModel: config.personaAdviserModel,
       retrievalLimit: config.personaMemoryRetrievalLimit,
       restoreTurns: config.personaMemoryRestoreTurns,
     });

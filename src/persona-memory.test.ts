@@ -8,6 +8,7 @@ import {
   PersonaMemorySelection,
   PersonaMemoryStore,
   PersonaTurnAnalysis,
+  groundedMemoryCandidate,
 } from "./persona-memory.js";
 
 class FakeStore implements PersonaMemoryStore {
@@ -64,6 +65,14 @@ const fakeEmbedder = (): PersonaEmbedder => ({
 
 const fakeAdviser = (analysis: PersonaTurnAnalysis = { memories: [] }): PersonaAdviser => ({
   analyzeTurn: vi.fn(async () => analysis),
+  planTurn: vi.fn(async () => ({
+    interpretation: "The user is asking about pottery.",
+    relevantFacts: [],
+    responseStrategy: "Answer naturally.",
+    responseIdeas: [],
+    needsAdviser: false,
+    shouldClarify: false,
+  })),
   advise: vi.fn(async () => "Try the pottery joke with a drier punchline."),
 });
 
@@ -80,7 +89,10 @@ describe("persona memory runtime", () => {
         {
           id: "12",
           kind: "preference",
+          canonicalKey: "user.preference.rainy-mornings",
           text: "The user likes rainy mornings.",
+          source: "user",
+          evidenceQuote: "I like rainy mornings",
           confidence: 0.98,
           importance: 0.7,
           createdAt: "2026-08-30T00:00:00.000Z",
@@ -125,13 +137,24 @@ describe("persona memory runtime", () => {
           memories: [
             {
               kind: "episode",
+              canonicalKey: "shared.episode.pottery-start",
               text: "The user started pottery last month.",
+              source: "user",
+              evidenceQuote: "I started pottery last month",
               confidence: 1,
               importance: 0.6,
             },
           ],
         };
       }),
+      planTurn: vi.fn(async () => ({
+        interpretation: "The user is talking about pottery.",
+        relevantFacts: [],
+        responseStrategy: "Respond warmly.",
+        responseIdeas: [],
+        needsAdviser: false,
+        shouldClarify: false,
+      })),
       advise: vi.fn(async () => "A better idea."),
     };
     const runtime = new PersonaMemoryRuntime({
@@ -160,9 +183,75 @@ describe("persona memory runtime", () => {
     );
     expect(store.closed).toBe(true);
   });
+
+  it("precomputes a response brief from partial speech without blocking the turn", async () => {
+    const store = new FakeStore();
+    const adviser: PersonaAdviser = {
+      analyzeTurn: vi.fn(async () => ({ memories: [] })),
+      planTurn: vi.fn(async () => ({
+        interpretation: "The user means the DeepSeek Flash background model.",
+        relevantFacts: ["Background planning can contribute private context."],
+        responseStrategy: "Answer the architecture question directly.",
+        responseIdeas: ["Yes, DeepSeek can prepare context while you speak."],
+        needsAdviser: false,
+        shouldClarify: false,
+      })),
+      advise: vi.fn(async () => "A better idea."),
+    };
+    const runtime = new PersonaMemoryRuntime({
+      ownerKey: "test-owner",
+      store,
+      embedder: fakeEmbedder(),
+      adviser,
+      logger: new Logger("error"),
+    });
+    await runtime.initialize();
+
+    runtime.prepare("what is that deep sea flash stuff", [
+      { role: "assistant", content: "A background model can prepare response ideas." },
+    ]);
+    await vi.waitFor(() =>
+      expect(runtime.contextFor("what is that deep sea flash stuff in background"))
+        .toContain("DeepSeek Flash"),
+    );
+    expect(runtime.hasPreparedResponseIdea(
+      "what is that deep sea flash stuff in background",
+    )).toBe(true);
+    await runtime.close();
+  });
 });
 
 describe("OpenAI-compatible persona adviser", () => {
+  it("rejects a user fact inferred only from Audrey's own words", () => {
+    expect(groundedMemoryCandidate(
+      {
+        kind: "user_fact",
+        canonical_key: "user.name",
+        text: "The user's name is Casey.",
+        source: "assistant",
+        evidence_quote: "Your name is Casey",
+        confidence: 0.9,
+        importance: 0.9,
+      },
+      "Are you remembering?",
+      "Yes. Your name is Casey.",
+    )).toBeUndefined();
+
+    expect(groundedMemoryCandidate(
+      {
+        kind: "user_fact",
+        canonical_key: "user.name",
+        text: "The user's name is Casey.",
+        source: "user",
+        evidence_quote: "I'm Casey",
+        confidence: 1,
+        importance: 0.9,
+      },
+      "I'm Casey.",
+      "Nice to meet you, Casey.",
+    )).toMatchObject({ canonicalKey: "user.name", source: "user" });
+  });
+
   it("parses bounded structured memories without exposing its key", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -174,7 +263,10 @@ describe("OpenAI-compatible persona adviser", () => {
                   memories: [
                     {
                       kind: "user_fact",
+                      canonical_key: "user.hobby.pottery",
                       text: "The user started pottery last month.",
+                      source: "user",
+                      evidence_quote: "I started pottery last month",
                       confidence: 1,
                       importance: 0.6,
                     },
@@ -203,7 +295,10 @@ describe("OpenAI-compatible persona adviser", () => {
       memories: [
         {
           kind: "user_fact",
+          canonicalKey: "user.hobby.pottery",
           text: "The user started pottery last month.",
+          source: "user",
+          evidenceQuote: "I started pottery last month",
           confidence: 1,
           importance: 0.6,
         },
