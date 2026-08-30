@@ -7,6 +7,12 @@ import { Logger } from "./log.js";
 import { CoordinatorMcpClient } from "./mcp.js";
 import { OmnigentClient } from "./omnigent.js";
 import { PersonaConversation } from "./persona.js";
+import {
+  OllamaPersonaEmbedder,
+  OpenAiPersonaAdviser,
+  PersonaMemoryRuntime,
+  PostgresPersonaMemoryStore,
+} from "./persona-memory.js";
 import { LocalSpeech } from "./speech.js";
 import { KameS2SRuntime } from "./s2s.js";
 
@@ -38,6 +44,7 @@ let coordinator: OmnigentCoordinator | undefined;
 let tools: CoordinatorMcpClient | undefined;
 let coordinatorConversation: CelerisConversation | undefined;
 let conversation: CelerisConversation | PersonaConversation;
+let personaMemory: PersonaMemoryRuntime | undefined;
 const memoryPolicy = {
   compactAfterMessages: config.celerisHistoryCompactMessages,
   compactAfterCharacters: config.celerisHistoryCompactCharacters,
@@ -45,6 +52,56 @@ const memoryPolicy = {
   compactionIdleMs: config.celerisHistoryCompactionIdleMs,
 };
 if (config.conversationMode === "persona") {
+  if (config.personaMemoryEnabled) {
+    if (
+      !config.personaMemoryDatabaseHost ||
+      !config.personaMemoryDatabaseName ||
+      !config.personaMemoryDatabaseUser ||
+      !config.personaMemoryDatabasePassword ||
+      !config.personaEmbeddingBaseUrl ||
+      !config.personaEmbeddingModel ||
+      !config.personaAdviserBaseUrl ||
+      !config.personaAdviserModel
+    ) {
+      throw new Error("Persona memory requires database, embedding, and adviser configuration");
+    }
+    const store = new PostgresPersonaMemoryStore({
+      host: config.personaMemoryDatabaseHost,
+      port: config.personaMemoryDatabasePort,
+      database: config.personaMemoryDatabaseName,
+      user: config.personaMemoryDatabaseUser,
+      password: config.personaMemoryDatabasePassword,
+      ssl: config.personaMemoryDatabaseSsl,
+      embeddingDimensions: config.personaEmbeddingDimensions,
+      logger,
+    });
+    const embedder = new OllamaPersonaEmbedder({
+      baseUrl: config.personaEmbeddingBaseUrl,
+      model: config.personaEmbeddingModel,
+      dimensions: config.personaEmbeddingDimensions,
+      timeoutMs: config.personaEmbeddingTimeoutMs,
+    });
+    const adviser = new OpenAiPersonaAdviser({
+      baseUrl: config.personaAdviserBaseUrl,
+      ...(config.personaAdviserApiKey
+        ? { apiKey: config.personaAdviserApiKey }
+        : {}),
+      model: config.personaAdviserModel,
+      ...(config.personaMemoryAnalysisModel
+        ? { analysisModel: config.personaMemoryAnalysisModel }
+        : {}),
+      timeoutMs: config.personaAdviserTimeoutMs,
+    });
+    personaMemory = new PersonaMemoryRuntime({
+      ownerKey: config.personaMemoryOwnerKey,
+      store,
+      embedder,
+      adviser,
+      logger,
+      retrievalLimit: config.personaMemoryRetrievalLimit,
+      restoreTurns: config.personaMemoryRestoreTurns,
+    });
+  }
   conversation = new PersonaConversation({
     apiKey: config.celerisApiKey,
     baseUrl: config.celerisBaseUrl,
@@ -54,7 +111,12 @@ if (config.conversationMode === "persona") {
     maxResponseCharacters: config.personaMaxResponseCharacters,
     temperature: config.personaTemperature,
     memoryPolicy,
+    ...(personaMemory ? { persistentMemory: personaMemory } : {}),
   });
+  if (personaMemory) {
+    const restored = await personaMemory.initialize();
+    if (restored.length > 0) conversation.restoreHistory(restored);
+  }
 } else {
   if (
     !config.omnigentBaseUrl ||
@@ -148,6 +210,7 @@ const shutdown = async (signal: string): Promise<void> => {
   await speech.stop();
   await endpoint?.stop();
   await s2s?.stop();
+  await personaMemory?.close();
   coordinator?.stop();
   await tools?.close();
   process.exit(0);

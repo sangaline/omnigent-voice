@@ -35,6 +35,25 @@ export interface Config {
   personaSystemPrompt: string;
   personaMaxResponseCharacters: number;
   personaTemperature: number;
+  personaMemoryEnabled: boolean;
+  personaMemoryOwnerKey: string;
+  personaMemoryDatabaseHost?: string | undefined;
+  personaMemoryDatabasePort: number;
+  personaMemoryDatabaseName?: string | undefined;
+  personaMemoryDatabaseUser?: string | undefined;
+  personaMemoryDatabasePassword?: string | undefined;
+  personaMemoryDatabaseSsl: boolean;
+  personaMemoryRetrievalLimit: number;
+  personaMemoryRestoreTurns: number;
+  personaEmbeddingBaseUrl?: string | undefined;
+  personaEmbeddingModel?: string | undefined;
+  personaEmbeddingDimensions: number;
+  personaEmbeddingTimeoutMs: number;
+  personaAdviserBaseUrl?: string | undefined;
+  personaAdviserApiKey?: string | undefined;
+  personaAdviserModel?: string | undefined;
+  personaMemoryAnalysisModel?: string | undefined;
+  personaAdviserTimeoutMs: number;
   sherpaAsrModelDir: string;
   sherpaTtsModelDir: string;
   sherpaAsrThreads: number;
@@ -158,6 +177,10 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
   if (conversationMode !== "coordinator" && conversationMode !== "persona") {
     throw new Error("CONVERSATION_MODE must be coordinator or persona");
   }
+  const personaMemoryEnabled = boolean(env, "PERSONA_MEMORY_ENABLED", false);
+  if (personaMemoryEnabled && conversationMode !== "persona") {
+    throw new Error("PERSONA_MEMORY_ENABLED requires CONVERSATION_MODE=persona");
+  }
 
   const voiceRuntime = optional(env, "VOICE_RUNTIME") ?? "staged";
   if (voiceRuntime !== "staged" && voiceRuntime !== "kame") {
@@ -272,6 +295,67 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
       420,
     ),
     personaTemperature: boundedNumber(env, "PERSONA_TEMPERATURE", 0.4, 0, 2),
+    personaMemoryEnabled,
+    personaMemoryOwnerKey: optional(env, "PERSONA_MEMORY_OWNER_KEY") ?? "primary",
+    personaMemoryDatabaseHost: personaMemoryEnabled
+      ? required(env, "PERSONA_MEMORY_DATABASE_HOST")
+      : optional(env, "PERSONA_MEMORY_DATABASE_HOST"),
+    personaMemoryDatabasePort: positiveInteger(
+      env,
+      "PERSONA_MEMORY_DATABASE_PORT",
+      5432,
+    ),
+    personaMemoryDatabaseName: personaMemoryEnabled
+      ? required(env, "PERSONA_MEMORY_DATABASE_NAME")
+      : optional(env, "PERSONA_MEMORY_DATABASE_NAME"),
+    personaMemoryDatabaseUser: personaMemoryEnabled
+      ? required(env, "PERSONA_MEMORY_DATABASE_USER")
+      : optional(env, "PERSONA_MEMORY_DATABASE_USER"),
+    personaMemoryDatabasePassword: personaMemoryEnabled
+      ? required(env, "PERSONA_MEMORY_DATABASE_PASSWORD")
+      : optional(env, "PERSONA_MEMORY_DATABASE_PASSWORD"),
+    personaMemoryDatabaseSsl: boolean(env, "PERSONA_MEMORY_DATABASE_SSL", false),
+    personaMemoryRetrievalLimit: positiveInteger(
+      env,
+      "PERSONA_MEMORY_RETRIEVAL_LIMIT",
+      6,
+    ),
+    personaMemoryRestoreTurns: positiveInteger(
+      env,
+      "PERSONA_MEMORY_RESTORE_TURNS",
+      12,
+    ),
+    personaEmbeddingBaseUrl: personaMemoryEnabled
+      ? required(env, "PERSONA_EMBEDDING_BASE_URL")
+      : optional(env, "PERSONA_EMBEDDING_BASE_URL"),
+    personaEmbeddingModel: personaMemoryEnabled
+      ? required(env, "PERSONA_EMBEDDING_MODEL")
+      : optional(env, "PERSONA_EMBEDDING_MODEL"),
+    personaEmbeddingDimensions: positiveInteger(
+      env,
+      "PERSONA_EMBEDDING_DIMENSIONS",
+      1024,
+    ),
+    personaEmbeddingTimeoutMs: positiveInteger(
+      env,
+      "PERSONA_EMBEDDING_TIMEOUT_MS",
+      5_000,
+    ),
+    personaAdviserBaseUrl: personaMemoryEnabled
+      ? required(env, "PERSONA_ADVISER_BASE_URL")
+      : optional(env, "PERSONA_ADVISER_BASE_URL"),
+    personaAdviserApiKey: optional(env, "PERSONA_ADVISER_API_KEY"),
+    personaAdviserModel: personaMemoryEnabled
+      ? required(env, "PERSONA_ADVISER_MODEL")
+      : optional(env, "PERSONA_ADVISER_MODEL"),
+    personaMemoryAnalysisModel:
+      optional(env, "PERSONA_MEMORY_ANALYSIS_MODEL") ??
+      (personaMemoryEnabled ? required(env, "PERSONA_ADVISER_MODEL") : undefined),
+    personaAdviserTimeoutMs: positiveInteger(
+      env,
+      "PERSONA_ADVISER_TIMEOUT_MS",
+      30_000,
+    ),
     sherpaAsrModelDir: required(env, "SHERPA_ASR_MODEL_DIR"),
     sherpaTtsModelDir: required(env, "SHERPA_TTS_MODEL_DIR"),
     sherpaAsrThreads: positiveInteger(env, "SHERPA_ASR_THREADS", 4),

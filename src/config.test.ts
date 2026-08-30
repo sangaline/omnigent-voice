@@ -64,6 +64,35 @@ describe("conversation mode configuration", () => {
     expect(config.personaSystemPrompt).toBe("Speak like a thoughtful old friend.");
     expect(config.personaMaxResponseCharacters).toBe(500);
     expect(config.personaTemperature).toBe(0.7);
+    expect(config.personaMemoryEnabled).toBe(false);
+  });
+
+  it("validates the opt-in persistent persona memory dependencies", () => {
+    const base = {
+      DISCORD_BOT_TOKEN: "test-token",
+      SHERPA_ASR_MODEL_DIR: "/test/asr",
+      SHERPA_TTS_MODEL_DIR: "/test/tts",
+      CONVERSATION_MODE: "persona",
+      PERSONA_MEMORY_ENABLED: "true",
+    };
+    expect(() => loadConfig(base)).toThrow(
+      "Missing required environment variable: PERSONA_MEMORY_DATABASE_HOST",
+    );
+    const config = loadConfig({
+      ...base,
+      PERSONA_MEMORY_DATABASE_HOST: "postgres.invalid",
+      PERSONA_MEMORY_DATABASE_NAME: "persona",
+      PERSONA_MEMORY_DATABASE_USER: "persona",
+      PERSONA_MEMORY_DATABASE_PASSWORD: "test-password",
+      PERSONA_EMBEDDING_BASE_URL: "http://ollama.invalid",
+      PERSONA_EMBEDDING_MODEL: "embedding-test",
+      PERSONA_ADVISER_BASE_URL: "https://adviser.invalid/v1",
+      PERSONA_ADVISER_MODEL: "adviser-test",
+    });
+    expect(config.personaMemoryEnabled).toBe(true);
+    expect(config.personaEmbeddingDimensions).toBe(1024);
+    expect(config.personaMemoryRestoreTurns).toBe(12);
+    expect(config.personaMemoryAnalysisModel).toBe("adviser-test");
   });
 
   it("rejects unknown conversation modes and invalid persona temperatures", () => {

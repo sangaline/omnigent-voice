@@ -49,6 +49,7 @@ import {
 } from "./s2s.js";
 
 export interface VoiceConversation {
+  prepare?(input: string): void;
   respond(
     input: string,
     onSpeechSegment?: ((segment: string) => void) | undefined,
@@ -329,7 +330,9 @@ export class DiscordVoiceBot {
     const started = performance.now();
     let speechStarted = false;
     const decoder = new OpusScript(48_000, 2, OpusScript.Application.AUDIO);
-    const transcription = this.options.speech.createTranscription();
+    const transcription = this.options.speech.createTranscription((partial) => {
+      this.options.conversation.prepare?.(partial);
+    });
     const endpoint = this.options.endpoint;
     const vad = endpoint?.createVad();
     const endpointAudio = endpoint ? new TailAudioBuffer(8 * 16_000) : undefined;

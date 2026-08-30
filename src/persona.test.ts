@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Logger } from "./log.js";
+import type { PersonaMemoryRuntime } from "./persona-memory.js";
 import {
   PersonaConversation,
   defaultPersonaSystemPrompt,
@@ -87,6 +88,97 @@ describe("persona conversation", () => {
     expect(body.tools).toBeUndefined();
     expect(body.tool_choice).toBeUndefined();
     expect(body.stream).toBe(true);
+  });
+
+  it("can acknowledge and deliberately escalate a difficult turn", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        streamingResponse(
+          {
+            choices: [
+              {
+                delta: { content: "Ooh, give me a second to make this one good. " },
+              },
+            ],
+          },
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call-1",
+                      type: "function",
+                      function: {
+                        name: "ask_adviser",
+                        arguments: JSON.stringify({ request: "Tell a clever pottery joke." }),
+                      },
+                    },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+          },
+          "[DONE]",
+        ),
+      )
+      .mockResolvedValueOnce(
+        streamingResponse(
+          {
+            choices: [
+              {
+                delta: { content: "I tried pottery, but I could not handle the pressure. " },
+                finish_reason: "stop",
+              },
+            ],
+          },
+          "[DONE]",
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const persistentMemory = {
+      prepare: vi.fn(),
+      contextFor: vi.fn(() => undefined),
+      rememberTurn: vi.fn(),
+      askAdviser: vi.fn(async () => "Use a joke about not handling the pressure."),
+    } as unknown as PersonaMemoryRuntime;
+    const segments: string[] = [];
+
+    await expect(
+      conversation({ persistentMemory }).respond(
+        "tell me a good pottery joke",
+        (segment) => segments.push(segment),
+      ),
+    ).resolves.toBe(
+      "Ooh, give me a second to make this one good. I tried pottery, but I could not handle the pressure.",
+    );
+    expect(segments).toEqual([
+      "Ooh, give me a second to make this one good.",
+      "I tried pottery, but I could not handle the pressure.",
+    ]);
+    expect(persistentMemory.askAdviser).toHaveBeenCalledWith(
+      "Tell a clever pottery joke.",
+      expect.arrayContaining([
+        { role: "user", content: "tell me a good pottery joke" },
+      ]),
+    );
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      tools?: Array<{ function?: { name?: string } }>;
+    };
+    expect(firstBody.tools?.[0]?.function?.name).toBe("ask_adviser");
+    const finalBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      messages?: Array<{ role?: string; tool_call_id?: string; content?: string }>;
+      tools?: unknown;
+    };
+    expect(finalBody.messages).toContainEqual({
+      role: "tool",
+      tool_call_id: "call-1",
+      content: JSON.stringify({ suggestion: "Use a joke about not handling the pressure." }),
+    });
+    expect(finalBody.tools).toBeUndefined();
   });
 
   it("retains conversational history without coordinator state or tools", async () => {

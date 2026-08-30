@@ -37,16 +37,38 @@ layer -> direct spoken reply or small Omnigent MCP coordinator tools -> local
 Pocket TTS -> Discord voice. Coordinator actions return immediately;
 Celeris never waits for a coding agent to complete work before acknowledging it.
 
-`CONVERSATION_MODE=persona` selects the tool-free variant. It reuses the exact
-Discord, streaming ASR, endpointing, interruption, Pocket/Piper TTS, memory, and
-private logging path, but the process does not instantiate `OmnigentClient`,
-`OmnigentCoordinator`, or an MCP client. `PERSONA_SYSTEM_PROMPT` overrides the
+`CONVERSATION_MODE=persona` selects the companion-oriented variant. It reuses
+the exact Discord, streaming ASR, endpointing, interruption, Pocket/Piper TTS,
+hot dialogue, and private logging path, but the process does not instantiate
+`OmnigentClient`, `OmnigentCoordinator`, or an MCP client.
+`PERSONA_SYSTEM_PROMPT` overrides the
 sanitized built-in personality; `PERSONA_MAX_RESPONSE_CHARACTERS` and
 `PERSONA_TEMPERATURE` tune voice-sized output. This mode is separate from
 PersonaPlex and from `VOICE_RUNTIME=kame`: production persona currently uses
 the staged Celeris/Pocket pipeline. A leaked Celeris control marker such as
 `< channel thought` is rejected and retried once before any final fragment is
 queued to speech. See `docs/PERSONA.md`.
+
+`PERSONA_MEMORY_ENABLED=true` adds a parallel durable companion-memory harness
+without changing coordinator mode. Completed turns, typed memories, and
+short-lived private thoughts live in a dedicated Postgres/pgvector database.
+Partial ASR revisions start local Ollama embedding and retrieval; the endpoint
+uses only an already-completed related snapshot and calls Celeris immediately,
+so neither pgvector nor an adviser becomes a normal-turn latency gate. After
+speech generation, one serialized background job persists the turn, calls an
+OpenAI-compatible analysis model, embeds its explicit memories and optional
+thought, and stores them. The latest configured turns restore verbatim after a
+restart. Never log adviser arguments, memory text, database credentials, owner
+keys, or embeddings.
+
+The memory harness exposes only `ask_adviser` to Celeris. Routine conversation
+must answer directly. A deliberate escalation first speaks a short natural
+acknowledgment, then calls the configured conversational adviser and returns to
+Celeris for final Audrey-style wording. The adviser cannot perform external
+actions. `PERSONA_MEMORY_ANALYSIS_MODEL` and `PERSONA_ADVISER_MODEL` may differ;
+an external provider receives the completed private dialogue and must be an
+explicit deployment choice. Local Ollama remains a valid OpenAI-compatible
+alternative. See `docs/PERSONA.md`.
 
 The bundled runtime models are the int8 0.6B Nemotron English streaming
 transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the

@@ -40,11 +40,13 @@ export class StreamingTranscription {
   private sampleCount = 0;
   private peak = 0;
   private firstPartialLogged = false;
+  private lastPartial = "";
   private finished = false;
 
   public constructor(
     private readonly recognizer: OnlineRecognizer,
     private readonly logger: Logger,
+    private readonly onPartial?: ((text: string) => void) | undefined,
   ) {
     this.stream = recognizer.createStream();
   }
@@ -87,9 +89,13 @@ export class StreamingTranscription {
       this.recognizer.decode(this.stream);
       decoded = true;
     }
-    if (decoded && !this.firstPartialLogged) {
+    if (decoded) {
       const partial = this.recognizer.getResult(this.stream).text?.trim() ?? "";
-      if (partial) {
+      if (partial && partial !== this.lastPartial) {
+        this.lastPartial = partial;
+        this.onPartial?.(partial);
+      }
+      if (partial && !this.firstPartialLogged) {
         this.firstPartialLogged = true;
         this.logger.info("asr.first_partial", {
           durationMs: Math.round(performance.now() - this.started),
@@ -206,8 +212,10 @@ export class LocalSpeech {
     return transcription.finish().text;
   }
 
-  public createTranscription(): StreamingTranscription {
-    return new StreamingTranscription(this.recognizer, this.options.logger);
+  public createTranscription(
+    onPartial?: ((text: string) => void) | undefined,
+  ): StreamingTranscription {
+    return new StreamingTranscription(this.recognizer, this.options.logger, onPartial);
   }
 
   public async synthesize(text: string): Promise<SynthesizedAudio> {

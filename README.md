@@ -9,11 +9,13 @@ ordinary turns directly and uses a small in-process MCP coordinator when a
 request depends on real sessions or requires agent work. Work is queued
 asynchronously, so spoken acknowledgements do not wait for a coding agent.
 
-`CONVERSATION_MODE=persona` is a tool-free conversational variant. It uses a
-static personality prompt and the same Discord, streaming ASR, semantic
-endpointing, barge-in, conversational memory, Pocket/Piper TTS, and private
-audit pipeline. It does not initialize an Omnigent client, coordinator, or MCP
-transport. `PERSONA_SYSTEM_PROMPT` can replace the sanitized built-in persona;
+`CONVERSATION_MODE=persona` is a companion-oriented conversational variant. It
+uses a static personality prompt and the same Discord, streaming ASR, semantic
+endpointing, barge-in, Pocket/Piper TTS, and private audit pipeline. It does not
+initialize an Omnigent client, coordinator, or MCP transport. Optional durable
+persona memory uses Postgres/pgvector, local embeddings, and an asynchronous
+OpenAI-compatible adviser; ordinary Celeris turns never wait for the adviser.
+`PERSONA_SYSTEM_PROMPT` can replace the sanitized built-in persona;
 response length and variation use `PERSONA_MAX_RESPONSE_CHARACTERS` and
 `PERSONA_TEMPERATURE`. See [docs/PERSONA.md](docs/PERSONA.md).
 
@@ -32,8 +34,10 @@ are both cancelled so the next turn does not wait behind discarded audio.
 Piper remains available with `TTS_RUNTIME=piper` as a lower-quality fallback.
 
 The project is intentionally narrow: one trusted caller, one container, and no
-text or web interface. Coordinator mode has one focused Omnigent session;
-persona mode has no external tools.
+text or web interface. Coordinator mode has one focused Omnigent session.
+Persona mode has no external-action tools; when durable memory is enabled it
+offers one optional private adviser tool for deliberately slower creative or
+reflective turns.
 
 An optional guided speech-to-speech experiment keeps the same coordinator but
 replaces staged playback with native KAME Q4/Vulkan audio. Discord audio is fed
