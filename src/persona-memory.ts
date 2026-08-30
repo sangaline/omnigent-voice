@@ -706,7 +706,14 @@ const partialJsonStringAllowEmpty = (
   }
 };
 
+export const creativeExplanationRequest = (input: string): boolean =>
+  /\bexplain\b[\s\S]{0,50}\b(?:joke|punchline|story|poem|roast)\b/i.test(input) ||
+  /\b(?:what(?:'s| is| was) the joke|what (?:did|does) (?:that|the joke) mean|why (?:is|was) (?:that|it) funny)\b/i.test(
+    input,
+  );
+
 const creativePersonaRequest = (input: string): boolean =>
+  !creativeExplanationRequest(input) &&
   /\b(?:joke|punchline|make me laugh|tell me a story|poem|roast|(?:distract|entertain|amuse) me|cheer me up)\b/i.test(
     input,
   );

@@ -120,14 +120,17 @@ question, or steer the subject away. Logs retain
 aggregate timing and token counts but never the provider request text.
 
 The same adviser is exposed to Celeris through one narrow `ask_adviser` tool.
-Celeris answers ordinary turns directly. A creative or distraction request
-speaks a short acknowledgment and deliberately enters the bounded candidate
-race, even when a planning draft arrived during speech. Creative advice is a
+Celeris answers ordinary turns directly. Explaining or discussing an earlier
+joke, story, poem, or roast is ordinary dialogue rather than a new creative
+request. A creative or distraction request deliberately enters the bounded
+candidate race, even when a planning draft arrived during speech. Creative advice is a
 three-candidate structured request, and the first grounded, non-template,
 voice-sized candidate streams directly to TTS without a second Celeris rewrite.
 The hot path races that request against a separate three-candidate Celeris pass,
 selects the first safe result, records which source actually won, and aborts the
-loser. `PERSONA_ADVISER_HOT_TIMEOUT_MS` bounds this caller-facing race without
+loser. It waits 400 ms after routing for a real candidate before speaking the
+short hold line, so a fast fallback is not delayed behind acknowledgment audio.
+`PERSONA_ADVISER_HOT_TIMEOUT_MS` bounds this caller-facing race without
 shortening the asynchronous analysis timeout. The original transcript is
 authoritative even when Celeris paraphrases tool arguments. Discord receives
 a fresh raw-audio resource for every delayed speech batch. A completed hold line

@@ -96,9 +96,13 @@ anchor locally, so late planning cannot silently erase a relevant callback;
 lower-scoring memories never enter the hot context. If
 no safe candidate is ready, ordinary Celeris response remains immediate;
 explicit creative or distraction requests may use `ask_adviser` behind the hold
-line. That hot escalation races the adviser against a separate three-candidate
-Celeris fallback, applies the same safety gate to both, records the actual
-winner for provenance, and aborts the loser. `PERSONA_ADVISER_HOT_TIMEOUT_MS`
+line. An explanation or analysis of material Audrey just produced is ordinary
+dialogue, not a new creative request. The hot escalation races the adviser
+against a separate three-candidate Celeris fallback and waits 400 ms for a real
+answer before emitting the hold line; a fast winner therefore reaches TTS
+directly instead of being queued behind acknowledgment audio. It applies the
+same safety gate to both, records the actual winner for provenance, and aborts
+the loser. `PERSONA_ADVISER_HOT_TIMEOUT_MS`
 defaults to 6,000 ms and bounds only this caller-facing race; the longer analysis
 timeout remains available for asynchronous memory work. Each delayed spoken
 batch owns a fresh Discord raw-audio resource and is awaited through idle. Never
@@ -167,6 +171,12 @@ contributions, not instructions to interview the human, invite a memory test,
 or evade a direct runtime question. Provenance retains the selected memory,
 thought, or draft process-locally so short DeepSeek follow-ups can report exactly
 what contributed without another model round.
+Mechanism follow-ups require explicit mechanism language; an ordinary pronoun-
+bearing greeting such as “how's it going?” must never inherit a stale DeepSeek
+topic. A short “I said ...” turn is treated as a likely ASR repair: the quoted
+words drive the reply, and the prefix is not evidence that the human is
+criticizing Audrey. Short repaired acknowledgments also retain the declarative
+conversation-rhythm guard.
 
 The bundled runtime models are the int8 0.6B Nemotron English streaming
 transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the

@@ -9,6 +9,7 @@ import {
 } from "./celeris.js";
 import { Logger } from "./log.js";
 import {
+  creativeExplanationRequest,
   PersonaMemoryRuntime,
   selfContainedPersonaRequest,
   unsafeCreativeDraft,
@@ -94,6 +95,7 @@ export const directCreativeRequest = (
   recentDialogue: readonly PersonaMessage[],
 ): boolean => {
   if (/\b(?:next time|later|sometime|another day)\b/i.test(input)) return false;
+  if (creativeExplanationRequest(input)) return false;
   if (/\b(?:joke|punchline|make me laugh|tell me a story|poem|roast)\b/i.test(input)) {
     return true;
   }
@@ -102,6 +104,15 @@ export const directCreativeRequest = (
     (message) => typeof message.content === "string" &&
       /\b(?:joke|funny|punchline|made you laugh)\b/i.test(message.content),
   );
+};
+
+export const transcriptRepairContent = (input: string): string | undefined => {
+  const match = /^(?:(?:no|sorry)[, ]+)?i said\s+(.{1,80}?)[.!?]*$/i.exec(
+    input.trim(),
+  );
+  if (!match?.[1]) return undefined;
+  const content = match[1].replace(/^["']|["']$/g, "").trim();
+  return content.split(/\s+/).length <= 8 ? content : undefined;
 };
 
 export const directRuntimeQuestion = (input: string): boolean =>
@@ -119,10 +130,13 @@ export const directDeepSeekQuestion = (
       /\bdeep\s*seek(?:\s+flash)?\b/i.test(message.content),
   );
   return recentDeepSeek && (
-    /\b(?:actually|specifically|exactly|input|telling|said|saying|gave|give|helping|doing)\b/i.test(
+    /\b(?:specifically|exactly|input|telling|said|saying|gave|give)\b/i.test(input) ||
+    /\b(?:what|how)\b[\s\S]{0,35}\b(?:it|that)\b[\s\S]{0,35}\b(?:say|said|tell|telling|give|gave|input|help|helping|do|doing|work|working)\b/i.test(
       input,
     ) ||
-    /\b(?:what|how|is|does|did|can)\b[\s\S]{0,50}\b(?:it|that)\b/i.test(input)
+    /\b(?:is|was|does|did|can)\s+(?:it|that)\b[\s\S]{0,35}\b(?:actually|telling|giving|helping|working|doing)\b/i.test(
+      input,
+    )
   );
 };
 
@@ -384,6 +398,7 @@ export class PersonaConversation {
       invalidPersonaResponse(text) ||
       (selfContainedRequest && incompletePersonaContribution(text));
     const speechReferenceHint = this.options.persistentMemory?.speechReferenceHint(input);
+    const transcriptRepair = transcriptRepairContent(input);
     const correctionAnchor = currentCorrectionAnchor(input);
     const scheduleAnchor = currentScheduleAnchor(input);
     const memoryContinuityAnchor = this.options.persistentMemory?.continuityAnchorFor?.(input);
@@ -391,7 +406,7 @@ export class PersonaConversation {
       runtimeQuestion && /\b(?:background|notes?|suggest(?:ed|ion)?|context)\b/i.test(input)
         ? "background context"
         : undefined;
-    const rhythmHint = personaRhythmHint(this.history, input);
+    const rhythmHint = personaRhythmHint(this.history, transcriptRepair ?? input);
     const requiredAnchors = Array.from(new Set(
       [
         correctionAnchor,
@@ -488,6 +503,17 @@ export class PersonaConversation {
         : []),
       ...(rhythmHint
         ? [{ role: "system" as const, content: rhythmHint }]
+        : []),
+      ...(transcriptRepair
+        ? [
+            {
+              role: "system" as const,
+              content:
+                "This short turn is a likely live-transcription repair. The words the human meant you to hear are " +
+                `${JSON.stringify(transcriptRepair)}. Respond to those words in the existing conversation. Do not treat ` +
+                "the phrase 'I said' as criticism, a complaint about your behavior, or a request to change the subject.",
+            },
+          ]
         : []),
       ...(persistentContext
         ? [
@@ -645,17 +671,15 @@ export class PersonaConversation {
         }
         if (call && this.options.persistentMemory) {
           if (segmenter) emit(segmenter.finish());
-          if (spokenSegments.length === 0) {
-            emit(["One second."]);
-          }
           // The completed human transcript is the authoritative creative request.
           // A small routing model may omit a safety-relevant word such as
           // "distract" when paraphrasing tool arguments.
           const request = input;
           const adviserStarted = performance.now();
+          const holdLine = "One second.";
           const remainingCharacters = Math.max(
             1,
-            this.maxResponseCharacters - spokenSegments.join(" ").length - 1,
+            this.maxResponseCharacters - holdLine.length - 1,
           );
           const adviserSegmenter = onSpeechSegment
             ? new StreamingSpeechSegmenter(remainingCharacters)
@@ -718,7 +742,21 @@ export class PersonaConversation {
           });
           let result: string;
           try {
-            const winner = await Promise.any([fastFallbackPromise, adviserPromise]);
+            const winnerPromise = Promise.any([fastFallbackPromise, adviserPromise]);
+            let holdTimer: ReturnType<typeof setTimeout> | undefined;
+            const winnerOrHold = await Promise.race([
+              winnerPromise.then((winner) => ({ kind: "winner" as const, winner })),
+              new Promise<{ kind: "hold" }>((resolve) => {
+                holdTimer = setTimeout(() => resolve({ kind: "hold" }), 400);
+              }),
+            ]);
+            if (holdTimer) clearTimeout(holdTimer);
+            if (winnerOrHold.kind === "hold" && spokenSegments.length === 0) {
+              emit([holdLine]);
+            }
+            const winner = winnerOrHold.kind === "winner"
+              ? winnerOrHold.winner
+              : await winnerPromise;
             result = winner.result;
             usedAdviser = winner.source === "adviser";
             usedFastFallback = winner.source === "celeris";

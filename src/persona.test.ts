@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Logger } from "./log.js";
 import type { PersonaMemoryRuntime } from "./persona-memory.js";
 import {
+  directCreativeRequest,
   directDeepSeekQuestion,
   PersonaConversation,
   containsPersonaAnchor,
@@ -14,6 +15,7 @@ import {
   parsePersonaCandidatePool,
   personaRhythmHint,
   personaTurnGroundingInvariant,
+  transcriptRepairContent,
 } from "./persona.js";
 
 const response = (message: object): Response =>
@@ -94,6 +96,18 @@ describe("persona conversation", () => {
     expect(directPersonalRecallQuestion("Do you know my name?")).toBe(true);
     expect(directPersonalRecallQuestion("What did I say I like?" )).toBe(true);
     expect(directPersonalRecallQuestion("Do you know what I mean?" )).toBe(false);
+  });
+
+  it("keeps creative explanation and short transcription repairs on the ordinary dialogue path", () => {
+    expect(directCreativeRequest("Can you explain the joke to me?", [
+      { role: "assistant", content: "Picture this: a toaster with stage fright." },
+    ])).toBe(false);
+    expect(directCreativeRequest("Tell me another joke", [
+      { role: "assistant", content: "Picture this: a toaster with stage fright." },
+    ])).toBe(true);
+    expect(transcriptRepairContent("I said yeah")).toBe("yeah");
+    expect(transcriptRepairContent("I said that the whole afternoon was strange and complicated for everyone"))
+      .toBeUndefined();
   });
 
   it("adds a declarative rhythm guard after repeated questions or a short acknowledgement", () => {
@@ -180,6 +194,7 @@ describe("persona conversation", () => {
         _history: unknown,
         onPartial?: (fragment: string) => void,
       ) => {
+        await new Promise((resolve) => setTimeout(resolve, 425));
         onPartial?.("I tried pottery, but I could not handle the pressure.");
         return "I tried pottery, but I could not handle the pressure.";
       }),
@@ -268,6 +283,9 @@ describe("persona conversation", () => {
     expect(directDeepSeekQuestion("is deep seek actually telling you things", []))
       .toBe(true);
     expect(directDeepSeekQuestion("that's interesting", [
+      { role: "assistant", content: "DeepSeek Flash can prepare a draft." },
+    ])).toBe(false);
+    expect(directDeepSeekQuestion("Hey, how's it going?", [
       { role: "assistant", content: "DeepSeek Flash can prepare a draft." },
     ])).toBe(false);
     await expect(subject.respond(

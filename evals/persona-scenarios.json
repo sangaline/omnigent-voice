@@ -633,5 +633,56 @@
         }
       }
     ]
+  },
+  {
+    "id": "ordinary_greeting_after_mechanism_chat",
+    "description": "A stale mechanism topic must not turn an ordinary pronoun-bearing greeting into another implementation disclosure.",
+    "initialHistory": [
+      { "role": "user", "content": "Does DeepSeek Flash ever prepare a suggestion while I am talking?" },
+      { "role": "assistant", "content": "It can prepare background context, but it did not contribute to that reply." }
+    ],
+    "turns": [
+      {
+        "input": "hey how's it going",
+        "expected": {
+          "speechForbiddenTerms": ["DeepSeek", "deep seek", "background context", "candidate draft", "mechanism"],
+          "maxSpeechWords": 45
+        }
+      }
+    ]
+  },
+  {
+    "id": "creative_followup_is_not_a_new_creative_task",
+    "description": "Explaining a just-told joke stays on the immediate dialogue path instead of invoking another creative generation pass.",
+    "initialHistory": [
+      { "role": "user", "content": "Tell me a silly joke." },
+      { "role": "assistant", "content": "Picture this: a toaster auditions for comedy, but every punchline comes out as burnt bread with a smiley face." }
+    ],
+    "turns": [
+      {
+        "input": "can you explain the joke to me",
+        "expected": {
+          "speechAnyTerms": [["toaster", "bread", "comedy", "punchline", "job"]],
+          "speechForbiddenTerms": ["One second", "background", "adviser", "I lost that thought"],
+          "maxSpeechWords": 55
+        }
+      }
+    ]
+  },
+  {
+    "id": "short_asr_repair_is_not_a_complaint",
+    "description": "A short repetition after the recognizer missed speech is answered as the intended utterance, not interpreted as criticism.",
+    "initialHistory": [
+      { "role": "assistant", "content": "I missed that. Say it once more?" }
+    ],
+    "turns": [
+      {
+        "input": "I said yeah",
+        "expected": {
+          "speechForbiddenTerms": ["over-explaining", "stop explaining", "change the subject", "What's actually on your mind", "What is actually on your mind", "?"],
+          "maxSpeechWords": 35
+        }
+      }
+    ]
   }
 ]
