@@ -1831,3 +1831,37 @@ No coordinator action or live-session read was used for this experiment, and
 the excluded ESPN session remained untouched. Promotion evidence is 142 passing
 unit tests, clean typecheck and build, all 46 isolated trials, and all 35
 stateful scenarios across 117 linked turns.
+
+### 2026-08-29 — Typed streaming evidence cannot look final
+
+Hypothesis H62: selecting the last textual `assistant:` marker was sufficient
+for noisy native deltas. A code-path audit disproved it. An older assistant
+message can be followed by newer tool activity before any new conclusion; the
+fallback parser would then retain that stale message together with the trailing
+tools and tag the whole value as the latest conclusion. The post-deploy log had
+no human or notification turns yet, so this was found without reading or
+mutating any live session.
+
+Coordinator output entries now retain whether they are assistant text or native
+activity. Every delta exposes the newest assistant value separately and marks it
+`streaming` or `final`; the model-only compactor consumes that typed value and
+removes its duplicate field. The legacy fallback now accepts a conclusion only
+when the last structural section is `assistant:`. If newer tool or terminal
+activity follows it, the bounded model view explicitly says there is no new
+assistant conclusion. The original chronological payload remains unchanged for
+cursors, deterministic safety checks, and private audit logging.
+
+A new linked scenario asks, in ASR-style speech, what the focused session has
+said “so far” while the typed suffix ends mid-sentence at “passed 20 of.” The
+baseline failed five of five: Celeris called `get_output`, discarded the fresh
+suffix, and omitted both the number and its streaming status. A narrow typed
+evidence renderer now answers that current-status request in 0–4 ms and zero
+model rounds while saying the session is still responding. It refuses a named
+nonfocused target so fresh focused output cannot be misattributed. The later
+final event is still adapted normally and preserves the final count.
+
+The complete candidate passed five of five targeted linked runs, 145 unit
+tests, clean typecheck and build, all 46 isolated cases after retrying one
+rate-limited invalid trial, and all 36 stateful scenarios across 119 linked
+turns. No coordinator action or live-session read occurred, and the excluded
+ESPN session remained untouched.

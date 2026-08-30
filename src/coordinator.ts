@@ -54,6 +54,7 @@ interface CoordinatorActionInput extends JsonObject {
 interface OutputEntry {
   id: string;
   text: string;
+  kind: "assistant" | "activity";
   contextText?: string;
 }
 
@@ -1258,7 +1259,11 @@ export class OmnigentCoordinator {
       );
       const changed = matching
         ? this.finalizeLiveOutput(state, matching.key, stableId, rawText)
-        : this.appendOutputEntry(state, { id: stableId, text: formatted });
+        : this.appendOutputEntry(state, {
+            id: stableId,
+            text: formatted,
+            kind: "assistant",
+          });
       if (changed) this.publishLiveOutput(id);
       return;
     }
@@ -1306,6 +1311,7 @@ export class OmnigentCoordinator {
     const entry: OutputEntry = {
       id,
       text: formatted,
+      kind: "assistant",
       ...(consumed > 0
         ? { contextText: suffix ? `assistant (continued): ${suffix}` : "" }
         : {}),
@@ -1376,7 +1382,13 @@ export class OmnigentCoordinator {
         continue;
       }
       if (isAssistantMessage(raw)) assistantMessageChanged = true;
-      if (text) state.entries.push({ id, text });
+      if (text) {
+        state.entries.push({
+          id,
+          text,
+          kind: isAssistantMessage(raw) ? "assistant" : "activity",
+        });
+      }
     }
     while (state.seenOrder.length > 300) {
       const removed = state.seenOrder.shift();
@@ -1400,25 +1412,45 @@ export class OmnigentCoordinator {
     const entries = state.entries.slice(state[cursor]);
     state[cursor] = state.entries.length;
     const rendered = entries
-      .map((entry) =>
-        cursor === "contextIndex" ? (entry.contextText ?? entry.text) : entry.text,
-      )
-      .filter(Boolean);
+      .map((entry) => ({
+        entry,
+        text: cursor === "contextIndex" ? (entry.contextText ?? entry.text) : entry.text,
+      }))
+      .filter(({ text }) => Boolean(text));
+    let voiceAssistantOutput: string | undefined;
+    let voiceAssistantOutputState: "final" | "streaming" | undefined;
+    const latestRendered = rendered.at(-1);
+    if (latestRendered?.entry.kind === "assistant") {
+      voiceAssistantOutput = latestRendered.text;
+      voiceAssistantOutputState = "final";
+    }
     let liveCursor: string | undefined;
     if (cursor === "contextIndex") {
       for (const live of state.live.values()) {
         const suffix = live.text.slice(live.contextOffset);
         live.contextOffset = live.text.length;
         if (!suffix) continue;
-        rendered.push(`assistant (still streaming): ${suffix}`);
+        const streamingText = `assistant (still streaming): ${suffix}`;
+        rendered.push({
+          entry: { id: `live:${live.key}`, text: streamingText, kind: "assistant" },
+          text: streamingText,
+        });
+        voiceAssistantOutput = streamingText;
+        voiceAssistantOutputState = "streaming";
         liveCursor = `live:${live.key}:${live.text.length}`;
       }
     }
-    const text = rendered.join("\n\n");
+    const text = rendered.map(({ text }) => text).join("\n\n");
     return {
       changed: rendered.length > 0,
       output: text.length > 8_000 ? `${text.slice(-8_000)}\n[older output omitted]` : text,
       cursor: liveCursor ?? entries.at(-1)?.id ?? null,
+      ...(voiceAssistantOutput
+        ? {
+            voice_assistant_output: voiceAssistantOutput,
+            voice_assistant_output_state: voiceAssistantOutputState,
+          }
+        : {}),
     };
   }
 
@@ -1431,11 +1463,18 @@ export class OmnigentCoordinator {
     const cursorExpired = Boolean(cursor && cursorIndex < 0);
     const entries = state.entries.slice(cursorIndex + 1);
     const text = entries.map((entry) => entry.text).join("\n\n");
+    const latestEntry = entries.at(-1);
     return {
       changed: entries.length > 0,
       output: text.length > 8_000 ? `${text.slice(-8_000)}\n[older output omitted]` : text,
       cursor: entries.at(-1)?.id ?? cursor ?? null,
       cursor_expired: cursorExpired,
+      ...(latestEntry?.kind === "assistant"
+        ? {
+            voice_assistant_output: latestEntry.text,
+            voice_assistant_output_state: "final",
+          }
+        : {}),
     };
   }
 

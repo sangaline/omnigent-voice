@@ -498,6 +498,54 @@ describe("Celeris coordinator conversation", () => {
     expect(output.length).toBeLessThanOrEqual(2_000);
     expect(output).toContain("tool call shell");
     expect(output).toContain("tool result");
+    expect(compacted.output_delta).toMatchObject({
+      voice_selection: "bounded_native_activity_without_new_assistant_conclusion",
+    });
+  });
+
+  it("does not promote an older assistant message followed by newer tool activity", () => {
+    const [compacted] = compactCoordinatorUpdatesForModel([
+      {
+        event_id: 11,
+        type: "session_output",
+        session_id: "session-voice",
+        name: "Voice Work",
+        output_delta: {
+          changed: true,
+          output:
+            "tool call shell: start the check\n\nassistant: The prior build was healthy.\n\ntool call shell: run the new test\n\ntool result: still running",
+        },
+      },
+    ]);
+    expect(compacted?.output_delta).toMatchObject({
+      voice_selection: "bounded_native_activity_without_new_assistant_conclusion",
+    });
+    expect((compacted?.output_delta as { output: string }).output).toContain(
+      "tool result: still running",
+    );
+  });
+
+  it("prefers typed streaming assistant output over an older noisy prefix", () => {
+    const [compacted] = compactCoordinatorUpdatesForModel([
+      {
+        event_id: 12,
+        type: "session_output",
+        session_id: "session-voice",
+        name: "Voice Work",
+        output_delta: {
+          changed: true,
+          output:
+            "assistant: The prior build was healthy.\n\ntool call shell: run the new test\n\ntool result: still running\n\nassistant (still streaming): The candidate has passed 20 of",
+          voice_assistant_output: "assistant (still streaming): The candidate has passed 20 of",
+          voice_assistant_output_state: "streaming",
+        },
+      },
+    ]);
+    expect(compacted?.output_delta).toEqual({
+      changed: true,
+      output: "assistant (still streaming): The candidate has passed 20 of",
+      voice_selection: "latest_streaming_assistant_suffix_after_native_activity",
+    });
   });
 
   it("answers a plain latest-output question only from a safe fresh delta", () => {
@@ -538,6 +586,34 @@ describe("Celeris coordinator conversation", () => {
         latest_message: { role: "user", text: "Do not attribute this to the agent." },
         updates: [],
       }),
+    ).toBeUndefined();
+  });
+
+  it("answers current status from a typed streaming suffix without claiming completion", () => {
+    const state = {
+      focused_session: { id: "session-primary", name: "Primary Work" },
+      known_sessions: [
+        { id: "session-primary", name: "Primary Work", focused: true },
+        { id: "session-side", name: "Side Work", focused: false },
+      ],
+      pending_decisions: [],
+      updates: [],
+      output_delta: {
+        changed: true,
+        output:
+          "assistant: Old result.\n\ntool call shell: run checks\n\nassistant (still streaming): The candidate passed 20 of",
+        voice_assistant_output: "assistant (still streaming): The candidate passed 20 of",
+        voice_assistant_output_state: "streaming",
+      },
+    };
+    expect(
+      directFocusedOutputSpeech("what has primary work said so far", state),
+    ).toBe("Primary Work is still responding. So far: The candidate passed 20 of");
+    expect(
+      directFocusedOutputSpeech("what has side work said so far", state),
+    ).toBeUndefined();
+    expect(
+      directFocusedOutputSpeech("what have primary work and side work said so far", state),
     ).toBeUndefined();
   });
 

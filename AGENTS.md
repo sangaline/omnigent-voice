@@ -196,16 +196,21 @@ the human was still speaking. Partial text is not proactively spoken; a final
 message produces one `session_output` event immediately rather than waiting for
 item persistence. Output arriving later remains buffered for the next turn.
 Native output deltas can contain a large chronological prefix of terminal and
-tool activity before the final assistant message. Immediately before a
-coordinator snapshot, notification, or tool result enters Celeris, the harness
-recognizes that native shape and retains only the last assistant conclusion,
-bounded to 2,000 characters. The compacted delta is tagged with
-`voice_selection`, and notification history also records that it was a new
-backend event at that position in the dialogue. This is a model-only view: the
-original update still controls deterministic safe rendering, cursors, and the
-private audit path. If a noisy delta has no usable assistant conclusion, it
-remains model-routed and is merely bounded; native tool text can never become a
-direct zero-model spoken result through this compaction.
+tool activity before the newest assistant text. Coordinator entries therefore
+carry a typed `voice_assistant_output` and `voice_assistant_output_state` of
+`streaming` or `final`. Immediately before a snapshot, notification, or tool
+result enters Celeris, the harness prefers that typed value, bounds it to 2,000
+characters, and replaces the duplicate native prefix with `voice_selection`.
+Legacy/frozen payloads use a structural fallback only when their last native
+section is an assistant message; an older assistant section followed by newer
+tool activity is instead tagged and bounded as activity without a conclusion.
+Notification history also records that it was a new backend event at that
+position in the dialogue. This is a model-only view: the original update still
+controls deterministic safe rendering, cursors, and the private audit path.
+Native tool text can never become a direct zero-model spoken result through
+compaction. A current-status question can use a short safe typed streaming
+suffix directly, but its deterministic receipt must say that the session is
+still responding and label the text as “so far”; it must never claim completion.
 An idle transition within five seconds of that final live message does not emit
 an empty second completion announcement; a later completion still does.
 Persisted conversation items exclude transient terminal animations.

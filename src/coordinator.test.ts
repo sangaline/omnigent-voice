@@ -620,6 +620,8 @@ describe("Omnigent coordinator", () => {
         output_delta: {
           changed: true,
           output: "assistant (still streaming): The estimate is ",
+          voice_assistant_output: "assistant (still streaming): The estimate is ",
+          voice_assistant_output_state: "streaming",
         },
         updates: [],
       });
@@ -636,6 +638,8 @@ describe("Omnigent coordinator", () => {
         output_delta: {
           changed: true,
           output: "assistant (continued): 45 to 60 minutes.",
+          voice_assistant_output: "assistant (continued): 45 to 60 minutes.",
+          voice_assistant_output_state: "final",
         },
         updates: [
           {
@@ -645,6 +649,8 @@ describe("Omnigent coordinator", () => {
             output_delta: {
               changed: true,
               output: "assistant: The estimate is 45 to 60 minutes.",
+              voice_assistant_output: "assistant: The estimate is 45 to 60 minutes.",
+              voice_assistant_output_state: "final",
             },
           },
         ],
@@ -749,12 +755,16 @@ describe("Omnigent coordinator", () => {
         output_delta: {
           changed: true,
           output: "assistant: The estimate is 45 to 60 minutes.",
+          voice_assistant_output: "assistant: The estimate is 45 to 60 minutes.",
+          voice_assistant_output_state: "final",
         },
         updates: [
           {
             type: "session_output",
             output_delta: {
               output: "assistant: The estimate is 45 to 60 minutes.",
+              voice_assistant_output: "assistant: The estimate is 45 to 60 minutes.",
+              voice_assistant_output_state: "final",
             },
           },
         ],

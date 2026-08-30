@@ -5249,5 +5249,83 @@
         }
       }
     ]
+  },
+  {
+    "id": "streaming_native_suffix_is_not_reported_as_complete",
+    "description": "Use a typed in-flight assistant suffix without treating older native activity as the current answer, then announce the final conclusion once it arrives.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "okay uh what has voice work said so far right now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": {
+            "changed": true,
+            "output": "assistant: The prior build was healthy.\n\ntool call shell: run the new packet suite\n\ntool result: still running\n\nassistant (still streaming): The candidate has passed 20 of",
+            "cursor": "live:answer-1:30",
+            "voice_assistant_output": "assistant (still streaming): The candidate has passed 20 of",
+            "voice_assistant_output_state": "streaming"
+          },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session"],
+          "speechTerms": ["20"],
+          "speechAnyTerms": [
+            ["streaming", "partial", "so far", "in progress", "still coming"]
+          ],
+          "speechForbiddenTerms": ["finished", "completed", "all checks passed", "prior build", "tool call", "tool result"],
+          "maxRounds": 1
+        }
+      },
+      {
+        "type": "notification",
+        "updates": [
+          {
+            "event_id": 1201,
+            "type": "session_output",
+            "session_id": "session-voice",
+            "name": "Voice Work",
+            "status": "running",
+            "output_delta": {
+              "changed": true,
+              "output": "assistant: The prior build was healthy.\n\ntool call shell: run the new packet suite\n\ntool result: 24 checks completed\n\nassistant: The candidate passed all 24 checks with zero dropped events.",
+              "cursor": "live:answer-1",
+              "voice_assistant_output": "assistant: The candidate passed all 24 checks with zero dropped events.",
+              "voice_assistant_output_state": "final"
+            }
+          }
+        ],
+        "expected": {
+          "toolSequence": [],
+          "speechTerms": ["voice work", "24"],
+          "speechAnyTerms": [
+            ["passed", "green"]
+          ],
+          "speechForbiddenTerms": ["20", "prior build", "tool call", "tool result", "still streaming"],
+          "maxSpeechWords": 24,
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

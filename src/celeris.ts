@@ -347,7 +347,7 @@ voice_read_routing also resolves a deictic read against authoritative notificati
 After a successful get_output or poll_output for a nonfocused or clarified session, name target_session.name in the spoken answer before summarizing its result. The read does not change sticky focus; naming its source prevents the result from sounding as though it came from the focused session.
 When the requested message content depends on a missing fact about what a different session found, said, or is doing, first call get_output for that source session. Only after receiving the source result may you call send_message with the grounded finding; never send a placeholder telling the destination merely to inspect or review the source session. If more than one source must be compared, complete every requested read before the send, name each source in the outbound comparison, and preserve the decisive counts, outcomes, and causes. If the human already states the complete finding to relay in the current request, send that supplied content directly without rereading the source.
 When the human explicitly asks for exact numbers, counts, or metrics in a grounded multi-source relay, copy every numeric fact from every returned source into the outbound message; do not summarize away a passing source's metric or a failing source's cause magnitude.
-The coordinator snapshot immediately above is already current data for this turn. output_delta is the chronological stable output newly available since the prior human snapshot. When output_delta.changed is true and its content answers “latest,” “current,” “what's new,” or “since then,” answer directly from it and do not call get_output. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.
+The coordinator snapshot immediately above is already current data for this turn. output_delta is the chronological output newly available since the prior human snapshot. voice_selection distinguishes a final assistant conclusion from a still-streaming suffix; describe streaming text as partial or in progress and never as completion. When output_delta.changed is true and its content answers “latest,” “current,” "what's new," or “since then,” answer directly from it and do not call get_output. A question about whether you actually performed a prior send or queue action is answered directly from recent_actions; use get_output only when the human asks whether the message is visible, received, recent, or present in session output. These direct evidence answers are not new coordinator actions.
 A short output_delta is already a voice-sized update. When it directly answers the human, preserve every concrete condition, count, outcome, and still-running or blocked clause instead of shortening away one of its facts.
 A question about whether any prior coordinator action succeeded, including prompt approval, is answered directly from recent_actions. Do not repeat the action and do not read session output merely to verify a ledger entry.
 Resolve “just asked” and similar recency language against the newest human request in dialogue, not merely the newest retained action. If that newer request was incomplete or interrupted and has no later successful tool receipt, say it was not performed and ask for the missing content; never reuse an older recent_actions receipt as proof for the newer request.
@@ -377,7 +377,7 @@ const contextContract = (
   decisions:
     "pending_decisions repeats exact unresolved prompt and session identifiers until resolution.",
   current_output:
-    "output_delta is only stable new focused-session output collected through speech finalization.",
+    "output_delta is chronological new focused-session output collected through speech finalization. voice_selection says when it is a final assistant conclusion versus a still-streaming suffix; streaming text is evidence so far, never proof of completion.",
   older_output: "Absent unless a tool result in this turn explicitly returned it.",
   context_measurement: "No token or page-count introspection is available; never estimate it.",
 });
@@ -1341,28 +1341,71 @@ const coordinatorUpdates = (value: unknown): CoordinatorUpdate[] => {
   });
 };
 
-const compactNoisyNativeOutput = (value: string): string => {
-  if (!/\n\ntool (?:call|result):/i.test(value)) return value;
-  const assistantMarker = "\n\nassistant:";
-  const markerIndex = value.toLocaleLowerCase().lastIndexOf(assistantMarker);
-  if (markerIndex < 0) return clipToolString(value, 2_000);
+interface CompactedNativeOutput {
+  output: string;
+  selection?:
+    | "latest_assistant_conclusion_after_native_activity"
+    | "latest_streaming_assistant_suffix_after_native_activity"
+    | "bounded_native_activity_without_new_assistant_conclusion";
+}
+
+const compactNoisyNativeOutput = (value: string): CompactedNativeOutput => {
+  const structuralMarker = /(?:^|\n\n)(assistant|tool call|tool result|terminal):/gi;
+  const markers = [...value.matchAll(structuralMarker)];
+  const hasNativeActivity = markers.some((marker) => marker[1]?.toLowerCase() !== "assistant");
+  if (!hasNativeActivity) return { output: value };
+  const latest = markers.at(-1);
+  if (latest?.[1]?.toLowerCase() !== "assistant") {
+    return {
+      output: clipToolString(value, 2_000),
+      selection: "bounded_native_activity_without_new_assistant_conclusion",
+    };
+  }
+  const markerText = latest[0];
+  const assistantLabelOffset = markerText.toLowerCase().lastIndexOf("assistant:");
   const conclusion = value
-    .slice(markerIndex + assistantMarker.length)
+    .slice((latest.index ?? 0) + assistantLabelOffset + "assistant:".length)
     .replace(/\n\[older output omitted\]\s*$/i, "")
     .trim();
-  if (conclusion.length < 12) return clipToolString(value, 2_000);
-  return `assistant: ${clipToolString(conclusion, 2_000)}`;
+  if (conclusion.length < 12) {
+    return {
+      output: clipToolString(value, 2_000),
+      selection: "bounded_native_activity_without_new_assistant_conclusion",
+    };
+  }
+  return {
+    output: `assistant: ${clipToolString(conclusion, 2_000)}`,
+    selection: "latest_assistant_conclusion_after_native_activity",
+  };
 };
 
 const compactOutputDeltaForModel = (value: unknown): unknown => {
   const delta = objectValue(value);
   if (!delta || typeof delta.output !== "string") return value;
-  const output = compactNoisyNativeOutput(delta.output);
-  if (output === delta.output) return value;
+  const typedAssistant = typeof delta.voice_assistant_output === "string"
+    ? delta.voice_assistant_output.trim()
+    : "";
+  if (typedAssistant) {
+    const {
+      voice_assistant_output: _voiceAssistantOutput,
+      voice_assistant_output_state: voiceAssistantOutputState,
+      ...modelDelta
+    } = delta;
+    return {
+      ...modelDelta,
+      output: clipToolString(typedAssistant, 2_000),
+      voice_selection:
+        voiceAssistantOutputState === "streaming"
+          ? "latest_streaming_assistant_suffix_after_native_activity"
+          : "latest_assistant_conclusion_after_native_activity",
+    };
+  }
+  const compacted = compactNoisyNativeOutput(delta.output);
+  if (!compacted.selection) return value;
   return {
     ...delta,
-    output,
-    voice_selection: "latest_assistant_conclusion_after_native_activity",
+    output: compacted.output,
+    voice_selection: compacted.selection,
   };
 };
 
@@ -2109,14 +2152,62 @@ export const directFocusedOutputSpeech = (
     /\bwhat(?:'s|\s+is)\s+(?:new\b|(?:it|this|that)\s+(?:doing|working\s+on|up\s+to)\b)/i.test(
       input,
     ) ||
-    /\b(?:found|done)\s+so\s+far\b/i.test(input) ||
+    /\b(?:found|done|said|reported|returned)\s+so\s+far\b/i.test(input) ||
+    /\bwhat\s+(?:has|have)\b[^?.!]{0,100}\b(?:said|reported|returned|found|done)\b/i.test(
+      input,
+    ) ||
     /\bwhat\s+finished\b/i.test(input);
   if (!asksForCurrentOutput) return undefined;
   const delta = objectValue(state.output_delta);
+  const focusedObject = objectValue(state.focused_session);
+  const focusedId = typeof focusedObject?.id === "string" ? focusedObject.id : "";
+  const normalizedInput = ` ${words(input).join(" ")} `;
+  const explicitlyNamedSessionIds = new Set(
+    (Array.isArray(state.known_sessions) ? state.known_sessions : []).flatMap(
+      (candidate) => {
+        const session = objectValue(candidate);
+        const id = typeof session?.id === "string" ? session.id : "";
+        const name = typeof session?.name === "string"
+          ? words(session.name).join(" ")
+          : "";
+        return id && name && normalizedInput.includes(` ${name} `) ? [id] : [];
+      },
+    ),
+  );
+  if (explicitlyNamedSessionIds.size > 1) return undefined;
+  const readRouting = voiceReadRouting(input, state.known_sessions);
+  if (
+    readRouting.mode === "ambiguous" ||
+    readRouting.mode === "named" &&
+    readRouting.target?.id &&
+    readRouting.target.id !== focusedId
+  ) {
+    return undefined;
+  }
+  const focused = resultSessionName(state.focused_session);
+  const streamingOutput =
+    delta?.changed === true &&
+      delta.voice_assistant_output_state === "streaming" &&
+      typeof delta.voice_assistant_output === "string"
+      ? delta.voice_assistant_output
+          .trim()
+          .replace(/^assistant\s*\(still streaming\):\s*/i, "")
+      : "";
+  if (streamingOutput) {
+    if (
+      !focused ||
+      streamingOutput.length > 240 ||
+      streamingOutput.includes("```") ||
+      /https?:\/\//i.test(streamingOutput) ||
+      streamingOutput.split("\n").length > 3
+    ) {
+      return undefined;
+    }
+    return `${focused} is still responding. So far: ${streamingOutput}`;
+  }
   const output = delta?.changed === true && typeof delta.output === "string"
     ? delta.output.trim().replace(/^assistant:\s*/i, "")
     : "";
-  const focused = resultSessionName(state.focused_session);
   if (
     !focused ||
     !output ||
