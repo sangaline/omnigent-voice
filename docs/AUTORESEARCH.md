@@ -2042,3 +2042,37 @@ one unapproved number then passed five of five targeted reruns, so it remains
 recorded as stochastic evidence rather than a quality pass. All coordinator
 executions were frozen. No live Omnigent session was read or mutated, and the
 excluded ESPN session remained untouched.
+
+### 2026-08-29 — Voice-directed “tell me” is not a session message
+
+Hypothesis H68 extended the H67 speech-finalization boundary beyond sends. One
+linked ASR-style work sequence renamed a temporary session, archived it back to
+the prior focus, approved a background prompt, explicitly switched focus, and
+continued a concurrent update cursor. Every action turn also asked what arrived
+while the human was speaking.
+
+The baseline failed zero of three scenario runs. Rename, archive, approval, and
+cursor continuation worked, but “switch me to Build Worker and tell me if
+anything else came in” was classified as both a focus and a message request.
+The harness therefore executed an unrequested `send_message`, then omitted the
+Metrics Watch update. The deterministic cause was the single-name routing
+fallback: it treated voice-directed “tell me” as an outbound verb because the
+same transcript happened to name the focus target.
+
+Message routing now removes voice-directed tell/ask clauses unless a separate
+outbound verb or addressed recipient remains. Explicit and deictic sends retain
+their existing routes. The focused-session receipt also names the previous
+focus when the typed tool result supplies it, making the state transition clear
+without a model round. The repaired scenario passed five of five runs across
+25 linked turns; all four distinct actions ran exactly once, every concurrent
+update was spoken, and the final opaque cursor continued without changing
+focus.
+
+Promotion evidence is 159 passing unit tests, clean typecheck and build, all 42
+stateful scenarios across 133 linked turns, and the six closest focus, action,
+notification, and cursor scenarios. The isolated corpus passed 45 of 46 on its
+aggregate run; the unrelated partial-name read that emitted one malformed
+model ID then passed five of five targeted reruns. All coordinator executions
+were frozen. No live Omnigent session was read or mutated, and the excluded
+ESPN session remained untouched. The live persona pod was not redeployed
+by this coordinator-only source change.

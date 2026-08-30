@@ -5791,5 +5791,258 @@
         }
       }
     ]
+  },
+  {
+    "id": "non_send_actions_with_preflight_updates",
+    "description": "Do not let stable output already present at speech finalization erase an explicit rename, archive-and-restore, prompt approval, or focus action; report each concurrent update and retain the final cursor.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-temp", "name": "Temporary Lab", "status": "idle" },
+      "known_sessions": [
+        { "id": "session-temp", "name": "Temporary Lab", "status": "idle", "focused": true },
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+        { "id": "session-build", "name": "Build Worker", "status": "waiting", "focused": false },
+        { "id": "session-audit", "name": "Release Audit", "status": "running", "focused": false },
+        { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "rename this session to latency lab and uh tell me if anything came in while i was talking",
+        "coordinatorState": {
+          "focused_session": { "id": "session-temp", "name": "Temporary Lab", "status": "idle" },
+          "known_sessions": [
+            { "id": "session-temp", "name": "Temporary Lab", "status": "idle", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+            { "id": "session-build", "name": "Build Worker", "status": "waiting", "focused": false },
+            { "id": "session-audit", "name": "Release Audit", "status": "running", "focused": false },
+            { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [
+            { "event_id": 1601, "type": "session_output", "session_id": "session-audit", "name": "Release Audit", "status": "running", "output_delta": { "changed": true, "output": "assistant: The trace export reached 18 samples with no missing spans.", "cursor": "audit-18" } }
+          ],
+          "update_cursor": 1601
+        },
+        "toolResults": {
+          "rename_session": {
+            "renamed": true,
+            "previous_name": "Temporary Lab",
+            "new_name": "Latency Lab",
+            "renamed_session": { "id": "session-temp", "name": "Latency Lab", "status": "idle" },
+            "focus_changed": false,
+            "focused_session": { "id": "session-temp", "name": "Latency Lab", "status": "idle" },
+            "known_sessions": [
+              { "id": "session-temp", "name": "Latency Lab", "status": "idle", "focused": true },
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+              { "id": "session-build", "name": "Build Worker", "status": "waiting", "focused": false },
+              { "id": "session-audit", "name": "Release Audit", "status": "running", "focused": false },
+              { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 1602, "type": "session_renamed", "previous_name": "Temporary Lab", "new_name": "Latency Lab", "summary": "Renamed Temporary Lab to Latency Lab." }
+            ]
+          }
+        },
+        "checkUpdatesAfter": 0,
+        "expected": {
+          "toolSequence": ["rename_session"],
+          "forbiddenTools": ["focus_session", "send_message", "get_output", "poll_output"],
+          "argumentTerms": { "title": ["latency", "lab"] },
+          "speechTerms": ["temporary lab", "latency lab", "release audit", "18", "no missing"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "archive this temporary session and tell me what just came in while i was saying that",
+        "coordinatorState": {
+          "focused_session": { "id": "session-temp", "name": "Latency Lab", "status": "idle" },
+          "known_sessions": [
+            { "id": "session-temp", "name": "Latency Lab", "status": "idle", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+            { "id": "session-build", "name": "Build Worker", "status": "waiting", "focused": false },
+            { "id": "session-audit", "name": "Release Audit", "status": "running", "focused": false },
+            { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1602, "type": "session_renamed", "previous_name": "Temporary Lab", "new_name": "Latency Lab", "summary": "Renamed Temporary Lab to Latency Lab." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [
+            { "event_id": 1603, "type": "session_output", "session_id": "session-metrics", "name": "Metrics Watch", "status": "running", "output_delta": { "changed": true, "output": "assistant: The speech path held 42 turns without a dropped frame.", "cursor": "metrics-42" } }
+          ],
+          "update_cursor": 1603
+        },
+        "toolResults": {
+          "archive_session": {
+            "archived": true,
+            "archived_session": { "id": "session-temp", "name": "Latency Lab" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "focus_changed": true,
+            "recent_actions": [
+              { "action_id": 1602, "type": "session_renamed", "summary": "Renamed Temporary Lab to Latency Lab." },
+              { "action_id": 1604, "type": "session_archived", "summary": "Archived Latency Lab and restored Primary Work." }
+            ],
+            "summary": "Archived Latency Lab and restored Primary Work."
+          }
+        },
+        "checkUpdatesAfter": 1601,
+        "expected": {
+          "toolSequence": ["archive_session"],
+          "forbiddenTools": ["focus_session", "send_message", "get_output", "poll_output"],
+          "speechTerms": ["latency lab", "primary work", "metrics watch", "42", "without", "dropped frame"],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "yeah approve that build worker restart and tell me what just came in while i was talking",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "waiting", "focused": false },
+            { "id": "session-audit", "name": "Release Audit", "status": "running", "focused": false },
+            { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [
+            { "session_id": "session-build", "name": "Build Worker", "prompts": [
+              { "prompt_id": "prompt-build-restart", "message": "Restart the build worker now?", "mode": "confirmation", "schema": null }
+            ] }
+          ],
+          "recent_actions": [
+            { "action_id": 1604, "type": "session_archived", "summary": "Archived Latency Lab and restored Primary Work." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [
+            { "event_id": 1605, "type": "session_output", "session_id": "session-audit", "name": "Release Audit", "status": "running", "output_delta": { "changed": true, "output": "assistant: The reconnect audit passed 19 checks with one warning still open.", "cursor": "audit-19" } }
+          ],
+          "update_cursor": 1605
+        },
+        "toolResults": {
+          "answer_prompt": {
+            "resolved": true,
+            "session_id": "session-build",
+            "prompt_id": "prompt-build-restart",
+            "action": "accept",
+            "target_session": { "id": "session-build", "name": "Build Worker", "status": "waiting" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "pending_decisions": [],
+            "recent_actions": [
+              { "action_id": 1604, "type": "session_archived", "summary": "Archived Latency Lab and restored Primary Work." },
+              { "action_id": 1606, "type": "prompt_answered", "summary": "Accepted a pending prompt in Build Worker." }
+            ]
+          }
+        },
+        "checkUpdatesAfter": 1603,
+        "expected": {
+          "toolSequence": ["answer_prompt"],
+          "forbiddenTools": ["focus_session", "send_message", "get_output", "poll_output"],
+          "sessionId": "session-build",
+          "argumentEquals": { "prompt_id": "prompt-build-restart", "action": "accept" },
+          "speechTerms": ["build worker", "release audit", "19", "one warning", "open"],
+          "speechAnyTerms": [["approved", "accepted", "approval"]],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "switch me to build worker and tell me if anything else came in while i was saying that",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false },
+            { "id": "session-audit", "name": "Release Audit", "status": "running", "focused": false },
+            { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1606, "type": "prompt_answered", "summary": "Accepted a pending prompt in Build Worker." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [
+            { "event_id": 1607, "type": "session_output", "session_id": "session-metrics", "name": "Metrics Watch", "status": "running", "output_delta": { "changed": true, "output": "assistant: First audio fell to 180 milliseconds after warmup.", "cursor": "metrics-43" } }
+          ],
+          "update_cursor": 1607
+        },
+        "toolResults": {
+          "focus_session": {
+            "focus_changed": true,
+            "focused_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+            "previous_focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-build", "name": "Build Worker", "status": "running", "focused": true },
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+              { "id": "session-audit", "name": "Release Audit", "status": "running", "focused": false },
+              { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 1606, "type": "prompt_answered", "summary": "Accepted a pending prompt in Build Worker." },
+              { "action_id": 1608, "type": "focus_changed", "summary": "Focused Build Worker from Primary Work." }
+            ]
+          }
+        },
+        "checkUpdatesAfter": 1605,
+        "expected": {
+          "toolSequence": ["focus_session"],
+          "forbiddenTools": ["send_message", "get_output", "poll_output"],
+          "sessionId": "session-build",
+          "speechTerms": ["build worker", "primary work", "metrics watch", "180", "milliseconds"],
+          "speechAnyTerms": [["switched", "focused", "now in"]],
+          "maxRounds": 2
+        }
+      },
+      {
+        "type": "user",
+        "input": "okay whats newer from that one since that last update",
+        "coordinatorState": {
+          "focused_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+          "known_sessions": [
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false },
+            { "id": "session-audit", "name": "Release Audit", "status": "running", "focused": false },
+            { "id": "session-metrics", "name": "Metrics Watch", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [
+            { "action_id": 1608, "type": "focus_changed", "summary": "Focused Build Worker from Primary Work." }
+          ],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 1607
+        },
+        "toolResults": {
+          "poll_output": {
+            "target_session": { "id": "session-metrics", "name": "Metrics Watch", "status": "running" },
+            "focus_changed": false,
+            "changed": true,
+            "output": "assistant: The next warm run held 175 milliseconds with zero underruns.",
+            "cursor": "metrics-44",
+            "cursor_expired": false
+          }
+        },
+        "checkUpdatesAfter": 1607,
+        "expected": {
+          "toolSequence": ["poll_output"],
+          "forbiddenTools": ["get_output", "focus_session", "send_message"],
+          "callExpectations": [
+            { "index": 0, "name": "poll_output", "sessionId": "session-metrics", "argumentEquals": { "cursor": "metrics-43" } }
+          ],
+          "speechTerms": ["metrics watch", "175", "zero underruns"],
+          "maxRounds": 2
+        }
+      }
+    ]
   }
 ]

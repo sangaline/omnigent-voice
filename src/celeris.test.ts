@@ -719,6 +719,14 @@ describe("Celeris coordinator conversation", () => {
       }),
     ).toBe("I declined the prompt for Release Deploy.");
     expect(
+      successfulActionSpeech("focus_session", {
+        focus_changed: true,
+        previous_focused_session: { id: "session-primary", name: "Primary Work" },
+        focused_session: { id: "session-build", name: "Build Worker" },
+        updates: [],
+      }),
+    ).toBe("I switched from Primary Work to Build Worker.");
+    expect(
       successfulActionSpeech("send_message", {
         accepted: true,
         target_session: { id: "session-1", name: "Primary Work" },
@@ -1292,6 +1300,21 @@ describe("Celeris coordinator conversation", () => {
         { id: "session-beta", name: "Side Beta" },
       ]),
     ).toEqual({ mode: "ambiguous", candidates: ["Primary Work", "Side Beta"] });
+    expect(
+      voiceMessageRouting(
+        "switch me to build worker and tell me if anything else came in while i was saying that",
+        [
+          { id: "session-primary", name: "Primary Work" },
+          { id: "session-build", name: "Build Worker" },
+        ],
+      ),
+    ).toEqual({ mode: "focused" });
+    expect(
+      voiceMessageRouting("can you tell me what message came from side beta", [
+        { id: "session-primary", name: "Primary Work" },
+        { id: "session-beta", name: "Side Beta" },
+      ]),
+    ).toEqual({ mode: "focused" });
     expect(
       voiceMessageRouting(
         "tell build worker to rerun phone audio and tell docs worker to record first audio",

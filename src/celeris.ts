@@ -956,6 +956,15 @@ export const voiceMessageRouting = (
       candidates: directlyAddressed.map(({ name }) => name),
     };
   }
+  const voiceDirectedOnly =
+    /\b(?:tell|ask)\s+(?:me|us)\b/i.test(input) &&
+    !(
+      /\b(?:send|queue|steer)\b/i.test(input) ||
+      /\b(?:tell|ask|have)\s+(?!(?:me|us)\b)/i.test(input) ||
+      /\bmessage\s+(?:it|that|this|the\s+(?:session|agent))\b/i.test(input) ||
+      /\blet\s+(?!(?:me|us)\b).{0,80}\bknow\b/i.test(input)
+    );
+  if (voiceDirectedOnly) return { mode: "focused" };
   if (matches.size === 1) return { mode: "named", target: [...matches.values()][0] };
   return {
     mode: "ambiguous",
@@ -1773,10 +1782,13 @@ export const successfulActionSpeech = (
     case "focus_session": {
       const focused = resultSessionName(result.focused_session);
       if (!focused) return undefined;
+      const previous = resultSessionName(result.previous_focused_session);
       return result.already_focused === true
         ? `You're already in ${focused}.`
         : result.focus_changed === true
-          ? `I switched to ${focused}.`
+          ? previous && previous !== focused
+            ? `I switched from ${previous} to ${focused}.`
+            : `I switched to ${focused}.`
           : undefined;
     }
     case "answer_prompt": {
