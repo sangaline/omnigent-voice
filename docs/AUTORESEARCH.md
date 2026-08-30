@@ -2321,3 +2321,78 @@ final complete confirmation. All coordinator execution was frozen; no live
 Omnigent session was accessed or mutated, and the excluded ESPN session remained
 untouched. The live Audrey persona pod was not redeployed for this
 coordinator-only change.
+
+### 2026-08-29 — Single-recipient relay forms remain verbatim
+
+Hypothesis H78 compared two common single-recipient dictation forms with the
+already deterministic multi-recipient grammar. “Send Build Worker a message to
+rerun all 48 packet probes unless reconnect is stable” happened to pass twenty
+of twenty baseline trials exactly. “Let Docs Worker know the first audio result
+was 180 milliseconds” passed only three of twenty: seventeen messages added
+punctuation, capitalization, or a false “voice coordinator reports”
+attribution.
+
+The bounded single-recipient extractor now covers send-NAME-a-message,
+message-NAME-to, and let-NAME-know forms. It resolves only the independently
+matched known-session target, copies the dictated payload, and continues to
+strip only separate voice navigation controls. Read-dependent relays still use
+model synthesis because their message must be grounded in returned evidence.
+
+After the change, both canonical forms passed twenty of twenty with exact
+outbound text and one model round. They are permanent stateful regressions.
+Promotion evidence is 163 passing unit tests, clean typecheck and build, all 47
+isolated cases, and all 59 stateful scenarios across 151 linked turns with no
+invalid trials. All
+coordinator execution was frozen; no live Omnigent session was accessed or
+mutated, and the excluded ESPN session remained untouched. The live Audrey
+persona pod was not redeployed for this coordinator-only change.
+
+### 2026-08-29 — Post-tool summaries retain verified action receipts
+
+The first H78 promotion sweep exposed a separate long-standing failure in the
+three-source comparison flow. The send itself was grounded, validated, and
+accepted, but the final Celeris synthesis sometimes spoke only the comparison.
+It omitted both that a send occurred and the Release Work destination. The
+complete sweep missed once, a five-run targeted check missed once, and a traced
+ten-run reproduction missed once. This was not an action failure; it was a
+spoken truthfulness failure after a verified action.
+
+Post-action synthesis rounds are now buffered instead of streamed. The harness
+derives receipts only from successful typed tool results, preserves exact
+receipts already present in model speech, and prefixes any omitted receipt
+before the synthesized detail. The combined speech is still bounded to 300
+characters, with verified action outcome prioritized over optional detail.
+
+The three-source comparison then passed twenty of twenty runs across forty
+linked turns, including every destination and send acknowledgement. Both H78
+single-recipient cases remained green in ten of ten adjacent runs. Promotion
+evidence is 163 passing unit tests, clean typecheck and build, all 47 isolated
+cases, and all 59 stateful scenarios across 151 linked turns with no invalid
+trials. All coordinator
+execution was frozen; no live Omnigent session was accessed or mutated, and the
+excluded ESPN session remained untouched. The live Audrey persona pod was not
+redeployed for this coordinator-only change.
+
+### 2026-08-29 — Plain named check-ins skip lossy rewording
+
+The first post-H79 isolated sweep exposed a reproducible four-of-five failure in
+the existing unique-partial-name read case. The harness always resolved Release
+Login Audit, injected its authoritative ID, and received the correct typed
+assistant result. It then unnecessarily requested a second Celeris synthesis
+round for the ordinary phrase “check in on,” and that round occasionally omitted
+both the session name and its result.
+
+Plain non-mutating `check in` reads now share the existing bounded direct-read
+path used for latest, status, progress, and doing questions. A safe assistant
+message of at most 240 characters and three lines is named and spoken directly
+after `get_output`; URLs, code fences, updates, and action language still fail
+closed to model synthesis.
+
+The formerly flaky case passed twenty of twenty after the change, always in one
+model round. Its median model time was about 157 milliseconds; the cold first
+request was 515 milliseconds. Promotion evidence is 163 passing unit tests,
+clean typecheck and build, all 47 isolated cases, and all 59 stateful scenarios
+across 151 linked turns with no invalid trials. All coordinator execution was
+frozen; no live Omnigent session was accessed or mutated, and the excluded ESPN
+session remained untouched. The live Audrey persona pod was not redeployed for
+this coordinator-only change.

@@ -25,6 +25,7 @@ import {
   missingMultiSourceCauseTerms,
   missingMultiSourceNames,
   missingMultiSourceNumbers,
+  prependMissingActionReceipts,
   requestsPositiveFocusAction,
   requestedRenameTitle,
   requiresNotificationOutputRead,
@@ -197,6 +198,21 @@ describe("Celeris coordinator conversation", () => {
       ),
     ).toContain("doesn't make sense");
     expect(directRepetitionCorrectionSpeech("please explain that again")).toBeUndefined();
+  });
+
+  it("prepends typed action receipts only when final synthesis omitted them", () => {
+    expect(
+      prependMissingActionReceipts(
+        "Memory Sweep is the blocker.",
+        ["I sent that to Release Work."],
+      ),
+    ).toBe("I sent that to Release Work. Memory Sweep is the blocker.");
+    expect(
+      prependMissingActionReceipts(
+        "I sent that to Release Work. Memory Sweep is the blocker.",
+        ["I sent that to Release Work."],
+      ),
+    ).toBe("I sent that to Release Work. Memory Sweep is the blocker.");
   });
 
   it("removes unsupported future-monitoring offers without losing current evidence", () => {
@@ -1112,6 +1128,18 @@ describe("Celeris coordinator conversation", () => {
         "Side Beta",
       ),
     ).toBe("compare the packet timestamps");
+    expect(
+      voiceMessageInstruction(
+        "send build worker a message to rerun all 48 packet probes unless reconnect is stable",
+        "Build Worker",
+      ),
+    ).toBe("rerun all 48 packet probes unless reconnect is stable");
+    expect(
+      voiceMessageInstruction(
+        "let docs worker know the first audio result was 180 milliseconds",
+        "Docs Worker",
+      ),
+    ).toBe("the first audio result was 180 milliseconds");
     expect(
       voiceMessageInstruction(
         "tell primary work what side worker found",
@@ -2155,7 +2183,7 @@ describe("Celeris coordinator conversation", () => {
     );
 
     await expect(
-      conversation("test-key", tools).respond("okay what's side worker doing now"),
+      conversation("test-key", tools).respond("while we wait can we check in on side worker"),
     ).resolves.toBe("Side Worker update: Collecting packet logs now.");
     expect(tools.callTool).toHaveBeenNthCalledWith(2, "get_output", {
       session_id: "session-side",

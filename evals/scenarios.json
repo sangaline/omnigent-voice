@@ -7034,5 +7034,115 @@
         }
       }
     ]
+  },
+  {
+    "id": "single_send_message_form_is_verbatim",
+    "description": "Preserve the exact dictated message in a single-recipient send-NAME-a-message form.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "send build worker a message to rerun all 48 packet probes unless reconnect is stable",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2501, "type": "message_sent", "summary": "Sent immediately to Build Worker: rerun all 48 packet probes unless reconnect is stable." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "sessionId": "session-build",
+          "argumentEquals": { "message": "rerun all 48 packet probes unless reconnect is stable" },
+          "delivery": "not_queued",
+          "speechTerms": ["build worker"],
+          "allowedSpeechNumbers": [48],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "single_let_know_form_is_verbatim",
+    "description": "Preserve the exact dictated message in a single-recipient let-NAME-know form.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "let docs worker know the first audio result was 180 milliseconds",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-docs", "name": "Docs Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2502, "type": "message_sent", "summary": "Sent immediately to Docs Worker: the first audio result was 180 milliseconds." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "sessionId": "session-docs",
+          "argumentEquals": { "message": "the first audio result was 180 milliseconds" },
+          "delivery": "not_queued",
+          "speechTerms": ["docs worker"],
+          "allowedSpeechNumbers": [180],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

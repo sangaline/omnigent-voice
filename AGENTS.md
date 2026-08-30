@@ -354,7 +354,11 @@ becomes `last_verified_action_outcome` even when another read still needs model
 synthesis, so a follow-up audit cannot repeat a stale older action. Do not
 weaken the success predicates or drop the updates-empty guard: unsafe reads,
 uncertain results, and composites containing a non-renderable result still need
-model synthesis.
+model synthesis. If a later synthesis round follows one or more verified
+actions, that round is buffered rather than streamed; any typed action receipt
+the model omitted is prefixed before TTS. This prevents a grounded summary from
+hiding whether the requested action actually happened or which session received
+it.
 The runtime's hidden `check_updates` call already answers a generic “did
 anything come in while I was speaking?” question at speech finalization. When
 that question accompanies an explicit named send or a clear focused-session
@@ -465,10 +469,11 @@ decision, or action language, the harness voices a short safe focused-session
 `output_delta` directly in zero model rounds. An explicit switch to the session
 that is already focused is likewise a typed zero-round receipt. These paths must
 remain narrow: compound or ambiguous turns still go to Celeris.
-A model-selected `get_output` for a plain non-mutating latest/status/progress
-question similarly voices one safe short assistant `latest_message` directly
-after the read, skipping the second Celeris round. An explicit question about a
-newer message from the human may copy a safe typed `role: user` latest message.
+A model-selected `get_output` for a plain non-mutating
+latest/status/progress/check-in question similarly voices one safe short
+assistant `latest_message` directly after the read, skipping the second Celeris
+round. An explicit question about a newer message from the human may copy a safe
+typed `role: user` latest message.
 This direct path is disabled for send, queue, focus, archive, approval, retry,
 and other compound action language.
 Imperative pronoun follow-ups after a spoken notification burst are also
@@ -534,7 +539,9 @@ missing source phrasing. This is a bounded evidence guard, not a deterministic
 sender: the model still composes the comparison and the real coordinator must
 confirm it. Clear dictated forms such as
 “queue it a message to …,” “tell Side Worker to …,” and the common ASR form
-“tell Side Worker rerun …” copy the exact task clause
+“tell Side Worker rerun …” copy the exact task clause. Single-recipient
+“send Side Worker a message to …,” “message Side Worker to …,” and “let Side
+Worker know …” forms receive the same exact-copy treatment
 into `send_message` when no read participated, stripping only separate voice
 navigation controls such as “then switch me there” or “don't switch me.” This
 prevents the fast model from corrupting or shortening user-supplied work while

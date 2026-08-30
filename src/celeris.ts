@@ -731,6 +731,24 @@ export const withoutUnsupportedMonitoringOffers = (speech: string): string => {
     .trim();
 };
 
+const normalizedReceiptText = (value: string): string =>
+  value
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+export const prependMissingActionReceipts = (
+  speech: string,
+  receipts: readonly string[],
+): string => {
+  const normalizedSpeech = normalizedReceiptText(speech);
+  const missing = [...new Set(receipts)].filter((receipt) => {
+    const normalized = normalizedReceiptText(receipt);
+    return normalized && !normalizedSpeech.includes(normalized);
+  });
+  return [...missing, speech].filter(Boolean).join(" ").trim();
+};
+
 const immediateNotificationUpdates = (
   history: readonly { role: string; content: unknown }[],
 ): JsonObject[] => {
@@ -1336,6 +1354,18 @@ export const voiceMessageInstruction = (
     /\b(?:tell|ask)\s+(?:(?:that|this|the\s+(?:first|second|third|last|other))\s+one)\s+(?:to\s+)?(.+)$/i,
     ...(targetPattern
       ? [
+          new RegExp(
+            `\\bsend\\s+(?:the\\s+)?${targetPattern}\\s+(?:(?:a|the)\\s+message\\s+)(?:to|that)\\s+(.+)$`,
+            "i",
+          ),
+          new RegExp(
+            `\\bmessage\\s+(?:the\\s+)?${targetPattern}\\s+(?:to|that)\\s+(.+)$`,
+            "i",
+          ),
+          new RegExp(
+            `\\blet\\s+(?:the\\s+)?${targetPattern}\\s+know(?:\\s+that)?\\s+(.+)$`,
+            "i",
+          ),
           new RegExp(
             `\\b(?:tell|ask)\\s+(?:the\\s+)?${targetPattern}\\s+to\\s+(.+)$`,
             "i",
@@ -3227,6 +3257,7 @@ export class CelerisConversation {
         // Celeris accepts automatic tool selection on streamed requests, but
         // named/required tool forcing is deliberately non-streaming.
         const speechSegmenter = onSpeechSegment && !forcedThisRound && !retainedResponseEvidence
+          && verifiedActionReceipts().length === 0
           ? new StreamingSpeechSegmenter(300)
           : undefined;
         let streamedSegments = 0;
@@ -3273,6 +3304,13 @@ export class CelerisConversation {
             speech = sanitizeForSpeech(
               withoutUnsupportedMonitoringOffers(speech) ||
                 "That update did not establish the answer you asked for.",
+              300,
+            );
+          }
+          const completedActionReceipts = verifiedActionReceipts();
+          if (completedActionReceipts.length > 0) {
+            speech = sanitizeForSpeech(
+              prependMissingActionReceipts(speech, completedActionReceipts),
               300,
             );
           }
@@ -3755,7 +3793,7 @@ export class CelerisConversation {
           const plainAssistantRead =
             latest?.role === "assistant" &&
             messageRouting.mode === "focused" &&
-            /\b(?:latest|status|progress|doing|found|said|last\s+thing|up\s+to)\b/i.test(
+            /\b(?:latest|status|progress|doing|found|said|last\s+thing|up\s+to|check\s+in)\b/i.test(
               input,
             ) &&
             !/\b(?:send|message|steer|queue|switch|focus|archive|rename|start|make|create|approve|accept|decline|deny|reject|cancel|interrupt|stop|rerun|retry)\b/i.test(
