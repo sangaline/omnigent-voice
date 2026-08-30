@@ -2234,3 +2234,32 @@ tests, clean typecheck and build, and eighteen of eighteen targeted promotion
 runs across all six nested navigation cases. The corpus now contains 51
 stateful scenarios and 143 specified linked turns. No live Omnigent session was
 accessed or mutated, and the excluded ESPN session remained untouched.
+
+### 2026-08-29 — New side work does not absorb a separate relay
+
+Hypothesis H75 covered an untested compound boundary: one ASR-style utterance
+started a side session to investigate reconnect jitter and separately told
+Primary Work to retain its current branch until a benchmark finished. Celeris
+selected both correct tools, targets, and clauses, but the voice harness then
+overrode the model's correct `start_session.instruction` with the complete
+utterance. The baseline failed zero of five because the new side session
+received both its own task and the unrelated Primary Work instruction.
+
+`voiceStartInstruction` now accepts only the session names that the existing
+message router independently resolved, finds the earliest explicit relay clause
+to one of those sessions, and bounds the new-session task before that clause.
+This does not use a generic action-word split: continuations such as “and tell
+me how to reproduce it” remain part of the coding task. The explicit start and
+send already participate in the shared required-action gate, and their typed
+success results now yield one deterministic compound receipt without another
+model round.
+
+The repaired canonical flow passed ten of ten trials. A held-out “make a side
+chat … then ask Docs Worker …” grammar also passed ten of ten with its distinct
+180-millisecond result preserved. Both completed in one model round. Promotion
+evidence is 162 passing unit tests, clean typecheck and build, all 47 isolated
+cases, and all 53 stateful scenarios across 145 linked turns with no invalid
+trials. The two compound flows are permanent regressions. All coordinator
+execution was frozen, no live Omnigent session was accessed or mutated, and the
+excluded ESPN session remained untouched. The live Audrey persona pod was not
+redeployed for this coordinator-only change.

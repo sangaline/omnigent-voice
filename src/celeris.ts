@@ -1224,17 +1224,69 @@ export const voiceRetryReadRouting = (
   return undefined;
 };
 
-export const voiceStartInstruction = (input: string): string | undefined => {
+const startInstructionRelayBoundary = (
+  instruction: string,
+  relayTargetNames: readonly string[],
+): number | undefined => {
+  let earliest: number | undefined;
+  const transition =
+    "\\s+(?:(?:and\\s+)?then|and|but)\\s+(?:(?:uh|um)\\s+)*";
+  for (const name of relayTargetNames) {
+    const targetPattern = words(name)
+      .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s+");
+    if (!targetPattern) continue;
+    const patterns = [
+      new RegExp(
+        `${transition}(?:tell|ask|have|steer|message|queue)\\s+(?:the\\s+)?${targetPattern}\\b`,
+        "i",
+      ),
+      new RegExp(
+        `${transition}send(?:\\s+(?:a|the)\\s+message)?\\s+to\\s+(?:the\\s+)?${targetPattern}\\b`,
+        "i",
+      ),
+      new RegExp(
+        `${transition}send\\s+(?:the\\s+)?${targetPattern}\\s+(?:(?:a|the)\\s+message\\s+)?(?:to|that)\\b`,
+        "i",
+      ),
+      new RegExp(
+        `${transition}let\\s+(?:the\\s+)?${targetPattern}\\s+know\\b`,
+        "i",
+      ),
+    ];
+    for (const pattern of patterns) {
+      const index = pattern.exec(instruction)?.index;
+      if (index !== undefined && (earliest === undefined || index < earliest)) {
+        earliest = index;
+      }
+    }
+  }
+  return earliest;
+};
+
+export const voiceStartInstruction = (
+  input: string,
+  relayTargetNames: readonly string[] = [],
+): string | undefined => {
   const match =
     /\b(?:start|make|create|open)\b.{0,50}\b(?:session|chat)\b\s+(?:to|for)\s+(.+)/i.exec(
       input,
     );
-  const instruction = match?.[1]
+  let instruction = match?.[1]
     ?.replace(
       /\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:(?:if\s+(?:anything(?:\s+else)?(?:\s+new)?|any\s+updates?)\s+(?:came|comes|arrived|arrives)\s+in\b.*)|(?:(?:tell|let)\s+me\b.*\b(?:came|arrived|updates?)\b.*))$/i,
       "",
     )
     .trim();
+  if (instruction) {
+    const relayBoundary = startInstructionRelayBoundary(
+      instruction,
+      relayTargetNames,
+    );
+    if (relayBoundary !== undefined) {
+      instruction = instruction.slice(0, relayBoundary).trim();
+    }
+  }
   return instruction || undefined;
 };
 
@@ -2973,7 +3025,14 @@ export class CelerisConversation {
       readRouting,
       notificationTargets,
     );
-    const startInstruction = voiceStartInstruction(input);
+    const startInstruction = voiceStartInstruction(
+      input,
+      messageRouting.mode === "multiple"
+        ? (messageRouting.targets ?? []).map(({ name }) => name)
+        : messageRouting.target
+          ? [messageRouting.target.name]
+          : [],
+    );
     const messageInstruction = messageRouting.mode === "multiple"
       ? undefined
       : voiceMessageInstruction(

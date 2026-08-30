@@ -1611,6 +1611,24 @@ describe("Celeris coordinator conversation", () => {
         "make a new session to profile the cutoff and tell me how to reproduce it",
       ),
     ).toBe("profile the cutoff and tell me how to reproduce it");
+    expect(
+      voiceStartInstruction(
+        "start a new session to investigate reconnect jitter and tell primary work keep its current branch until the benchmark finishes",
+        ["Primary Work"],
+      ),
+    ).toBe("investigate reconnect jitter");
+    expect(
+      voiceStartInstruction(
+        "make a side chat for check the audio cutoff then ask docs worker write down the current result",
+        ["Docs Worker"],
+      ),
+    ).toBe("check the audio cutoff");
+    expect(
+      voiceStartInstruction(
+        "make a new session to investigate primary work and tell me how to reproduce it",
+        ["Primary Work"],
+      ),
+    ).toBe("investigate primary work and tell me how to reproduce it");
     expect(voiceStartInstruction("what is this session doing")).toBeUndefined();
   });
 

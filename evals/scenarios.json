@@ -6598,5 +6598,158 @@
         }
       }
     ]
+  },
+  {
+    "id": "start_side_session_and_message_existing",
+    "description": "Start one side task and send a distinct instruction to an existing session without leaking either clause into the other action.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "start a new session to investigate reconnect jitter and tell primary work keep its current branch until the benchmark finishes",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "start_session": {
+            "started": true,
+            "session": { "id": "session-reconnect", "name": "Reconnect Study", "status": "running" },
+            "focused_session": { "id": "session-reconnect", "name": "Reconnect Study", "status": "running" },
+            "previous_focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "known_sessions": [
+              { "id": "session-reconnect", "name": "Reconnect Study", "status": "running", "focused": true },
+              { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+            ],
+            "recent_actions": [
+              { "action_id": 2201, "type": "session_started", "summary": "Started Reconnect Study: investigate reconnect jitter." }
+            ]
+          },
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "focused_session": { "id": "session-reconnect", "name": "Reconnect Study", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2201, "type": "session_started", "summary": "Started Reconnect Study: investigate reconnect jitter." },
+              { "action_id": 2202, "type": "message_sent", "summary": "Sent immediately to Primary Work: Keep its current branch until the benchmark finishes." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["start_session", "send_message"],
+          "alternativeToolSequences": [["send_message", "start_session"]],
+          "unorderedCallExpectations": [
+            {
+              "name": "start_session",
+              "argumentEquals": { "instruction": "investigate reconnect jitter" }
+            },
+            {
+              "name": "send_message",
+              "sessionId": "session-primary",
+              "messageTerms": ["keep", "current", "branch", "until", "benchmark", "finishes"],
+              "delivery": "not_queued"
+            }
+          ],
+          "speechTerms": ["reconnect study", "primary work"],
+          "speechAnyTerms": [["started", "created"], ["sent", "told"]],
+          "maxRounds": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "start_side_chat_then_ask_existing",
+    "description": "Hold out alternate start and relay grammar while keeping the two instructions isolated.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "make a side chat for checking phone audio cutoff then ask docs worker write down the 180 millisecond first audio result",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "start_session": {
+            "started": true,
+            "session": { "id": "session-audio", "name": "Audio Cutoff", "status": "running" },
+            "focused_session": { "id": "session-audio", "name": "Audio Cutoff", "status": "running" },
+            "previous_focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2211, "type": "session_started", "summary": "Started Audio Cutoff: checking phone audio cutoff." }
+            ]
+          },
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-docs", "name": "Docs Worker", "status": "running" },
+            "focused_session": { "id": "session-audio", "name": "Audio Cutoff", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2211, "type": "session_started", "summary": "Started Audio Cutoff: checking phone audio cutoff." },
+              { "action_id": 2212, "type": "message_sent", "summary": "Sent immediately to Docs Worker: Write down the 180 millisecond first audio result." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["start_session", "send_message"],
+          "alternativeToolSequences": [["send_message", "start_session"]],
+          "unorderedCallExpectations": [
+            {
+              "name": "start_session",
+              "argumentEquals": { "instruction": "checking phone audio cutoff" }
+            },
+            {
+              "name": "send_message",
+              "sessionId": "session-docs",
+              "messageTerms": ["write", "180", "millisecond", "first", "audio", "result"],
+              "delivery": "not_queued"
+            }
+          ],
+          "speechTerms": ["audio cutoff", "docs worker"],
+          "speechAnyTerms": [["started", "created"], ["sent", "told"]],
+          "allowedSpeechNumbers": [180],
+          "maxRounds": 2
+        }
+      }
+    ]
   }
 ]

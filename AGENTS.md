@@ -610,9 +610,12 @@ copies the user's exact task clause into `start_session.instruction`; Celeris
 still selects the tool and may choose the title, agent, and workspace. A
 trailing voice-directed concurrent-update clause such as “and tell me what came
 in while I was talking” is not part of the coding task and is removed before
-tool execution. Other task continuations remain intact. The explicit start is
-included in the required-action set, while its concurrent update is retained
-and spoken from the typed event after the verified start receipt.
+tool execution. When the same utterance separately addresses a known existing
+session, that relay clause is also excluded from the new session's instruction;
+the exact start and send remain two required, independently verified actions.
+Other task continuations remain intact. The explicit start is included in the
+required-action set, while any concurrent update is retained and spoken from
+the typed event after the verified start receipt.
 `get_output` reads `/v1/sessions/{id}/items`; arbitrary tmux scrollback is not
 available through the Omnigent HTTP API and must not be implied. It returns a
 JSON array instead of flattening the page into text. Page 1 contains the most
