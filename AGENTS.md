@@ -467,7 +467,9 @@ instead of leaking into the destination's message. Conversational ASR may omit
 the word “to” after each destination only when every named clause begins with a
 concrete imperative. A following conjunction or question/source prefix such as
 “what” or “whether” does not qualify, preserving ambiguity and read-first
-safety. Per-destination delivery is
+safety. The likewise bounded forms “send Session a message to …” and “let
+Session know …” participate in exact per-destination routing; a bare “send
+Session” remains incomplete and fails closed. Per-destination delivery is
 also harness-owned in this form: a target's
 explicit queue, wait, or after-current-turn clause forces `queued`, while every
 other target is forced to the normal `immediate` default. Clause boundaries

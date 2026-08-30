@@ -1099,6 +1099,20 @@ describe("Celeris coordinator conversation", () => {
     expect(
       Object.fromEntries(
         voiceMultipleMessageInstructions(
+          "send build worker a message to rerun the phone cutoff and let docs worker know the first audio was 180 milliseconds don't move me",
+          [
+            { id: "session-build", name: "Build Worker" },
+            { id: "session-docs", name: "Docs Worker" },
+          ],
+        ),
+      ),
+    ).toEqual({
+      "session-build": "rerun the phone cutoff",
+      "session-docs": "the first audio was 180 milliseconds",
+    });
+    expect(
+      Object.fromEntries(
+        voiceMultipleMessageInstructions(
           "uh tell docs worker to record the first audio timing and queue build worker a message to rerun the long reply after this turn don't move me",
           [
             { id: "session-docs", name: "Docs Worker" },
@@ -1259,7 +1273,32 @@ describe("Celeris coordinator conversation", () => {
     });
     expect(
       voiceMessageRouting(
+        "send build worker and let docs worker know the timing changed",
+        [
+          { id: "session-build", name: "Build Worker" },
+          { id: "session-docs", name: "Docs Worker" },
+        ],
+      ),
+    ).toEqual({ mode: "ambiguous", candidates: ["Build Worker", "Docs Worker"] });
+    expect(
+      voiceMessageRouting(
         "tell build worker rerun phone audio and tell docs worker record first audio",
+        [
+          { id: "session-build", name: "Build Worker" },
+          { id: "session-docs", name: "Docs Worker" },
+        ],
+      ),
+    ).toEqual({
+      mode: "multiple",
+      candidates: ["Build Worker", "Docs Worker"],
+      targets: [
+        { id: "session-build", name: "Build Worker" },
+        { id: "session-docs", name: "Docs Worker" },
+      ],
+    });
+    expect(
+      voiceMessageRouting(
+        "send build worker a message to rerun phone audio and let docs worker know the first audio was 180 milliseconds",
         [
           { id: "session-build", name: "Build Worker" },
           { id: "session-docs", name: "Docs Worker" },

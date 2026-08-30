@@ -1928,3 +1928,27 @@ typecheck and build, all 46 isolated trials after one HTTP 429 rerun, and all 38
 stateful scenarios across 121 linked turns. The evaluations used frozen
 coordinator state, no live session was read or mutated, and the excluded ESPN
 session remained untouched.
+
+### 2026-08-29 — Compound “send a message” and “let know” clauses
+
+Hypothesis H65 came from aggregate-only inspection of the retained private
+audit log. Across 223 recognized turns, 74 contained relay-like language;
+“message” appeared in 33, “tell” in 15, “ask” in 13, explicit “send a message”
+in eight, and five were compound relays. Only counts and event field names left
+the private pod. No transcript text, session name, or identifier was printed or
+copied into the repository.
+
+The existing focused garbled-send and ordinary-send cases each passed ten of
+ten, so changing that stable path was unwarranted. The uncovered boundary was
+two separately addressed clauses using “send Build Worker a message to …” and
+“let Docs Worker know ….” The new stateful baseline failed zero of three:
+neither send ran and both destinations disappeared from the response.
+
+Routing and exact-clause extraction now recognize those two bounded forms. A
+bare “send Build Worker and …” remains ambiguous, preventing an incomplete
+clause from becoming remote work. The candidate passed ten of ten targeted
+runs; nine completed both tools in one model round and one used the existing
+required-action recovery round. Promotion evidence is 146 passing unit tests,
+clean typecheck and build, all 46 isolated trials, and all 39 stateful scenarios
+across 122 linked turns. Model tests used frozen coordinator state, no live
+session was read or mutated, and the excluded ESPN session remained untouched.
