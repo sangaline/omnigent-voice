@@ -2569,3 +2569,56 @@ in 3–8 milliseconds, normal Celeris turns in 141–404 milliseconds, the open-
 composition in 364 milliseconds, and the bounded creative path in 589
 milliseconds after its immediate hold line. All 181 unit and integration tests,
 typecheck, and build passed before promotion.
+
+### 2026-08-30 — Longitudinal rhythm, cold recall, and delayed playback
+
+A retained live exchange separated three new failure classes. A short direct
+name question reached endpoint before memory prefetch and Celeris falsely denied
+the known fact. A mechanism question confused a phonetic DeepSeek Flash alias
+with a visual effect, and a creative provenance question denied real background
+help. The latter two already had deterministic typed fixes in the pending
+deployment. The name case revealed the remaining timing hole: its retrieval
+completed about 119 ms after endpoint, too late for the frozen context.
+
+Explicit personal-recall questions now get one bounded cold lookup of at most
+250 ms when partial prefetch missed; ordinary conversation remains nonblocking.
+A sanitized cold-name scenario returned the selected name in 399 ms instead of
+denying it. Three linked memory/provenance runs then passed, with the first turns
+at 193–503 ms and typed follow-ups at 0–3 ms. The memory-analysis prompt now
+requires explicit names, preference changes, dated follow-ups, and new open
+loops; the resolved-interview flow retained its Friday next step in three of
+three runs.
+
+The same live trace proved the delayed creative answer was a playback bug, not
+model latency. The 37-character hold line began in 45 ms and produced 2.16
+seconds of audio, then Discord went idle. The adviser completed at 3.56 seconds
+and Pocket still rendered 8.08 seconds of final audio in 1.33 seconds, but that
+audio was appended to the already-dead resource and never played. Staged speech
+now creates and awaits a fresh Discord resource for every coalesced batch. This
+retains streaming within each batch and makes the final answer independently
+auditable in `conversation.assistant.playback_started`.
+
+Five new sanitized scenarios expanded the corpus to seventeen: cold recall, a
+five-turn friendship rhythm, one-time background-thought use, preference
+evolution, and kind disagreement. The evaluator now scores aggregate question
+frequency, consecutive question runs, and repeated three-word openings. A
+four-reply rhythm guard asks for a declarative contribution after repeated
+questions or a short acknowledgment, while direct contribution requests cannot
+be replaced with a question. The five-turn exchange passed with zero questions
+after acknowledgments and 136–564 ms model times. The background thought was
+used specifically and disappeared on the unrelated next turn in three of three
+linked runs; one prepared reply completed in 1 ms. A full sweep reached sixteen
+of seventeen; its only miss was an intentionally corrected lexical overfit that
+rejected an otherwise clear “world-class hermit” disagreement for omitting an
+arbitrary noun.
+
+The next full sweep exposed a real longer-flow failure: an ordinary reflective
+turn selected the optional adviser, and the parallel Celeris candidate pool
+ended partway through its third JSON string. The old parser treated that raw
+envelope as a spoken candidate. Candidate parsing now recovers only complete
+closed strings, the pool budget is 384 tokens, and the final speech gate rejects
+all raw structured payloads. The five-turn flow then passed three of three runs.
+The final complete sweep passed all seventeen scenarios with no invalid trials:
+median endpoint generation was 175 ms, p95 746 ms, and maximum 808 ms. The full
+188-test unit and integration suite passed, and typecheck, build, and diff checks
+were clean before promotion.

@@ -9,6 +9,7 @@ import {
   PersonaMemoryStore,
   PersonaTurnAnalysis,
   groundedMemoryCandidate,
+  selfContainedPersonaRequest,
   unsafeCreativeDraft,
 } from "./persona-memory.js";
 
@@ -129,6 +130,38 @@ describe("persona memory runtime", () => {
     await runtime.close();
   });
 
+  it("performs one bounded cold lookup for an explicit recall question", async () => {
+    const store = new FakeStore();
+    store.selection = {
+      memories: [
+        {
+          id: "13",
+          kind: "user_fact",
+          canonicalKey: "user.name",
+          text: "The user's name is Morgan.",
+          source: "user",
+          evidenceQuote: "call me Morgan",
+          confidence: 1,
+          importance: 0.9,
+          relevance: 0.92,
+          createdAt: "2026-08-30T00:00:00.000Z",
+        },
+      ],
+    };
+    const runtime = new PersonaMemoryRuntime({
+      ownerKey: "test-owner",
+      store,
+      embedder: fakeEmbedder(),
+      adviser: fakeAdviser(),
+      logger: new Logger("error"),
+    });
+    await runtime.initialize();
+
+    await expect(runtime.contextForRecall("Do you know my name?", 250))
+      .resolves.toContain("The user's name is Morgan");
+    await runtime.close();
+  });
+
   it("records and analyzes a completed turn outside the caller's hot path", async () => {
     let releaseAnalysis: (() => void) | undefined;
     const wait = new Promise<void>((resolve) => {
@@ -239,6 +272,14 @@ describe("persona memory runtime", () => {
 });
 
 describe("OpenAI-compatible persona adviser", () => {
+  it("recognizes requests that need a self-contained contribution", () => {
+    expect(selfContainedPersonaRequest(
+      "give me one tiny reset that doesn't feel like homework",
+    )).toBe(true);
+    expect(selfContainedPersonaRequest("tell me what you really think")).toBe(true);
+    expect(selfContainedPersonaRequest("did you like it")).toBe(false);
+  });
+
   it("rejects stock or purportedly factual joke drafts", () => {
     expect(unsafeCreativeDraft(
       "tell me a weird joke",

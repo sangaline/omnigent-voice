@@ -100,9 +100,11 @@ line. That hot escalation races the adviser against a separate three-candidate
 Celeris fallback, applies the same safety gate to both, records the actual
 winner for provenance, and aborts the loser. `PERSONA_ADVISER_HOT_TIMEOUT_MS`
 defaults to 6,000 ms and bounds only this caller-facing race; the longer analysis
-timeout remains available for asynchronous memory work. A continuous silent PCM
-gap keeps Discord's raw audio resource alive between the short hold line and
-delayed final answer.
+timeout remains available for asynchronous memory work. Each delayed spoken
+batch owns a fresh Discord raw-audio resource and is awaited through idle. Never
+append an adviser result to the resource used by an earlier hold line: live logs
+proved Discord can close that resource before the result arrives and silently
+drop the generated answer.
 
 Every extracted durable memory has a stable canonical key, declared source
 speaker, and an exact evidence quote that must appear in that speaker's turn.
@@ -129,6 +131,17 @@ preserves the verified relationship detail without discarding the otherwise
 useful answer. False claims of shared physical history receive a typed refusal
 and are excluded from memory extraction. Do not restore an absolute instruction to deny or hide
 mechanisms that were actually used.
+
+An explicit personal-recall question that reached endpoint before any useful
+partial may spend at most 250 ms on one cold memory lookup; ordinary turns never
+acquire this latency gate. The latest four Audrey replies also feed a compact
+rhythm guard: repeated questions and short acknowledgments should produce a
+declarative contribution, not another menu or interview. Direct contribution
+requests must be fulfilled in the current reply. Sequence evals measure total
+question-bearing replies, consecutive question runs, and repeated openings.
+The fast fallback may recover complete closed candidate strings from a truncated
+JSON pool, but a structured envelope or unfinished string is never speech. Keep
+the final raw-JSON rejection even when provider token limits change.
 
 The bundled runtime models are the int8 0.6B Nemotron English streaming
 transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the
@@ -839,7 +852,9 @@ Logs are newline-delimited JSON on stdout and, when `LOG_FILE` is configured,
 appended to that runtime file. `conversation.user.recognized` contains each ASR
 transcript. `conversation.assistant.generated` records the response and whether
 it was superseded before playback. `conversation.assistant.playback_started`
-records the exact text whose audio actually began and its retry number.
+records every exact speech batch whose audio actually began, its segment number,
+and its retry number. A delayed adviser answer therefore has independent
+playback evidence after the hold line.
 For `source: "background_update"`, the generated record also stores the exact
 serialized coordinator update payload so private replay can distinguish backend
 evidence from the voice model's spoken interpretation. This field can contain

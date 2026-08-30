@@ -32,8 +32,15 @@ interface PersonaScenario {
   description: string;
   initialHistory: CelerisHistoryMessage[];
   turns: PersonaScenarioTurn[];
+  sequenceExpected?: PersonaSequenceExpected | undefined;
   analysisTerms?: string[] | undefined;
   analysisForbiddenTerms?: string[] | undefined;
+}
+
+interface PersonaSequenceExpected {
+  maxQuestionReplies?: number | undefined;
+  maxConsecutiveQuestionReplies?: number | undefined;
+  maxRepeatedOpeningCount?: number | undefined;
 }
 
 class ScenarioMemoryStore implements PersonaMemoryStore {
@@ -123,6 +130,61 @@ const scoreSpeech = (speech: string, expected: PersonaExpected): string[] => {
   return failures;
 };
 
+const scoreSequence = (
+  speeches: readonly string[],
+  expected: PersonaSequenceExpected | undefined,
+): string[] => {
+  if (!expected) return [];
+  const failures: string[] = [];
+  const questionReplies = speeches.map((speech) => speech.includes("?"));
+  const questionCount = questionReplies.filter(Boolean).length;
+  if (
+    expected.maxQuestionReplies !== undefined &&
+    questionCount > expected.maxQuestionReplies
+  ) {
+    failures.push(
+      `sequence had ${questionCount} question-bearing replies, limit ${expected.maxQuestionReplies}`,
+    );
+  }
+  let currentQuestionRun = 0;
+  let longestQuestionRun = 0;
+  for (const containsQuestion of questionReplies) {
+    currentQuestionRun = containsQuestion ? currentQuestionRun + 1 : 0;
+    longestQuestionRun = Math.max(longestQuestionRun, currentQuestionRun);
+  }
+  if (
+    expected.maxConsecutiveQuestionReplies !== undefined &&
+    longestQuestionRun > expected.maxConsecutiveQuestionReplies
+  ) {
+    failures.push(
+      `sequence had ${longestQuestionRun} consecutive question-bearing replies, limit ` +
+        expected.maxConsecutiveQuestionReplies,
+    );
+  }
+  if (expected.maxRepeatedOpeningCount !== undefined) {
+    const openingCounts = new Map<string, number>();
+    for (const speech of speeches) {
+      const opening = speech
+        .normalize("NFKC")
+        .toLocaleLowerCase()
+        .replace(/[^\p{L}\p{N}'\s]/gu, " ")
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(" ");
+      if (opening) openingCounts.set(opening, (openingCounts.get(opening) ?? 0) + 1);
+    }
+    const repeated = Math.max(0, ...openingCounts.values());
+    if (repeated > expected.maxRepeatedOpeningCount) {
+      failures.push(
+        `sequence repeated one three-word opening ${repeated} times, limit ` +
+          expected.maxRepeatedOpeningCount,
+      );
+    }
+  }
+  return failures;
+};
+
 const celerisKeyFile = option("--celeris-api-key-file") ?? option("--api-key-file");
 const adviserKeyFile = option("--adviser-api-key-file");
 const celerisApiKey = required(
@@ -189,6 +251,7 @@ for (const scenario of scenarios) {
     });
     conversation.restoreHistory(scenario.initialHistory);
     const turnResults: Array<Record<string, unknown>> = [];
+    const speeches: string[] = [];
     let invalid = false;
     try {
       for (const [turnIndex, turn] of scenario.turns.entries()) {
@@ -209,6 +272,7 @@ for (const scenario of scenarios) {
             throw new Error("Production streaming speech diverged from remembered speech");
           }
           const failures = scoreSpeech(speech, turn.expected);
+          speeches.push(speech);
           const result = {
             turn: turnIndex + 1,
             input: turn.input,
@@ -250,6 +314,9 @@ for (const scenario of scenarios) {
 
     const analysisText = JSON.stringify(store.analyses);
     const analysisFailures: string[] = [];
+    const sequenceFailures = invalid
+      ? []
+      : scoreSequence(speeches, scenario.sequenceExpected);
     if (!invalid) {
       for (const term of scenario.analysisTerms ?? []) {
         if (!includes(analysisText, term)) {
@@ -266,6 +333,7 @@ for (const scenario of scenarios) {
       !invalid &&
       turnResults.length === scenario.turns.length &&
       turnResults.every((result) => result.passed === true) &&
+      sequenceFailures.length === 0 &&
       analysisFailures.length === 0;
     results.push({
       id: scenario.id,
@@ -274,11 +342,15 @@ for (const scenario of scenarios) {
       passed,
       invalid,
       turns: turnResults,
+      sequenceFailures,
       analysisCount: store.analyses.length,
       analysisFailures,
     });
     if (!hasOption("--json") && analysisFailures.length > 0) {
       for (const failure of analysisFailures) console.log(`  ${failure}`);
+    }
+    if (!hasOption("--json") && sequenceFailures.length > 0) {
+      for (const failure of sequenceFailures) console.log(`  ${failure}`);
     }
   }
 }

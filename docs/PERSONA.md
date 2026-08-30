@@ -45,7 +45,10 @@ The application stores completed turns and typed memories in a dedicated
 Postgres database with pgvector. A local Ollama embedding endpoint handles
 semantic retrieval. Live ASR partials start retrieval while the caller is still
 speaking; at endpoint the harness takes only the latest completed result and
-calls Celeris immediately. It never waits for an embedding or adviser request.
+calls Celeris immediately. One narrow exception prevents a known identity or
+preference from being falsely denied: an explicit personal-recall question with
+no usable partial may wait up to 250 milliseconds for one cold retrieval. It
+still never waits for the conversational adviser.
 
 The same partial transcript starts a DeepSeek context planner after it contains
 enough words. Reasoning is disabled for this latency-sensitive job. It streams
@@ -73,6 +76,8 @@ relationship callback cannot erase the user's new schedule. If the small model
 drops a verified anchor three times, the harness keeps its useful answer and
 adds a short grounded repair prefix. Direct false premises about shared physical
 history are refused locally and are not eligible for durable-memory extraction.
+Natural punctuation is ignored while checking an anchor, so `bright, crisp
+morning` does not trigger a needless retry for `bright crisp morning`.
 
 After Celeris has produced the spoken response, a serialized background worker
 sends that completed exchange to the configured OpenAI-compatible adviser. It
@@ -102,9 +107,24 @@ selects the first safe result, records which source actually won, and aborts the
 loser. `PERSONA_ADVISER_HOT_TIMEOUT_MS` bounds this caller-facing race without
 shortening the asynchronous analysis timeout. The original transcript is
 authoritative even when Celeris paraphrases tool arguments. Discord receives
-silent PCM between the acknowledgment and result so the delayed second batch
-cannot be dropped as an already-finished stream. The tool cannot perform
-external actions.
+a fresh raw-audio resource for every delayed speech batch. A completed hold line
+may go idle normally; when the adviser result arrives, its own resource starts
+and is awaited through playback instead of being written into a dead earlier
+stream. The tool cannot perform external actions.
+
+The hot conversation tracks rhythm over the latest four Audrey replies. After
+repeated question-bearing replies, or after a short acknowledgment such as
+“okay,” a per-turn guard asks for a declarative opinion, observation, or thread
+rather than another interview question. Direct “give me,” “tell me,” or “what
+is your honest read” requests must deliver the contribution instead of handing
+the task back to the caller. The shared production-harness scenarios score these
+behaviors across linked turns.
+
+The parallel fast fallback requests a small structured candidate pool. If the
+provider stops after one or two closed JSON strings, the harness may recover
+those complete candidates; the JSON envelope and any unfinished string are
+never eligible for speech. Raw structured payloads are rejected by the final
+speech gate.
 
 Typed generation provenance records whether background context was merely
 available, a prepared DeepSeek reply was actually used, or the adviser produced

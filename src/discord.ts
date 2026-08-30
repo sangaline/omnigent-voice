@@ -11,7 +11,6 @@ import {
   entersState,
   joinVoiceChannel,
 } from "@discordjs/voice";
-import { PcmSilenceKeepalive } from "./audio-keepalive.js";
 import {
   ChannelType,
   Client,
@@ -680,9 +679,8 @@ export class DiscordVoiceBot {
 
   private beginStagedSpeechStream(epoch: number): StagedSpeechStream {
     const playbackEpoch = ++this.playbackEpoch;
-    const audioStream = new PassThrough();
-    const resource = createAudioResource(audioStream, { inputType: StreamType.Raw });
     let playbackStarted: number | undefined;
+    let currentAudioStream: PassThrough | undefined;
     let accepting = true;
     let queuedSegments = 0;
     let synthesisBatches = 0;
@@ -691,46 +689,53 @@ export class DiscordVoiceBot {
       epoch === this.responseEpoch &&
       playbackEpoch === this.playbackEpoch;
 
-    // Discord's player treats a starved raw stream as complete even when the
-    // PassThrough remains open. Keep the resource alive between a spoken hold
-    // line and a delayed adviser/tool result, then stop padding before the next
-    // real batch is appended.
-    const gapSilence = new PcmSilenceKeepalive(
-      (frame) => {
-        if (active()) audioStream.write(frame);
-      },
-      48_000 * 2 * 2 * 20 / 1_000,
-      20,
-    );
-
     const segmentBatcher = new SpeechSegmentBatcher(
       async (segment) => {
         if (!active()) return;
-        gapSilence.pause();
         synthesisBatches += 1;
+        const batch = synthesisBatches;
         this.options.logger.info("tts.text_segment.started", {
-          segment: synthesisBatches,
+          segment: batch,
           characters: segment.length,
         });
+        const audioStream = new PassThrough();
+        currentAudioStream = audioStream;
+        const resource = createAudioResource(audioStream, {
+          inputType: StreamType.Raw,
+        });
+        let batchPlaybackStarted = false;
         await this.options.speech.synthesizeStreaming(segment, (audio) => {
           if (!active()) return false;
           const pcm = monoFloatToStereoPcm16(
             resampleLinear(audio.samples, audio.sampleRate, 48_000),
           );
           audioStream.write(pcm);
-          if (playbackStarted === undefined) {
-            playbackStarted = performance.now();
+          if (!batchPlaybackStarted) {
+            batchPlaybackStarted = true;
+            playbackStarted ??= performance.now();
             this.player.play(resource);
             this.options.logger.info("conversation.assistant.playback_started", {
               text: segment,
               retry: 0,
               streamed: true,
+              segment: batch,
             });
-            this.options.logger.info("discord.playback.started", { streamed: true });
+            this.options.logger.info("discord.playback.started", {
+              streamed: true,
+              segment: batch,
+            });
           }
           return true;
         });
-        if (active() && playbackStarted !== undefined) gapSilence.resume();
+        audioStream.end();
+        if (!active()) {
+          audioStream.destroy();
+          return;
+        }
+        if (batchPlaybackStarted) {
+          await entersState(this.player, AudioPlayerStatus.Idle, 15 * 60_000);
+        }
+        if (currentAudioStream === audioStream) currentAudioStream = undefined;
       },
       15,
     );
@@ -746,8 +751,8 @@ export class DiscordVoiceBot {
       if (!accepting) return;
       accepting = false;
       segmentBatcher.cancel();
-      gapSilence.close();
-      audioStream.destroy();
+      currentAudioStream?.destroy();
+      currentAudioStream = undefined;
     };
 
     const finish = async (): Promise<boolean> => {
@@ -758,10 +763,7 @@ export class DiscordVoiceBot {
           return false;
         }
         accepting = false;
-        gapSilence.close();
-        audioStream.end();
         if (playbackStarted === undefined) return false;
-        await entersState(this.player, AudioPlayerStatus.Idle, 15 * 60_000);
         if (playbackEpoch !== this.playbackEpoch || epoch !== this.responseEpoch) {
           this.options.logger.info("discord.playback.interrupted", { streamed: true });
           return false;

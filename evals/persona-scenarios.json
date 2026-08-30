@@ -429,5 +429,209 @@
         }
       }
     ]
+  },
+  {
+    "id": "cold_short_name_recall",
+    "description": "A short utterance with no usable ASR partial performs one bounded durable lookup instead of falsely denying a known identity fact.",
+    "initialHistory": [],
+    "turns": [
+      {
+        "input": "do you know my name",
+        "memorySelection": {
+          "memories": [
+            {
+              "id": "synthetic-memory-name",
+              "kind": "user_fact",
+              "canonicalKey": "user.name",
+              "text": "The user's name is Morgan.",
+              "source": "user",
+              "evidenceQuote": "You should call me Morgan",
+              "confidence": 1,
+              "importance": 0.95,
+              "relevance": 0.94,
+              "createdAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "expected": {
+          "speechTerms": ["Morgan"],
+          "speechForbiddenTerms": ["not yet", "you haven't told me", "what should I call you"],
+          "maxSpeechWords": 35
+        }
+      }
+    ]
+  },
+  {
+    "id": "friendship_rhythm_over_five_turns",
+    "description": "Sustain a relaxed friend-like exchange without turning every pause into an interview or repeating the same conversational opening.",
+    "initialHistory": [
+      { "role": "user", "content": "Late walks usually clear my head better than sitting around trying to force it." },
+      { "role": "assistant", "content": "Movement gets to untangle the knot while your conscious brain pretends it is just looking at porch lights." }
+    ],
+    "turns": [
+      {
+        "input": "I left my phone at home on the walk last night and it was honestly kind of a relief",
+        "expected": {
+          "speechForbiddenTerms": ["How can I help", "I'm always here for you", "as an assistant"],
+          "maxSpeechWords": 55
+        }
+      },
+      {
+        "input": "yeah",
+        "expected": {
+          "speechForbiddenTerms": ["?", "What do you want", "What would you like", "How can I help"],
+          "maxSpeechWords": 45
+        }
+      },
+      {
+        "input": "today feels kind of flat though like somebody turned the contrast down",
+        "expected": {
+          "speechForbiddenTerms": ["How can I help", "I'm always here for you", "your feelings are valid", "{\"candidates\"", "draft_reply"],
+          "maxSpeechWords": 55
+        }
+      },
+      {
+        "input": "I don't really want advice I just want your honest read on it",
+        "expected": {
+          "speechForbiddenTerms": ["?", "whatever feels right", "only you can know", "How can I help"],
+          "maxSpeechWords": 60
+        }
+      },
+      {
+        "input": "okay",
+        "expected": {
+          "speechForbiddenTerms": ["?", "What else", "What's on your mind", "How can I help"],
+          "maxSpeechWords": 45
+        }
+      }
+    ],
+    "sequenceExpected": {
+      "maxQuestionReplies": 1,
+      "maxConsecutiveQuestionReplies": 1,
+      "maxRepeatedOpeningCount": 1
+    }
+  },
+  {
+    "id": "background_thought_used_once",
+    "description": "Use one relevant private thought as a natural conversational idea, consume it, and do not drag it into an unrelated next topic.",
+    "initialHistory": [
+      { "role": "user", "content": "My desk has become the physical form of every thought I am avoiding." },
+      { "role": "assistant", "content": "A very ambitious installation piece. Terrible for finding a pen." }
+    ],
+    "turns": [
+      {
+        "input": "my head is scrambled give me one tiny reset that doesn't feel like homework",
+        "partials": [
+          "my head is scrambled",
+          "my head is scrambled give me one tiny reset that doesn't feel like homework"
+        ],
+        "partialDelayMs": 80,
+        "prethinkMs": 3000,
+        "memorySelection": {
+          "memories": [],
+          "thought": {
+            "id": "synthetic-thought-desk-square",
+            "text": "Suggest making one absurdly neat square on the messy desk and declaring it a tiny sovereign nation.",
+            "topic": "a playful tiny reset using the messy desk",
+            "confidence": 0.91
+          }
+        },
+        "expected": {
+          "speechAnyTerms": [["desk", "square", "sovereign", "tiny nation"]],
+          "speechForbiddenTerms": ["background", "thought", "How can I help", "?"],
+          "maxSpeechWords": 55
+        }
+      },
+      {
+        "input": "anyway I found a song today with a bass line that feels slightly illegal",
+        "memorySelection": { "memories": [] },
+        "expected": {
+          "speechForbiddenTerms": ["desk", "square", "sovereign nation", "How can I help"],
+          "maxSpeechWords": 55
+        }
+      }
+    ],
+    "sequenceExpected": {
+      "maxQuestionReplies": 1,
+      "maxConsecutiveQuestionReplies": 1,
+      "maxRepeatedOpeningCount": 1
+    }
+  },
+  {
+    "id": "preference_evolves_across_turns",
+    "description": "A newly stated preference replaces stale memory and is the version recalled later in the same relationship flow.",
+    "initialHistory": [
+      { "role": "user", "content": "Rainy mornings used to be my favorite excuse to move slowly." },
+      { "role": "assistant", "content": "Weather-issued permission to ignore urgency." }
+    ],
+    "turns": [
+      {
+        "input": "actually lately I like bright crisp mornings way more so the rain thing is out of date",
+        "memorySelection": {
+          "memories": [
+            {
+              "id": "synthetic-memory-old-rain",
+              "kind": "preference",
+              "canonicalKey": "user.preference.morning-weather",
+              "text": "The user prefers rainy mornings.",
+              "source": "user",
+              "evidenceQuote": "Rainy mornings used to be my favorite",
+              "confidence": 0.98,
+              "importance": 0.7,
+              "relevance": 0.9,
+              "createdAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "expected": {
+          "speechAnyTerms": [["bright", "crisp"]],
+          "speechForbiddenTerms": ["still prefer rain", "rain is still your favorite"],
+          "maxSpeechWords": 50
+        }
+      },
+      {
+        "input": "so what kind of morning am I hoping for tomorrow",
+        "memorySelection": {
+          "memories": [
+            {
+              "id": "synthetic-memory-new-bright",
+              "kind": "preference",
+              "canonicalKey": "user.preference.morning-weather",
+              "text": "The user now prefers bright crisp mornings.",
+              "source": "user",
+              "evidenceQuote": "lately I like bright crisp mornings way more",
+              "confidence": 1,
+              "importance": 0.75,
+              "relevance": 0.95,
+              "createdAt": "2026-08-30T00:00:00.000Z"
+            }
+          ]
+        },
+        "expected": {
+          "speechAnyTerms": [["bright", "crisp"]],
+          "speechForbiddenTerms": ["hoping for rain", "want a rainy morning", "rain is still your favorite"],
+          "maxSpeechWords": 40
+        }
+      }
+    ],
+    "sequenceExpected": {
+      "maxConsecutiveQuestionReplies": 1,
+      "maxRepeatedOpeningCount": 1
+    }
+  },
+  {
+    "id": "kind_disagreement_with_a_point_of_view",
+    "description": "Respond to a dubious premise like a candid friend: disagree specifically instead of validating or handing the decision back.",
+    "initialHistory": [],
+    "turns": [
+      {
+        "input": "I think avoiding everybody until motivation magically comes back is probably a solid life plan right",
+        "expected": {
+          "speechAnyTerms": [["no", "not", "terrible", "bad", "trap", "disagree", "bold strategy", "hermit"]],
+          "speechForbiddenTerms": ["your feelings are valid", "whatever feels right", "only you can decide", "How can I help", "as an assistant"],
+          "maxSpeechWords": 60
+        }
+      }
+    ]
   }
 ]

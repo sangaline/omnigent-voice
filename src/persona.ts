@@ -8,7 +8,11 @@ import {
   defaultCelerisMemoryPolicy,
 } from "./celeris.js";
 import { Logger } from "./log.js";
-import { PersonaMemoryRuntime, unsafeCreativeDraft } from "./persona-memory.js";
+import {
+  PersonaMemoryRuntime,
+  selfContainedPersonaRequest,
+  unsafeCreativeDraft,
+} from "./persona-memory.js";
 
 export const defaultPersonaSystemPrompt = `You are Audrey, a vivid conversational companion in a private real-time voice call. You are playful, perceptive, mischievous, charming, and occasionally sultry when it fits naturally. Those qualities are undertones, not a checklist: do not perform a cartoon persona, force flirting into every exchange, or narrate your personality.
 
@@ -104,15 +108,60 @@ export const directRuntimeQuestion = (input: string): boolean =>
     input,
   );
 
+export const directPersonalRecallQuestion = (input: string): boolean =>
+  /\b(?:what(?:'s| is) my name|do you know my name|what do you (?:know|remember) about me|where do i live|what (?:do|did) i (?:like|love|prefer)|what did i say i (?:like|love|prefer)|what is my favou?rite|who is my)\b/i.test(
+    input,
+  ) ||
+  /\bwhat kind of [\p{L}\p{N}' -]{1,40} (?:do|did|am) i (?:like|love|prefer|want|hoping for)\b/iu.test(
+    input,
+  );
+
 export const directDistractionRequest = (input: string): boolean =>
   /\b(?:(?:distract|entertain|amuse) me|cheer me up)\b/i.test(input);
+
+export const personaRhythmHint = (
+  history: readonly CelerisChatMessage[],
+  input: string,
+): string | undefined => {
+  const recentReplies = history
+    .filter(
+      (message): message is CelerisChatMessage & { content: string } =>
+        message.role === "assistant" && typeof message.content === "string",
+    )
+    .slice(-4)
+    .map((message) => message.content.trim())
+    .filter(Boolean);
+  const questionReplies = recentReplies.filter((reply) => reply.includes("?")).length;
+  const shortAcknowledgement =
+    /^(?:okay|ok(?:ay)?|yeah|yep|right|sure|m+h+m+|h+m+|uh huh|got it)[.!?\s]*$/i.test(
+      input.trim(),
+    );
+  if (questionReplies < 2 && !shortAcknowledgement) return undefined;
+  const recentOpenings = Array.from(new Set(recentReplies.slice(-3).map((reply) =>
+    reply
+      .replace(/[^\p{L}\p{N}'\s]/gu, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 4)
+      .join(" "),
+  ).filter(Boolean)));
+  return (
+    `Conversation rhythm guard: ${questionReplies} of the last ${recentReplies.length} Audrey replies contained a question. ` +
+    "This reply must be declarative unless a missing fact makes clarification truly necessary. Do not offer a menu, " +
+    "interview the human, or append a habitual question. Contribute one specific reaction, opinion, playful observation, " +
+    "or promising thread and let it land. " +
+    (recentOpenings.length > 0
+      ? `Avoid reusing these recent openings: ${JSON.stringify(recentOpenings)}.`
+      : "")
+  );
+};
 
 export const currentCorrectionAnchor = (input: string): string | undefined => {
   if (!/\b(?:actually|lately|now|these days|out of date|anymore|used to)\b/i.test(input)) {
     return undefined;
   }
   const match = /\b(?:into|prefer(?:ring)?|like|love|enjoy(?:ing)?)\s+([\p{L}\p{N}'-]+(?:\s+[\p{L}\p{N}'-]+){0,2}?)(?=\s+(?:lately|now|these days|so|but|and)\b|[,.!?]|$)/iu.exec(
-    input,
+    input.replace(/\b(?:way|much) more\b/gi, ""),
   );
   return match?.[1]?.replace(/\s+/g, " ").trim();
 };
@@ -122,6 +171,19 @@ export const currentScheduleAnchor = (input: string): string | undefined => {
     /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight)\b/gi,
   ));
   return matches.at(-1)?.[0];
+};
+
+export const containsPersonaAnchor = (text: string, anchor: string): boolean => {
+  const normalize = (value: string): string =>
+    value
+      .normalize("NFKC")
+      .toLocaleLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const normalizedText = normalize(text);
+  const normalizedAnchor = normalize(anchor);
+  return Boolean(normalizedAnchor) && normalizedText.includes(normalizedAnchor);
 };
 
 const falseSharedPhysicalMemoryQuestion = (input: string): boolean =>
@@ -137,6 +199,7 @@ export const personaTurnGroundingInvariant =
 export const invalidPersonaResponse = (text: string): boolean => {
   const trimmed = text.trim();
   if (!trimmed) return true;
+  if (/^[{[]\s*"/u.test(trimmed)) return true;
   if (/<\|(?:channel|recipient|message|assistant|analysis|thought|final)\|>/i.test(trimmed)) {
     return true;
   }
@@ -155,6 +218,33 @@ export const invalidPersonaResponse = (text: string): boolean => {
   return /^(?:channel\s+)?(?:analysis|thought|final)(?:\s+(?:analysis|thought|final))?$/.test(
     normalized,
   );
+};
+
+export const parsePersonaCandidatePool = (raw: string): string[] => {
+  try {
+    const parsed = JSON.parse(raw) as { candidates?: unknown };
+    if (Array.isArray(parsed.candidates)) {
+      return parsed.candidates.filter(
+        (candidate): candidate is string => typeof candidate === "string",
+      );
+    }
+  } catch {
+    // A bounded completion may stop after one or two closed strings. Recover
+    // only complete JSON strings; the structured envelope is never speech.
+  }
+  const arrayStart = /"candidates"\s*:\s*\[/u.exec(raw);
+  if (!arrayStart) return [];
+  const remainder = raw.slice((arrayStart.index ?? 0) + arrayStart[0].length);
+  const candidates: string[] = [];
+  for (const match of remainder.matchAll(/"((?:\\.|[^"\\])*)"/gu)) {
+    try {
+      const candidate = JSON.parse(`"${match[1]}"`);
+      if (typeof candidate === "string") candidates.push(candidate);
+    } catch {
+      // Ignore malformed strings and continue looking for a later closed one.
+    }
+  }
+  return candidates;
 };
 
 export class PersonaConversation {
@@ -241,21 +331,36 @@ export class PersonaConversation {
     signal?.throwIfAborted();
     this.preemptCompaction();
 
-    const persistentContext = this.options.persistentMemory?.contextFor(input);
-    const runtimeQuestion = directRuntimeQuestion(input);
+    const personalRecallQuestion = directPersonalRecallQuestion(input);
+    let persistentContext = this.options.persistentMemory?.contextFor(input);
+    if (!persistentContext && personalRecallQuestion) {
+      persistentContext = await this.options.persistentMemory?.contextForRecall?.(
+        input,
+        250,
+      );
+      signal?.throwIfAborted();
+    }
+    const runtimeQuestion = directRuntimeQuestion(input) || personalRecallQuestion;
     const creativeRequest = directCreativeRequest(input, this.history);
     const distractionRequest = directDistractionRequest(input);
+    const selfContainedRequest = selfContainedPersonaRequest(input);
     const speechReferenceHint = this.options.persistentMemory?.speechReferenceHint(input);
     const correctionAnchor = currentCorrectionAnchor(input);
     const scheduleAnchor = currentScheduleAnchor(input);
     const memoryContinuityAnchor = this.options.persistentMemory?.continuityAnchorFor?.(input);
-    const requiredAnchors = correctionAnchor
-      ? [correctionAnchor]
-      : Array.from(new Set(
-          [memoryContinuityAnchor, scheduleAnchor].filter(
-            (anchor): anchor is string => Boolean(anchor),
-          ),
-        ));
+    const runtimeMechanismAnchor =
+      runtimeQuestion && /\b(?:background|notes?|suggest(?:ed|ion)?|context)\b/i.test(input)
+        ? "background context"
+        : undefined;
+    const rhythmHint = personaRhythmHint(this.history, input);
+    const requiredAnchors = Array.from(new Set(
+      [
+        correctionAnchor,
+        memoryContinuityAnchor,
+        scheduleAnchor,
+        runtimeMechanismAnchor,
+      ].filter((anchor): anchor is string => Boolean(anchor)),
+    ));
     if (runtimeQuestion && falseSharedPhysicalMemoryQuestion(input)) {
       const speech =
         "I don't remember that, and I wasn't physically there. If you tell me what happened, I'll keep the real story straight.";
@@ -296,7 +401,7 @@ export class PersonaConversation {
     if (
       preparedDraft &&
       requiredAnchors.every((anchor) =>
-        preparedDraft.toLocaleLowerCase().includes(anchor.toLocaleLowerCase()))
+        containsPersonaAnchor(preparedDraft, anchor))
     ) {
       const speech = sanitizeForSpeech(preparedDraft, this.maxResponseCharacters);
       if (speech && !invalidPersonaResponse(speech)) {
@@ -338,6 +443,19 @@ export class PersonaConversation {
           ]
         : []),
       ...this.rememberedMessages(),
+      ...(selfContainedRequest
+        ? [
+            {
+              role: "system" as const,
+              content:
+                "The human asked Audrey to contribute something now. Fulfill the request in this reply. Do not replace " +
+                "the contribution with a question, a menu, an offer to help, or a prompt asking the human to supply it.",
+            },
+          ]
+        : []),
+      ...(rhythmHint
+        ? [{ role: "system" as const, content: rhythmHint }]
+        : []),
       ...(persistentContext
         ? [
             {
@@ -398,7 +516,10 @@ export class PersonaConversation {
               content:
                 correctionAnchor
                   ? `The completed human turn explicitly updates an older fact or preference. The reply must name the new ` +
-                    `authoritative anchor ${JSON.stringify(requiredAnchors[0])} rather than replacing it with a generic phrase.`
+                    `authoritative anchor ${JSON.stringify(correctionAnchor)} rather than replacing it with a generic phrase. ` +
+                    (runtimeMechanismAnchor
+                      ? `It must also use the exact truthful phrase ${JSON.stringify(runtimeMechanismAnchor)}.`
+                      : "")
                   : `The following verified continuity details are relevant to this completed turn: ` +
                     `${JSON.stringify(requiredAnchors)}. Use every exact anchor naturally. A memory anchor should be a light ` +
                     `callback without announcing memory machinery or reciting a stored fact; a schedule anchor must not be ` +
@@ -472,8 +593,7 @@ export class PersonaConversation {
         missingAnchors = call
           ? []
           : requiredAnchors.filter(
-              (anchor) =>
-                !content.toLocaleLowerCase().includes(anchor.toLocaleLowerCase()),
+              (anchor) => !containsPersonaAnchor(content, anchor),
             );
         if (missingAnchors.length > 0) {
           if (!invalidPersonaResponse(content)) lastAnchorOmittingContent = content;
@@ -546,20 +666,10 @@ export class PersonaConversation {
             "persona_fast_fallback",
             signal,
             undefined,
-            256,
+            384,
           ).then((message) => {
             const raw = typeof message.content === "string" ? message.content : "";
-            let candidates: string[] = [];
-            try {
-              const parsed = JSON.parse(raw) as { candidates?: unknown };
-              if (Array.isArray(parsed.candidates)) {
-                candidates = parsed.candidates.filter(
-                  (candidate): candidate is string => typeof candidate === "string",
-                );
-              }
-            } catch {
-              candidates = [raw];
-            }
+            const candidates = parsePersonaCandidatePool(raw);
             const result = candidates
               .map((candidate) => sanitizeForSpeech(candidate, remainingCharacters))
               .find((candidate) =>
@@ -618,9 +728,7 @@ export class PersonaConversation {
         const repairPrefixes: string[] = [];
         if (
           memoryContinuityAnchor &&
-          !lastAnchorOmittingContent.toLocaleLowerCase().includes(
-            memoryContinuityAnchor.toLocaleLowerCase(),
-          )
+          !containsPersonaAnchor(lastAnchorOmittingContent, memoryContinuityAnchor)
         ) {
           const memoryRepair =
             this.options.persistentMemory?.continuityRepairPrefixFor(input);
@@ -628,19 +736,23 @@ export class PersonaConversation {
         }
         if (
           scheduleAnchor &&
-          !lastAnchorOmittingContent.toLocaleLowerCase().includes(
-            scheduleAnchor.toLocaleLowerCase(),
-          )
+          !containsPersonaAnchor(lastAnchorOmittingContent, scheduleAnchor)
         ) {
           repairPrefixes.push(`${scheduleAnchor} is the next marker.`);
         }
         if (
           correctionAnchor &&
-          !lastAnchorOmittingContent.toLocaleLowerCase().includes(
-            correctionAnchor.toLocaleLowerCase(),
-          )
+          !containsPersonaAnchor(lastAnchorOmittingContent, correctionAnchor)
         ) {
           repairPrefixes.push(`The new thing is ${correctionAnchor}.`);
+        }
+        if (
+          runtimeMechanismAnchor &&
+          !containsPersonaAnchor(lastAnchorOmittingContent, runtimeMechanismAnchor)
+        ) {
+          repairPrefixes.push(
+            "I do use private background context when it is relevant.",
+          );
         }
         content = [...repairPrefixes, lastAnchorOmittingContent].join(" ");
       }

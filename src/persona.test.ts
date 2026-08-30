@@ -3,10 +3,14 @@ import { Logger } from "./log.js";
 import type { PersonaMemoryRuntime } from "./persona-memory.js";
 import {
   PersonaConversation,
+  containsPersonaAnchor,
   currentCorrectionAnchor,
   currentScheduleAnchor,
   defaultPersonaSystemPrompt,
+  directPersonalRecallQuestion,
   invalidPersonaResponse,
+  parsePersonaCandidatePool,
+  personaRhythmHint,
   personaTurnGroundingInvariant,
 } from "./persona.js";
 
@@ -48,7 +52,15 @@ describe("persona conversation", () => {
     expect(invalidPersonaResponse("< channel thought")).toBe(true);
     expect(invalidPersonaResponse("<|channel|>analysis")).toBe(true);
     expect(invalidPersonaResponse("I had a weird dream about a tiny orchestra.")).toBe(true);
+    expect(invalidPersonaResponse('{"candidates":["Do not say this"]}')).toBe(true);
     expect(invalidPersonaResponse("That is a thoughtful answer.")).toBe(false);
+  });
+
+  it("recovers only closed candidates from a truncated structured fallback", () => {
+    expect(parsePersonaCandidatePool(
+      '{"candidates":["First complete reply.","Second complete reply.","unfinished',
+    )).toEqual(["First complete reply.", "Second complete reply."]);
+    expect(parsePersonaCandidatePool('{"candidates":[')).toEqual([]);
   });
 
   it("extracts an explicit present-tense correction anchor", () => {
@@ -62,6 +74,32 @@ describe("persona conversation", () => {
     expect(currentScheduleAnchor("they asked me back for a second interview Friday"))
       .toBe("Friday");
     expect(currentScheduleAnchor("not Friday, Monday instead")).toBe("Monday");
+  });
+
+  it("matches continuity anchors across natural speech punctuation", () => {
+    expect(containsPersonaAnchor(
+      "You want a bright, crisp morning.",
+      "bright crisp morning",
+    )).toBe(true);
+    expect(containsPersonaAnchor("You want a rainy morning.", "bright crisp morning"))
+      .toBe(false);
+  });
+
+  it("recognizes direct personal recall questions without treating ordinary chat as recall", () => {
+    expect(directPersonalRecallQuestion("Do you know my name?")).toBe(true);
+    expect(directPersonalRecallQuestion("What did I say I like?" )).toBe(true);
+    expect(directPersonalRecallQuestion("Do you know what I mean?" )).toBe(false);
+  });
+
+  it("adds a declarative rhythm guard after repeated questions or a short acknowledgement", () => {
+    expect(personaRhythmHint([
+      { role: "assistant", content: "What happened?" },
+      { role: "user", content: "Nothing much." },
+      { role: "assistant", content: "Do you want to talk about it?" },
+    ], "okay")).toContain("must be declarative");
+    expect(personaRhythmHint([
+      { role: "assistant", content: "That sounds wonderfully strange." },
+    ], "tell me more")).toBeUndefined();
   });
 
   it("streams natural speech through a tool-free static prompt", async () => {
@@ -197,19 +235,43 @@ describe("persona conversation", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("waits briefly for cold durable recall instead of falsely denying a known name", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({ content: "Yes, your name is Morgan." }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const persistentMemory = {
+      prepare: vi.fn(),
+      contextFor: vi.fn(() => undefined),
+      contextForRecall: vi.fn(async () => JSON.stringify({
+        relevant_memories: [
+          { kind: "user_fact", text: "The user's name is Morgan.", confidence: 1 },
+        ],
+      })),
+      preparedDraftFor: vi.fn(() => undefined),
+      hasPreparedResponseIdea: vi.fn(() => false),
+      runtimeContext: vi.fn(() => "{}"),
+      speechReferenceHint: vi.fn(() => undefined),
+      rememberTurn: vi.fn(),
+      askAdviser: vi.fn(),
+    } as unknown as PersonaMemoryRuntime;
+
+    await expect(conversation({ persistentMemory }).respond(
+      "Do you know my name?",
+    )).resolves.toBe("Yes, your name is Morgan.");
+    expect(persistentMemory.contextForRecall).toHaveBeenCalledWith(
+      "Do you know my name?",
+      250,
+    );
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      messages?: Array<{ content?: string }>;
+    };
+    expect(JSON.stringify(body.messages)).toContain("The user's name is Morgan");
+  });
+
   it("answers direct provenance questions without another adviser round", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      streamingResponse(
-        {
-          choices: [
-            {
-              delta: { content: "Yes, background context can help me answer." },
-              finish_reason: "stop",
-            },
-          ],
-        },
-        "[DONE]",
-      ),
+      response({ content: "Yes, background context can help me answer." }),
     );
     vi.stubGlobal("fetch", fetchMock);
     const persistentMemory = {

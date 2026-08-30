@@ -696,6 +696,11 @@ const creativePersonaRequest = (input: string): boolean =>
     input,
   );
 
+export const selfContainedPersonaRequest = (input: string): boolean =>
+  /\b(?:give me|tell me|say something|make me|(?:distract|entertain|amuse) me|cheer me up|your (?:honest )?(?:read|opinion|take)|one tiny reset)\b/i.test(
+    input,
+  );
+
 const jokePersonaRequest = (input: string): boolean =>
   /\b(?:joke|punchline|make me laugh)\b/i.test(input);
 
@@ -751,6 +756,9 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
             "Use one short atomic sentence per memory. " +
             "A thought is a private, short-lived idea that could improve a related future turn: a callback, better joke, " +
             "gentle question, or useful conversational angle. It is a suggestion, never a fact. Return null when none is worthwhile. " +
+            "Always retain an explicitly stated preferred name, changed preference, future plan, appointment, promised follow-up, " +
+            "or unresolved event. When one event is resolved and the human states a dated next step, store that new next step as " +
+            "an open_loop and preserve the exact day in its text and evidence. " +
             "A question, hypothetical, joke premise, or false shared-memory test is not evidence that an event happened. " +
             "If Audrey denies a purported event, do not extract that event as memory.",
         },
@@ -822,8 +830,9 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
             "Preserve the exact named person, event, preference, correction, or emotional " +
             "open loop needed to demonstrate continuity. Trust the newest speech over stale memory. Fulfill direct requests " +
             "inside the reply: if asked to distract or entertain, provide the distraction instead of asking the human for " +
-            "another task. A distraction reply must be a self-contained amusing observation, tiny story, or playful riff, " +
-            "not a question or conversation prompt. Resolve conversational shorthand before writing: when the human says something like today's " +
+            "another task. If asked to give, tell, say, make, distract, entertain, or offer an honest read, the reply must " +
+            "deliver that contribution and must not turn it into a question. A distraction reply must be a self-contained " +
+            "amusing observation, tiny story, or playful riff, not a question or conversation prompt. Resolve conversational shorthand before writing: when the human says something like today's " +
             "the day, it happened, or that one, name the concrete event from recent dialogue or an open-loop memory. For " +
             "example, if the established event is an interview, say interview rather than giving generic encouragement. " +
             "Respond to nerves with specific continuity rather than a stock pep talk. For jokes or creative requests, " +
@@ -1339,6 +1348,94 @@ export class PersonaMemoryRuntime {
     });
   }
 
+  public async contextForRecall(
+    input: string,
+    timeoutMs = 250,
+  ): Promise<string | undefined> {
+    const query = input.replace(/\s+/g, " ").trim();
+    if (query.length < 3 || timeoutMs < 1) return undefined;
+    const started = performance.now();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const lookup = this.options.embedder
+        .embed([query])
+        .then(([embedding]) =>
+          this.options.store.retrieve(
+            this.options.ownerKey,
+            query,
+            embedding,
+            this.retrievalLimit,
+          ),
+        );
+      const selection = await Promise.race([
+        lookup,
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(
+            () => reject(new DOMException("Persona recall lookup timed out", "TimeoutError")),
+            timeoutMs,
+          );
+        }),
+      ]);
+      const highValueSelection: PersonaMemorySelection = {
+        memories: selection.memories.filter(
+          (memory) => memory.relevance === undefined || memory.relevance >= 0.55,
+        ),
+        ...(selection.thought ? { thought: selection.thought } : {}),
+      };
+      this.options.logger.info("persona.memory.recall.ready", {
+        durationMs: Math.round(performance.now() - started),
+        memories: highValueSelection.memories.length,
+        memoriesRejected:
+          selection.memories.length - highValueSelection.memories.length,
+        thoughtReady: Boolean(highValueSelection.thought),
+      });
+      if (
+        highValueSelection.memories.length === 0 &&
+        !highValueSelection.thought
+      ) {
+        return undefined;
+      }
+      if (highValueSelection.thought) {
+        void this.options.store
+          .consumeThought(this.options.ownerKey, highValueSelection.thought.id)
+          .catch((error) =>
+            this.options.logger.error("persona.thought.consume.failed", error));
+      }
+      const continuityAnchors = memoryContinuityAnchors(
+        highValueSelection.memories,
+      );
+      return JSON.stringify({
+        relevant_memories: highValueSelection.memories.map((memory) => ({
+          kind: memory.kind,
+          text: memory.text,
+          source: memory.source,
+          confidence: memory.confidence,
+          recorded_at: memory.createdAt,
+        })),
+        ...(continuityAnchors.length > 0
+          ? { required_continuity_anchors: continuityAnchors }
+          : {}),
+        ...(highValueSelection.thought
+          ? {
+              optional_private_thought: {
+                text: highValueSelection.thought.text,
+                topic: highValueSelection.thought.topic,
+                confidence: highValueSelection.thought.confidence,
+              },
+            }
+          : {}),
+      });
+    } catch (error) {
+      this.options.logger.warn("persona.memory.recall.unavailable", {
+        durationMs: Math.round(performance.now() - started),
+        reason: error instanceof Error ? error.name : "unknown",
+      });
+      return undefined;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
   public hasPreparedResponseIdea(input: string): boolean {
     const normalizedQuery = normalizedMemoryText(input);
     return Boolean(
@@ -1409,7 +1506,7 @@ export class PersonaMemoryRuntime {
         Boolean(draft) &&
         !unsafeCreativeDraft(input, draft) &&
         !(
-          /\b(?:(?:distract|entertain|amuse) me|cheer me up)\b/i.test(input) &&
+          selfContainedPersonaRequest(input) &&
           draft.includes("?")
         ) &&
         (prepared.continuityAnchors.length === 0 ||
