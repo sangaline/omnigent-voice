@@ -6378,5 +6378,115 @@
         }
       }
     ]
+  },
+  {
+    "id": "nested_focus_is_only_a_message",
+    "description": "Treat focus language inside an explicitly addressed coding instruction as message content, not authorization to change sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell build worker focus on the reconnect timeout and rerun five clean probes don't switch me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2001, "type": "message_sent", "summary": "Sent immediately to Build Worker: Focus on the reconnect timeout and rerun five clean probes." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session", "rename_session", "archive_session", "get_output", "poll_output"],
+          "sessionId": "session-build",
+          "messageTerms": ["focus", "reconnect", "timeout", "rerun", "five", "clean", "probes"],
+          "delivery": "not_queued",
+          "speechTerms": ["build worker"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "nested_switch_branches_is_only_a_message",
+    "description": "Treat switch-branches language inside an explicitly addressed coding instruction as message content, not session navigation.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell build worker switch branches to latency experiment and rerun the packet test don't switch me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2002, "type": "message_sent", "summary": "Sent immediately to Build Worker: Switch branches to latency experiment and rerun the packet test." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["focus_session", "rename_session", "archive_session", "get_output", "poll_output"],
+          "sessionId": "session-build",
+          "messageTerms": ["switch", "branches", "latency", "experiment", "rerun", "packet", "test"],
+          "delivery": "not_queued",
+          "speechTerms": ["build worker"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

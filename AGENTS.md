@@ -554,7 +554,9 @@ if Celeris emits a malformed one. Multiple named targets without a clear
 destination fail closed. A positive switch to a name absent from the fresh map
 forces `list_sessions`; if that result resolves one name, the harness injects
 its ID and requires `focus_session` before speech. Task instructions such as
-“tell it to focus on the cutoff” do not activate this navigation guard. The harness
+“tell it to focus on the cutoff” or “tell it to switch branches” do not activate
+this navigation guard; an addressed relay keeps those phrases inside the remote
+work message and never changes sticky focus. The harness
 withholds `check_updates` from the voice model because it calls that tool
 atomically before constructing every turn and later tool results carry updates.
 When one utterance explicitly asks both to message a named session and to

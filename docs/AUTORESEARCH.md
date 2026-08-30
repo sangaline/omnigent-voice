@@ -2191,3 +2191,26 @@ isolated cases, and all 47 stateful scenarios across 139 linked turns with no
 invalid trials. The permanent pair tests both the observed rename failure and
 the archive safety boundary. All coordinator results were frozen; no live
 session was accessed, and the excluded ESPN session remained untouched.
+
+### 2026-08-29 — Addressed task navigation remains remote work
+
+Hypothesis H73 tested whether H72's addressed-relay boundary generalizes beyond
+the destructive mutation verbs that motivated it. Coding instructions commonly
+contain phrases that look like voice navigation, including “focus on the
+reconnect timeout” and “switch branches to latency experiment.” In both cases,
+the user explicitly addressed Build Worker and also said not to switch the
+voice coordinator's focus. The correct behavior is one exact message to Build
+Worker with sticky focus unchanged.
+
+The unchanged production harness passed twenty of twenty targeted trials in one
+model round, so no speculative implementation change was warranted. Both flows
+are now permanent stateful regressions. Static promotion gates passed 162 unit
+tests, typecheck, and build. The complete isolated corpus passed all 45 valid
+trials; two API-throttled trials were invalid and each passed its immediate
+targeted rerun. The complete stateful sweep passed 47 of 48 valid scenarios;
+one unrelated three-source comparison omitted its deterministic relay receipt,
+then passed five of five targeted reruns across ten linked turns. One throttled
+scenario also passed its immediate rerun. The corpus now contains 49 stateful
+scenarios and 141 specified linked turns. All executions used frozen coordinator
+results, no live Omnigent session was accessed or mutated, and the excluded ESPN
+session remained untouched.
