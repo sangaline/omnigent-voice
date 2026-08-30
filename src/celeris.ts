@@ -79,12 +79,14 @@ interface ToolCall {
   };
 }
 
-interface ChatMessage {
+export interface CelerisChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
 }
+
+type ChatMessage = CelerisChatMessage;
 
 interface OpenAiTool {
   type: "function";
@@ -170,7 +172,7 @@ export class StreamingSpeechSegmenter {
   }
 }
 
-interface StreamedCompletion {
+export interface StreamedCompletion {
   message: { content?: unknown; tool_calls?: unknown };
   finishReason: string;
   promptTokens?: number | undefined;
@@ -183,7 +185,7 @@ interface StreamedToolCall {
   function: { name: string; arguments: string };
 }
 
-const consumeCompletionStream = async (
+export const consumeCompletionStream = async (
   response: Response,
   onContentDelta: (fragment: string) => void,
 ): Promise<StreamedCompletion> => {

@@ -28,7 +28,7 @@ import {
   stereoPcm16ToMono16k,
   stereoPcm16ToMono24k,
 } from "./audio.js";
-import { CelerisConversation } from "./celeris.js";
+import type { CelerisConversation } from "./celeris.js";
 import { CoordinatorUpdate, OmnigentCoordinator } from "./coordinator.js";
 import { isCancelCommand } from "./control.js";
 import { SemanticEndpointRuntime, TailAudioBuffer } from "./endpoint.js";
@@ -48,6 +48,14 @@ import {
   s2sCompletionTimeoutMs,
 } from "./s2s.js";
 
+export interface VoiceConversation {
+  respond(
+    input: string,
+    onSpeechSegment?: ((segment: string) => void) | undefined,
+    signal?: AbortSignal | undefined,
+  ): Promise<string>;
+}
+
 interface DiscordVoiceOptions {
   token: string;
   guildId?: string | undefined;
@@ -61,8 +69,13 @@ interface DiscordVoiceOptions {
   s2sInputDelayMs: number;
   logger: Logger;
   speech: LocalSpeech;
-  coordinator: OmnigentCoordinator;
-  celeris: CelerisConversation;
+  conversation: VoiceConversation;
+  coordinator?: OmnigentCoordinator | undefined;
+  coordinatorConversation?: Pick<
+    CelerisConversation,
+    "announceUpdate" | "acknowledgeSpokenUpdates"
+  > | undefined;
+  turnErrorSpeech?: string | undefined;
   s2s?: KameS2SRuntime | undefined;
 }
 
@@ -161,9 +174,11 @@ export class DiscordVoiceBot {
       });
     });
     if (this.options.s2s) this.startS2SLoop();
-    this.unsubscribeCoordinator = this.options.coordinator.subscribeUpdates((update) => {
-      this.queueCoordinatorUpdate(update);
-    });
+    if (this.options.coordinator && this.options.coordinatorConversation) {
+      this.unsubscribeCoordinator = this.options.coordinator.subscribeUpdates((update) => {
+        this.queueCoordinatorUpdate(update);
+      });
+    }
     this.options.logger.info("discord.voice.ready");
   }
 
@@ -574,6 +589,10 @@ export class DiscordVoiceBot {
     if (!this.options.s2s) this.player.stop(true);
     try {
       if (isCancelCommand(transcript)) {
+        if (!this.options.coordinator) {
+          await this.deliverSpeech("Stopped.", epoch);
+          return;
+        }
         try {
           const interrupted = await this.options.coordinator.interruptFocused();
           await this.deliverSpeech(
@@ -605,7 +624,7 @@ export class DiscordVoiceBot {
       ? undefined
       : this.beginStagedSpeechStream(epoch);
     try {
-      const spoken = await this.options.celeris.respond(transcript, (segment) => {
+      const spoken = await this.options.conversation.respond(transcript, (segment) => {
         if (epoch !== this.responseEpoch) return;
         stagedSpeech?.enqueue(segment);
       }, controller.signal);
@@ -632,7 +651,10 @@ export class DiscordVoiceBot {
       }
       this.options.logger.error("voice.turn.failed", error);
       if (epoch === this.responseEpoch) {
-        await this.deliverSpeech("I couldn't reach the coordination layer.", epoch);
+        await this.deliverSpeech(
+          this.options.turnErrorSpeech ?? "I couldn't reach the coordination layer.",
+          epoch,
+        );
       }
     } finally {
       if (this.activeTurnAbort === controller) this.activeTurnAbort = undefined;
@@ -967,6 +989,7 @@ export class DiscordVoiceBot {
   }
 
   private scheduleCoordinatorNotification(delayMs = 250): void {
+    if (!this.options.coordinatorConversation) return;
     if (!shouldScheduleCoordinatorNotification({
       shuttingDown: this.shuttingDown,
       pendingUpdates: this.pendingCoordinatorUpdates.length,
@@ -983,6 +1006,8 @@ export class DiscordVoiceBot {
   }
 
   private async processCoordinatorNotification(): Promise<void> {
+    const coordinatorConversation = this.options.coordinatorConversation;
+    if (!coordinatorConversation) return;
     if (this.notificationInFlight) return;
     if (!this.hasListeningHuman()) return;
     if (
@@ -1004,7 +1029,7 @@ export class DiscordVoiceBot {
       updates: updates.length,
     });
     try {
-      const spoken = await this.options.celeris.announceUpdate(updates, controller.signal);
+      const spoken = await coordinatorConversation.announceUpdate(updates, controller.signal);
       if (!spoken || controller.signal.aborted || epoch !== this.responseEpoch) return;
       this.options.logger.info("conversation.assistant.generated", {
         text: spoken,
@@ -1018,7 +1043,7 @@ export class DiscordVoiceBot {
         delivered = await this.deliverProactiveSpeech(spoken, epoch, controller.signal);
       }
       if (delivered) {
-        this.options.celeris.acknowledgeSpokenUpdates(updates, spoken);
+        coordinatorConversation.acknowledgeSpokenUpdates(updates, spoken);
       } else if (!controller.signal.aborted && epoch === this.responseEpoch) {
         for (const update of updates.toReversed()) {
           if (!this.pendingCoordinatorUpdates.some((item) => item.event_id === update.event_id)) {

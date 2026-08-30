@@ -1,4 +1,5 @@
 export interface Config {
+  conversationMode: "coordinator" | "persona";
   voiceRuntime: "staged" | "kame";
   ttsRuntime: "piper" | "pocket";
   discordBotToken: string;
@@ -19,11 +20,11 @@ export interface Config {
   smartTurnModelPath: string;
   smartTurnThreads: number;
   smartTurnCompleteThreshold: number;
-  omnigentBaseUrl: string;
-  omnigentRefreshToken: string;
+  omnigentBaseUrl?: string | undefined;
+  omnigentRefreshToken?: string | undefined;
   omnigentAgentName: string;
   omnigentHostId?: string | undefined;
-  omnigentWorkspace: string;
+  omnigentWorkspace?: string | undefined;
   celerisApiKey?: string | undefined;
   celerisBaseUrl: string;
   celerisModel: string;
@@ -31,6 +32,9 @@ export interface Config {
   celerisHistoryCompactCharacters: number;
   celerisHistoryKeepMessages: number;
   celerisHistoryCompactionIdleMs: number;
+  personaSystemPrompt: string;
+  personaMaxResponseCharacters: number;
+  personaTemperature: number;
   sherpaAsrModelDir: string;
   sherpaTtsModelDir: string;
   sherpaAsrThreads: number;
@@ -87,6 +91,22 @@ const positiveNumber = (
   return value;
 };
 
+const boundedNumber = (
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number => {
+  const raw = optional(env, name);
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be a number between ${minimum} and ${maximum}`);
+  }
+  return value;
+};
+
 const probability = (
   env: NodeJS.ProcessEnv,
   name: string,
@@ -134,6 +154,11 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     throw new Error("LOG_LEVEL must be debug, info, warn, or error");
   }
 
+  const conversationMode = optional(env, "CONVERSATION_MODE") ?? "coordinator";
+  if (conversationMode !== "coordinator" && conversationMode !== "persona") {
+    throw new Error("CONVERSATION_MODE must be coordinator or persona");
+  }
+
   const voiceRuntime = optional(env, "VOICE_RUNTIME") ?? "staged";
   if (voiceRuntime !== "staged" && voiceRuntime !== "kame") {
     throw new Error("VOICE_RUNTIME must be staged or kame");
@@ -177,6 +202,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
   }
 
   return {
+    conversationMode,
     voiceRuntime,
     ttsRuntime,
     discordBotToken: required(env, "DISCORD_BOT_TOKEN"),
@@ -211,11 +237,17 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
       "SMART_TURN_COMPLETE_THRESHOLD",
       0.65,
     ),
-    omnigentBaseUrl: required(env, "OMNIGENT_BASE_URL").replace(/\/$/, ""),
-    omnigentRefreshToken: required(env, "OMNIGENT_REFRESH_TOKEN"),
+    omnigentBaseUrl: conversationMode === "coordinator"
+      ? required(env, "OMNIGENT_BASE_URL").replace(/\/$/, "")
+      : optional(env, "OMNIGENT_BASE_URL")?.replace(/\/$/, ""),
+    omnigentRefreshToken: conversationMode === "coordinator"
+      ? required(env, "OMNIGENT_REFRESH_TOKEN")
+      : optional(env, "OMNIGENT_REFRESH_TOKEN"),
     omnigentAgentName: optional(env, "OMNIGENT_AGENT_NAME") ?? "codex-native-ui",
     omnigentHostId: optional(env, "OMNIGENT_HOST_ID"),
-    omnigentWorkspace: required(env, "OMNIGENT_WORKSPACE"),
+    omnigentWorkspace: conversationMode === "coordinator"
+      ? required(env, "OMNIGENT_WORKSPACE")
+      : optional(env, "OMNIGENT_WORKSPACE"),
     celerisApiKey: optional(env, "CELERIS_API_KEY"),
     celerisBaseUrl:
       optional(env, "CELERIS_BASE_URL") ??
@@ -233,6 +265,13 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
       "CELERIS_HISTORY_COMPACTION_IDLE_MS",
       5_000,
     ),
+    personaSystemPrompt: optional(env, "PERSONA_SYSTEM_PROMPT") ?? "",
+    personaMaxResponseCharacters: positiveInteger(
+      env,
+      "PERSONA_MAX_RESPONSE_CHARACTERS",
+      420,
+    ),
+    personaTemperature: boundedNumber(env, "PERSONA_TEMPERATURE", 0.4, 0, 2),
     sherpaAsrModelDir: required(env, "SHERPA_ASR_MODEL_DIR"),
     sherpaTtsModelDir: required(env, "SHERPA_TTS_MODEL_DIR"),
     sherpaAsrThreads: positiveInteger(env, "SHERPA_ASR_THREADS", 4),

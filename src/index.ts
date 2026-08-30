@@ -6,6 +6,7 @@ import { SemanticEndpointRuntime } from "./endpoint.js";
 import { Logger } from "./log.js";
 import { CoordinatorMcpClient } from "./mcp.js";
 import { OmnigentClient } from "./omnigent.js";
+import { PersonaConversation } from "./persona.js";
 import { LocalSpeech } from "./speech.js";
 import { KameS2SRuntime } from "./s2s.js";
 
@@ -14,6 +15,7 @@ const logger = new Logger(config.logLevel, config.logFile);
 
 logger.info("startup", {
   celerisEnabled: Boolean(config.celerisApiKey),
+  conversationMode: config.conversationMode,
   persistentLogEnabled: Boolean(config.logFile),
   voiceRuntime: config.voiceRuntime,
 });
@@ -32,31 +34,61 @@ const speech = await LocalSpeech.create({
   pocketTtsQuantize: config.pocketTtsQuantize,
   logger,
 });
-const omnigent = new OmnigentClient({
-  baseUrl: config.omnigentBaseUrl,
-  refreshToken: config.omnigentRefreshToken,
-  agentName: config.omnigentAgentName,
-  hostId: config.omnigentHostId,
-  workspace: config.omnigentWorkspace,
-  logger,
+let coordinator: OmnigentCoordinator | undefined;
+let tools: CoordinatorMcpClient | undefined;
+let coordinatorConversation: CelerisConversation | undefined;
+let conversation: CelerisConversation | PersonaConversation;
+const memoryPolicy = {
+  compactAfterMessages: config.celerisHistoryCompactMessages,
+  compactAfterCharacters: config.celerisHistoryCompactCharacters,
+  keepRecentMessages: config.celerisHistoryKeepMessages,
+  compactionIdleMs: config.celerisHistoryCompactionIdleMs,
+};
+if (config.conversationMode === "persona") {
+  conversation = new PersonaConversation({
+    apiKey: config.celerisApiKey,
+    baseUrl: config.celerisBaseUrl,
+    model: config.celerisModel,
+    logger,
+    systemPrompt: config.personaSystemPrompt,
+    maxResponseCharacters: config.personaMaxResponseCharacters,
+    temperature: config.personaTemperature,
+    memoryPolicy,
+  });
+} else {
+  if (
+    !config.omnigentBaseUrl ||
+    !config.omnigentRefreshToken ||
+    !config.omnigentWorkspace
+  ) {
+    throw new Error("Coordinator mode requires Omnigent runtime configuration");
+  }
+  const omnigent = new OmnigentClient({
+    baseUrl: config.omnigentBaseUrl,
+    refreshToken: config.omnigentRefreshToken,
+    agentName: config.omnigentAgentName,
+    hostId: config.omnigentHostId,
+    workspace: config.omnigentWorkspace,
+    logger,
+  });
+  coordinator = new OmnigentCoordinator({ omnigent, logger });
+  await coordinator.start();
+  tools = await CoordinatorMcpClient.create(coordinator);
+  coordinatorConversation = new CelerisConversation({
+    apiKey: config.celerisApiKey,
+    baseUrl: config.celerisBaseUrl,
+    model: config.celerisModel,
+    logger,
+    tools,
+    memoryPolicy,
+  });
+  conversation = coordinatorConversation;
+}
+await conversation.warmup();
+logger.info("conversation.ready", {
+  mode: config.conversationMode,
+  coordinatorEnabled: Boolean(coordinator),
 });
-const coordinator = new OmnigentCoordinator({ omnigent, logger });
-await coordinator.start();
-const tools = await CoordinatorMcpClient.create(coordinator);
-const celeris = new CelerisConversation({
-  apiKey: config.celerisApiKey,
-  baseUrl: config.celerisBaseUrl,
-  model: config.celerisModel,
-  logger,
-  tools,
-  memoryPolicy: {
-    compactAfterMessages: config.celerisHistoryCompactMessages,
-    compactAfterCharacters: config.celerisHistoryCompactCharacters,
-    keepRecentMessages: config.celerisHistoryKeepMessages,
-    compactionIdleMs: config.celerisHistoryCompactionIdleMs,
-  },
-});
-await celeris.warmup();
 const s2s =
   config.voiceRuntime === "kame"
     ? new KameS2SRuntime({
@@ -99,8 +131,12 @@ const bot = new DiscordVoiceBot({
   endpoint,
   logger,
   speech,
+  conversation,
   coordinator,
-  celeris,
+  coordinatorConversation,
+  turnErrorSpeech: config.conversationMode === "persona"
+    ? "Sorry, I lost my train of thought for a moment."
+    : undefined,
   s2s,
 });
 
@@ -112,8 +148,8 @@ const shutdown = async (signal: string): Promise<void> => {
   await speech.stop();
   await endpoint?.stop();
   await s2s?.stop();
-  coordinator.stop();
-  await tools.close();
+  coordinator?.stop();
+  await tools?.close();
   process.exit(0);
 };
 

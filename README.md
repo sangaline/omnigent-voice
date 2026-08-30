@@ -1,12 +1,21 @@
 # Omnigent Voice
 
-A minimal speech-only Discord interface for Omnigent. One process receives
-Discord voice, transcribes it locally, and uses Celeris as a fast conversational
-layer. Celeris answers ordinary turns directly and uses a small in-process MCP
-coordinator when a request depends on real sessions or requires agent work.
-Work is queued asynchronously, so the spoken acknowledgement does not wait for
-a coding agent to finish. Speech is synthesized locally and streamed back into
-the same voice channel.
+A minimal speech-only Discord interface with two selectable conversation modes.
+One process receives Discord voice, transcribes it locally, runs a fast Celeris
+conversation, and streams locally synthesized speech back into the same channel.
+
+`CONVERSATION_MODE=coordinator` is the Omnigent interface. Celeris answers
+ordinary turns directly and uses a small in-process MCP coordinator when a
+request depends on real sessions or requires agent work. Work is queued
+asynchronously, so spoken acknowledgements do not wait for a coding agent.
+
+`CONVERSATION_MODE=persona` is a tool-free conversational variant. It uses a
+static personality prompt and the same Discord, streaming ASR, semantic
+endpointing, barge-in, conversational memory, Pocket/Piper TTS, and private
+audit pipeline. It does not initialize an Omnigent client, coordinator, or MCP
+transport. `PERSONA_SYSTEM_PROMPT` can replace the sanitized built-in persona;
+response length and variation use `PERSONA_MAX_RESPONSE_CHARACTERS` and
+`PERSONA_TEMPERATURE`. See [docs/PERSONA.md](docs/PERSONA.md).
 
 ASR runs incrementally while the caller is speaking. Non-forced Celeris rounds
 use its SSE interface and complete natural speech segments feed one continuous
@@ -22,8 +31,9 @@ If the caller barges in, Discord playback and the in-progress Pocket generation
 are both cancelled so the next turn does not wait behind discarded audio.
 Piper remains available with `TTS_RUNTIME=piper` as a lower-quality fallback.
 
-The project is intentionally narrow: one caller, one focused Omnigent session,
-one container, and no text or web interface.
+The project is intentionally narrow: one trusted caller, one container, and no
+text or web interface. Coordinator mode has one focused Omnigent session;
+persona mode has no external tools.
 
 An optional guided speech-to-speech experiment keeps the same coordinator but
 replaces staged playback with native KAME Q4/Vulkan audio. Discord audio is fed
@@ -132,7 +142,8 @@ fetches pinned model artifacts itself.
 At startup the bot either uses explicit Discord guild/channel IDs or discovers
 them when it can see exactly one guild with exactly one voice channel. Omnigent
 host auto-discovery is similarly limited to exactly one online external host;
-otherwise set `OMNIGENT_HOST_ID`.
+otherwise set `OMNIGENT_HOST_ID`. Omnigent variables are required only in
+coordinator mode.
 
 ## Container
 

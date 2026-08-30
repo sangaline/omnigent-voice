@@ -1993,3 +1993,22 @@ all 46 isolated model trials, and all 40 stateful scenarios across 125 linked
 turns with no invalid trials. All model evaluations used frozen coordinator
 state. No live Omnigent session was read or mutated, and the excluded ESPN
 session remained untouched.
+
+### 2026-08-29 — Tool-free persona isolation probe
+
+Persona work became the human's explicit priority after the H66 coordinator
+checkpoint. The first implementation reuses the production Discord, streaming
+ASR, semantic endpointing, barge-in, Celeris, Pocket TTS, memory compaction, and
+private audit path while omitting construction of the Omnigent client,
+coordinator, and MCP client. Rendered persona deployment configuration also
+withholds all Omnigent URLs and secret keys from the voice container.
+
+A sanitized three-turn live Celeris probe tested conversational tone, an ASR-
+style qualification, and recall of why the speaker liked rainy mornings. The
+first run exposed one raw internal control marker instead of speech on the third
+turn. The harness now classifies leaked channel/control markers as invalid,
+discards them before speech, and retries once with a bounded adjacent repair
+instruction. The corrected linked run returned natural answers in 342, 234,
+and 146 ms respectively while preserving the original preference and later
+qualification. No tool schema or coordinator snapshot was present in any
+persona request, and no Omnigent session was read or mutated.

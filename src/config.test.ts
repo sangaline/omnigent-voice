@@ -33,3 +33,51 @@ describe("Smart Turn configuration", () => {
     ).toThrow("SMART_TURN_COMPLETE_THRESHOLD must be a number between 0 and 1");
   });
 });
+
+describe("conversation mode configuration", () => {
+  it("keeps coordinator mode as the default and requires its credentials", () => {
+    expect(loadConfig(requiredEnvironment()).conversationMode).toBe("coordinator");
+    expect(() =>
+      loadConfig({
+        DISCORD_BOT_TOKEN: "test-token",
+        SHERPA_ASR_MODEL_DIR: "/test/asr",
+        SHERPA_TTS_MODEL_DIR: "/test/tts",
+      }),
+    ).toThrow("Missing required environment variable: OMNIGENT_BASE_URL");
+  });
+
+  it("allows persona mode without any Omnigent configuration", () => {
+    const config = loadConfig({
+      DISCORD_BOT_TOKEN: "test-token",
+      SHERPA_ASR_MODEL_DIR: "/test/asr",
+      SHERPA_TTS_MODEL_DIR: "/test/tts",
+      CONVERSATION_MODE: "persona",
+      PERSONA_SYSTEM_PROMPT: "Speak like a thoughtful old friend.",
+      PERSONA_MAX_RESPONSE_CHARACTERS: "500",
+      PERSONA_TEMPERATURE: "0.7",
+    });
+
+    expect(config.conversationMode).toBe("persona");
+    expect(config.omnigentBaseUrl).toBeUndefined();
+    expect(config.omnigentRefreshToken).toBeUndefined();
+    expect(config.omnigentWorkspace).toBeUndefined();
+    expect(config.personaSystemPrompt).toBe("Speak like a thoughtful old friend.");
+    expect(config.personaMaxResponseCharacters).toBe(500);
+    expect(config.personaTemperature).toBe(0.7);
+  });
+
+  it("rejects unknown conversation modes and invalid persona temperatures", () => {
+    expect(() =>
+      loadConfig({ ...requiredEnvironment(), CONVERSATION_MODE: "agent" }),
+    ).toThrow("CONVERSATION_MODE must be coordinator or persona");
+    expect(() =>
+      loadConfig({
+        DISCORD_BOT_TOKEN: "test-token",
+        SHERPA_ASR_MODEL_DIR: "/test/asr",
+        SHERPA_TTS_MODEL_DIR: "/test/tts",
+        CONVERSATION_MODE: "persona",
+        PERSONA_TEMPERATURE: "2.1",
+      }),
+    ).toThrow("PERSONA_TEMPERATURE must be a number between 0 and 2");
+  });
+});

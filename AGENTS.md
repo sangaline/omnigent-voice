@@ -37,6 +37,17 @@ layer -> direct spoken reply or small Omnigent MCP coordinator tools -> local
 Pocket TTS -> Discord voice. Coordinator actions return immediately;
 Celeris never waits for a coding agent to complete work before acknowledging it.
 
+`CONVERSATION_MODE=persona` selects the tool-free variant. It reuses the exact
+Discord, streaming ASR, endpointing, interruption, Pocket/Piper TTS, memory, and
+private logging path, but the process does not instantiate `OmnigentClient`,
+`OmnigentCoordinator`, or an MCP client. `PERSONA_SYSTEM_PROMPT` overrides the
+sanitized built-in personality; `PERSONA_MAX_RESPONSE_CHARACTERS` and
+`PERSONA_TEMPERATURE` tune voice-sized output. This mode is separate from
+PersonaPlex and from `VOICE_RUNTIME=kame`: production persona currently uses
+the staged Celeris/Pocket pipeline. A leaked Celeris control marker such as
+`< channel thought` is rejected and retried once before any final fragment is
+queued to speech. See `docs/PERSONA.md`.
+
 The bundled runtime models are the int8 0.6B Nemotron English streaming
 transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the
 public `alba` voice, and Piper US English Lessac medium as a fallback. The public
@@ -871,7 +882,9 @@ experiments/personaplex/run-benchmark.sh --mode both
 ```
 
 The final image runs as the unprivileged `node` user. A smoke test should reach
-`speech.models.ready`, `coordinator.ready`, and `discord.voice.ready`. The image
+`speech.models.ready`, `conversation.ready`, and `discord.voice.ready`;
+coordinator mode additionally reaches `coordinator.ready`, while persona mode
+must report `coordinatorEnabled: false`. The image
 publisher intentionally disables provenance and SBOM
 attestations because this experiment's Docker Hub page must not expose a source
 link or deployment metadata.
