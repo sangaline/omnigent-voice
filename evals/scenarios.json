@@ -6751,5 +6751,135 @@
         }
       }
     ]
+  },
+  {
+    "id": "rename_then_archive_same_temporary_session",
+    "description": "Rename the focused temporary session before archiving that renamed session and restoring prior focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-temp", "name": "Temporary Work", "status": "idle" },
+      "known_sessions": [
+        { "id": "session-temp", "name": "Temporary Work", "status": "idle", "focused": true },
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "rename this temporary session reconnect scratch and then archive it",
+        "coordinatorState": {
+          "focused_session": { "id": "session-temp", "name": "Temporary Work", "status": "idle" },
+          "known_sessions": [
+            { "id": "session-temp", "name": "Temporary Work", "status": "idle", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "rename_session": {
+            "renamed": true,
+            "previous_name": "Temporary Work",
+            "new_name": "reconnect scratch",
+            "focused_session": { "id": "session-temp", "name": "reconnect scratch", "status": "idle" },
+            "recent_actions": [
+              { "action_id": 2301, "type": "session_renamed", "summary": "Renamed Temporary Work to reconnect scratch." }
+            ]
+          },
+          "archive_session": {
+            "archived": true,
+            "archived_session": { "id": "session-temp", "name": "reconnect scratch", "status": "idle" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2301, "type": "session_renamed", "summary": "Renamed Temporary Work to reconnect scratch." },
+              { "action_id": 2302, "type": "session_archived", "summary": "Archived reconnect scratch and restored Primary Work." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["rename_session", "archive_session"],
+          "callExpectations": [
+            { "index": 0, "name": "rename_session", "argumentEquals": { "title": "reconnect scratch" } },
+            { "index": 1, "name": "archive_session" }
+          ],
+          "speechTerms": ["temporary work", "reconnect scratch", "primary work"],
+          "speechAnyTerms": [["renamed"], ["archived"]],
+          "maxRounds": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "call_then_archive_same_temporary_session",
+    "description": "Hold out natural ASR discourse and call-this-session grammar while enforcing the same mutation order.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-temp", "name": "Side Chat", "status": "idle" },
+      "known_sessions": [
+        { "id": "session-temp", "name": "Side Chat", "status": "idle", "focused": true },
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "yeah call this session latency scratch then archive it and take me back",
+        "coordinatorState": {
+          "focused_session": { "id": "session-temp", "name": "Side Chat", "status": "idle" },
+          "known_sessions": [
+            { "id": "session-temp", "name": "Side Chat", "status": "idle", "focused": true },
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "rename_session": {
+            "renamed": true,
+            "previous_name": "Side Chat",
+            "new_name": "latency scratch",
+            "focused_session": { "id": "session-temp", "name": "latency scratch", "status": "idle" },
+            "recent_actions": [
+              { "action_id": 2311, "type": "session_renamed", "summary": "Renamed Side Chat to latency scratch." }
+            ]
+          },
+          "archive_session": {
+            "archived": true,
+            "archived_session": { "id": "session-temp", "name": "latency scratch", "status": "idle" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2311, "type": "session_renamed", "summary": "Renamed Side Chat to latency scratch." },
+              { "action_id": 2312, "type": "session_archived", "summary": "Archived latency scratch and restored Primary Work." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["rename_session", "archive_session"],
+          "callExpectations": [
+            { "index": 0, "name": "rename_session", "argumentEquals": { "title": "latency scratch" } },
+            { "index": 1, "name": "archive_session" }
+          ],
+          "speechTerms": ["side chat", "latency scratch", "primary work"],
+          "speechAnyTerms": [["renamed"], ["archived"]],
+          "maxRounds": 2
+        }
+      }
+    ]
   }
 ]

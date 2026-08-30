@@ -533,7 +533,7 @@ export const requestedRenameTitle = (input: string): string | undefined => {
   );
   const patterns = [
     /\brename\b[\s\S]*?\bto\s+(.+)$/i,
-    /\brename\s+(?:(?:(?:this|the\s+current|current|the\s+focused|focused|the)\s+session)|this|it)\s+(.+)$/i,
+    /\brename\s+(?:(?:(?:this|the)\s+(?:(?:temporary|temp|current|focused|active|side)\s+)?(?:session|chat|conversation))|(?:(?:current|focused|active)\s+(?:session|chat|conversation))|this|it)\s+(.+)$/i,
     /\bcall\s+(?:(?:this|the\s+current|current|the\s+focused|focused|the)\s+session)\s+(.+)$/i,
   ];
   for (const pattern of patterns) {

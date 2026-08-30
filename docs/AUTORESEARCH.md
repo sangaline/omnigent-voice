@@ -2263,3 +2263,30 @@ trials. The two compound flows are permanent regressions. All coordinator
 execution was frozen, no live Omnigent session was accessed or mutated, and the
 excluded ESPN session remained untouched. The live Audrey persona pod was not
 redeployed for this coordinator-only change.
+
+### 2026-08-29 — Temporary-session descriptors are not rename titles
+
+Hypothesis H76 audited the compound mutation “rename this temporary session,
+then archive it.” Tool order matters: rename must apply to the temporary session
+before archive restores Primary Work. Across the baseline, Celeris preserved
+that order, but all twenty canonical runs injected the title `temporary session
+reconnect scratch` instead of `reconnect scratch`. The parser had treated only
+the word “this” as the target reference and absorbed its descriptive session
+words into the title. A held-out “call this session … then archive it” grammar
+passed twenty of twenty.
+
+The bounded rename parser now recognizes common qualified references including
+temporary, temp, current, focused, active, and side sessions, chats, or
+conversations before extracting the exact title. It still stops at the next
+explicit action clause, so archive remains a separate required action. The
+canonical and held-out pair then passed all 38 valid trials; two HTTP 429 calls
+were invalid and excluded. Every valid run renamed first, archived the renamed
+session second, restored Primary Work, and spoke all three names within two
+model rounds.
+
+The two ordered mutation flows are permanent stateful regressions. Promotion
+evidence is 162 passing unit tests, clean typecheck and build, all 47 isolated
+cases, and all 55 stateful scenarios across 147 linked turns with no invalid
+trials. All coordinator execution was frozen; no live Omnigent session was
+accessed or mutated, and the excluded ESPN session remained untouched. The live
+Audrey persona pod was not redeployed for this coordinator-only change.

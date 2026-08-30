@@ -1043,6 +1043,11 @@ describe("Celeris coordinator conversation", () => {
         "rename this session latency lab and then switch me back to primary work",
       ),
     ).toBe("latency lab");
+    expect(
+      requestedRenameTitle(
+        "rename this temporary session reconnect scratch and then archive it",
+      ),
+    ).toBe("reconnect scratch");
     expect(requestedRenameTitle("Call this session Voice Research.")).toBe(
       "Voice Research",
     );
