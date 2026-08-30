@@ -6268,5 +6268,115 @@
         }
       }
     ]
+  },
+  {
+    "id": "nested_rename_is_only_a_message",
+    "description": "Treat rename language inside an explicitly addressed background instruction as message content, never as authorization to rename sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell build worker rename this session to reconnect audit and don't switch me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 1901, "type": "message_sent", "summary": "Sent immediately to Build Worker: Rename this session to reconnect audit." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["rename_session", "archive_session", "focus_session", "get_output", "poll_output"],
+          "sessionId": "session-build",
+          "messageTerms": ["rename", "session", "reconnect", "audit"],
+          "delivery": "not_queued",
+          "speechTerms": ["build worker"],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "nested_archive_is_only_a_message",
+    "description": "Treat archive language inside an explicitly addressed background instruction as message content, never as authorization to archive sticky focus.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "tell build worker archive this session's old benchmark logs and don't switch me",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 1902, "type": "message_sent", "summary": "Sent immediately to Build Worker: Archive this session's old benchmark logs." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "forbiddenTools": ["rename_session", "archive_session", "focus_session", "get_output", "poll_output"],
+          "sessionId": "session-build",
+          "messageTerms": ["archive", "session", "old", "benchmark", "logs"],
+          "delivery": "not_queued",
+          "speechTerms": ["build worker"],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

@@ -508,6 +508,20 @@ export const requestsPositiveFocusAction = (input: string): boolean => {
 
 export const allowsArchive = (input: string): boolean => /\barchive\b/i.test(input);
 
+const hasAddressedRelayBefore = (input: string, actionIndex: number): boolean => {
+  const prefix = input.slice(0, actionIndex);
+  return (
+    /\b(?:send|message|queue|steer)\b/i.test(prefix) ||
+    /\b(?:tell|ask|have)\s+(?!(?:me|us)\b)/i.test(prefix) ||
+    /\blet\s+(?!(?:me|us)\b).{0,80}\bknow\b/i.test(prefix)
+  );
+};
+
+const requestsDirectArchiveAction = (input: string): boolean => {
+  const match = /\barchive\b/i.exec(input);
+  return Boolean(match?.index !== undefined && !hasAddressedRelayBefore(input, match.index));
+};
+
 export const allowsRename = (input: string): boolean =>
   /\brename\b/i.test(input) || /\bcall\s+(?:this|the)\s+session\b/i.test(input);
 
@@ -529,10 +543,12 @@ export const requestedRenameTitle = (input: string): string | undefined => {
   return undefined;
 };
 
-const requestsDirectRenameAction = (input: string): boolean =>
-  /^(?:(?:okay|ok|great|right|yeah|yes|uh|um|now)[,!.]?\s+)*(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?:rename\b|call\s+(?:this|the\s+(?:current|focused))\s+session\b)/i.test(
-    input.trim(),
+const requestsDirectRenameAction = (input: string): boolean => {
+  const match = /\b(?:rename|call\s+(?:this|the\s+(?:current|focused))\s+session)\b/i.exec(
+    input,
   );
+  return Boolean(match?.index !== undefined && !hasAddressedRelayBefore(input, match.index));
+};
 
 const words = (value: string): string[] =>
   value
@@ -3036,8 +3052,9 @@ export class CelerisConversation {
             name !== "check_updates" &&
             (name !== "focus_session" ||
               (allowsFocusChange(input) && !targetsFocusedSession(input, focusedName))) &&
-            (name !== "archive_session" || allowsArchive(input)) &&
-            (name !== "rename_session" || (allowsRename(input) && Boolean(renameTitle))) &&
+            (name !== "archive_session" || requestsDirectArchiveAction(input)) &&
+            (name !== "rename_session" ||
+              (requestsDirectRenameAction(input) && Boolean(renameTitle))) &&
             (!retryReadRouting || name !== "send_message") &&
             (!incomingUpdateQuestion ||
               (name !== "get_output" && name !== "poll_output")) &&
@@ -3077,6 +3094,9 @@ export class CelerisConversation {
       allowedTools.has("rename_session")
     ) {
       requiredCompoundActionSet.add("rename_session");
+    }
+    if (requestsDirectArchiveAction(input) && allowedTools.has("archive_session")) {
+      requiredCompoundActionSet.add("archive_session");
     }
     if (startInstruction && allowedTools.has("start_session")) {
       requiredCompoundActionSet.add("start_session");

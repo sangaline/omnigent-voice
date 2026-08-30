@@ -2161,3 +2161,33 @@ false-cut result. All coordinator results were frozen; no live session was read
 or mutated. Promotion evidence is 161 passing unit tests, clean typecheck and
 build, all 47 isolated cases, and all 45 stateful scenarios across 137 linked
 turns with no invalid trials. The excluded ESPN session remained untouched.
+
+### 2026-08-29 — Nested mutation language is relay content, not authority
+
+Hypothesis H72 audited a security-sensitive ambiguity rather than another
+surface paraphrase: “tell Build Worker rename/archive …” is an outbound coding
+instruction, not permission for the voice coordinator to mutate sticky focus.
+The baseline nested-rename flow failed zero of twenty. Every run first called
+the locally exposed `rename_session` on the focused session, then needed a
+second round for the intended background send. The nested-archive model behavior
+happened to pass twenty of twenty, but static request inspection showed that
+the destructive local archive tool was exposed under the same lexical rule.
+
+Local rename and archive tools are now included only for a direct voice command
+at the start of the turn. Nested action words remain in the exact dictated
+`send_message` clause, and a direct archive participates in the verified
+required-action set. The candidate passed forty of forty targeted model runs:
+each used only one exact send to Build Worker in one round, never changed focus,
+and never exposed a local mutation as an executable choice. The first full
+sweep then showed that a start-of-string-only direct-action grammar was too
+strict for the real ASR prefix “yeah that's enough archive …”; it withheld the
+valid archive tool. A forced empty-schema tool-choice experiment also failed and
+was reverted. The final scope test accepts natural discourse before a mutation
+unless an addressed outbound relay precedes it. The original temporary-session
+flow then passed ten of ten across fifty linked turns.
+
+Promotion evidence is 162 passing unit tests, clean typecheck and build, all 47
+isolated cases, and all 47 stateful scenarios across 139 linked turns with no
+invalid trials. The permanent pair tests both the observed rename failure and
+the archive safety boundary. All coordinator results were frozen; no live
+session was accessed, and the excluded ESPN session remained untouched.

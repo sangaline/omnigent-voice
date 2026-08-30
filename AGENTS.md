@@ -572,11 +572,16 @@ questions and ledger-backed visibility questions are excluded from this guard.
 The ten tools are `list_sessions`, `focus_session`, `get_output`,
 `poll_output`, `send_message`, `archive_session`, `rename_session`,
 `answer_prompt`, `start_session`, and `check_updates`. `archive_session` is
-withheld unless the human explicitly says archive, and its voice-facing schema
-can only target the focused session. `rename_session` is likewise withheld
-unless the human explicitly asks to rename or call the current session and
-supplies the new title. A rename request without a title is answered with a
-deterministic clarification and cannot reach Celeris or the tool. Its voice
+withheld unless the human makes a direct archive command, and its voice-facing
+schema can only target the focused session. `rename_session` is likewise
+withheld unless the turn directly requests renaming or calling the current
+session and supplies the new title. Natural discourse can precede either
+mutation, but an addressed outbound relay before the action word makes that
+word remote work content, not local mutation authority; those local tools are
+absent from the model request. A direct archive
+is a required verified action, while the relay path requires only its exact
+send. A rename request without a title is answered with a deterministic
+clarification and cannot reach Celeris or the tool. Its voice
 schema requires only the new title, the coordinator returns both names, and
 focus never changes. General stdio MCP clients may supply a session ID for
 either action. For a direct voice rename, the harness bounds the title at the

@@ -1779,7 +1779,9 @@ describe("Celeris coordinator conversation", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await conversation("test-key").respond("Archive this temporary session.");
+    await conversation("test-key").respond(
+      "yeah that's enough archive this temporary thing",
+    );
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
       tools?: Array<{
         function?: { name?: string; parameters?: { properties?: Record<string, unknown> } };
@@ -1808,6 +1810,32 @@ describe("Celeris coordinator conversation", () => {
     expect(rename).toBeDefined();
     expect(rename?.function?.parameters?.properties).toHaveProperty("title");
     expect(rename?.function?.parameters?.properties).not.toHaveProperty("session_id");
+  });
+
+  it("withholds local mutation tools when rename or archive is nested in a relay", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(response({ content: "Okay." })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await conversation("test-key").respond(
+      "Tell Build Worker rename this session to reconnect audit and don't switch me",
+    );
+    await conversation("test-key").respond(
+      "Tell Build Worker archive this session's old benchmark logs and don't switch me",
+    );
+
+    const requests = fetchMock.mock.calls.map((call) =>
+      JSON.parse(String(call[1]?.body)) as {
+        tools?: Array<{ function?: { name?: string } }>;
+      }
+    );
+    expect(requests[0]?.tools?.map((tool) => tool.function?.name)).not.toContain(
+      "rename_session",
+    );
+    expect(requests[1]?.tools?.map((tool) => tool.function?.name)).not.toContain(
+      "archive_session",
+    );
   });
 
   it("asks for a missing rename title without calling Celeris", async () => {
