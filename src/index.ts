@@ -91,6 +91,7 @@ if (config.conversationMode === "persona") {
         ? { analysisModel: config.personaMemoryAnalysisModel }
         : {}),
       timeoutMs: config.personaAdviserTimeoutMs,
+      logger,
     });
     personaMemory = new PersonaMemoryRuntime({
       ownerKey: config.personaMemoryOwnerKey,

@@ -139,7 +139,14 @@ export class PostgresPersonaMemoryStore implements PersonaMemoryStore {
 
   public async initialize(): Promise<void> {
     const dimensions = this.options.embeddingDimensions;
-    await this.pool.query("CREATE EXTENSION IF NOT EXISTS vector");
+    const extension = await this.pool.query<{ installed: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS installed",
+    );
+    if (!extension.rows[0]?.installed) {
+      throw new Error(
+        "The persona memory database must be provisioned with the vector extension",
+      );
+    }
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS persona_turns (
         id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -441,6 +448,7 @@ export interface OpenAiPersonaAdviserOptions {
   model: string;
   analysisModel?: string | undefined;
   timeoutMs: number;
+  logger: Logger;
 }
 
 const analysisSchema = {
@@ -516,9 +524,10 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
           content: JSON.stringify({ user, assistant }),
         },
       ],
-      512,
+      384,
       { type: "json_schema", json_schema: analysisSchema },
       this.options.analysisModel ?? this.options.model,
+      "analysis",
     );
     const parsed = JSON.parse(content) as { memories?: unknown; thought?: unknown };
     const memories = Array.isArray(parsed.memories)
@@ -576,9 +585,10 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
           }),
         },
       ],
-      384,
+      192,
       undefined,
       this.options.model,
+      "advice",
     );
   }
 
@@ -587,7 +597,9 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
     maxTokens: number,
     responseFormat?: Record<string, unknown>,
     model = this.options.model,
+    phase = "unknown",
   ): Promise<string> {
+    const started = performance.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
     try {
@@ -615,11 +627,24 @@ export class OpenAiPersonaAdviser implements PersonaAdviser {
       if (!response.ok) throw new Error(`Persona adviser returned HTTP ${response.status}`);
       const payload = (await response.json()) as {
         choices?: Array<{ message?: { content?: unknown } }>;
+        usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
       };
       const content = payload.choices?.[0]?.message?.content;
       if (typeof content !== "string" || !content.trim()) {
         throw new Error("Persona adviser returned no content");
       }
+      this.options.logger.info("persona.adviser.usage", {
+        phase,
+        durationMs: Math.round(performance.now() - started),
+        promptTokens:
+          typeof payload.usage?.prompt_tokens === "number"
+            ? payload.usage.prompt_tokens
+            : undefined,
+        completionTokens:
+          typeof payload.usage?.completion_tokens === "number"
+            ? payload.usage.completion_tokens
+            : undefined,
+      });
       return content.trim();
     } finally {
       clearTimeout(timeout);

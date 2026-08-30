@@ -284,6 +284,7 @@ export class PersonaConversation {
             ? new StreamingSpeechSegmenter(remainingCharacters)
             : undefined;
           const finalSegmenter = segmenter;
+          const segmentsBeforeFollowup = spokenSegments.length;
           const finalMessage = await this.complete(
             [
               ...attemptMessages,
@@ -314,6 +315,16 @@ export class PersonaConversation {
           content = typeof finalMessage.content === "string"
             ? finalMessage.content.trim()
             : "";
+          if (
+            invalidPersonaResponse(content) &&
+            spokenSegments.length === segmentsBeforeFollowup
+          ) {
+            const fallback = result.startsWith("The deeper pass failed")
+              ? "I lost that thought for a second. Ask me again and I'll take another run at it."
+              : sanitizeForSpeech(result, remainingCharacters);
+            if (fallback) emit([fallback]);
+            content = fallback;
+          }
           break;
         }
         if (!invalidPersonaResponse(content) || spokenSegments.length > 0) break;

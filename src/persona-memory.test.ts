@@ -194,6 +194,7 @@ describe("OpenAI-compatible persona adviser", () => {
       apiKey: "private-test-key",
       model: "test-model",
       timeoutMs: 1_000,
+      logger: new Logger("error"),
     });
 
     await expect(
