@@ -1136,6 +1136,12 @@ describe("Celeris coordinator conversation", () => {
     ).toBe("rerun all 48 packet probes unless reconnect is stable");
     expect(
       voiceMessageInstruction(
+        "send a message to build worker to rerun all 72 reconnect probes unless packet loss stays under 2 percent",
+        "Build Worker",
+      ),
+    ).toBe("rerun all 72 reconnect probes unless packet loss stays under 2 percent");
+    expect(
+      voiceMessageInstruction(
         "let docs worker know the first audio result was 180 milliseconds",
         "Docs Worker",
       ),

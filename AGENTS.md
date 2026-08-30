@@ -541,7 +541,9 @@ confirm it. Clear dictated forms such as
 “queue it a message to …,” “tell Side Worker to …,” and the common ASR form
 “tell Side Worker rerun …” copy the exact task clause. Single-recipient
 “send Side Worker a message to …,” “message Side Worker to …,” and “let Side
-Worker know …” forms receive the same exact-copy treatment
+Worker know …” forms receive the same exact-copy treatment. The inverse but
+equally common “send a message to Side Worker to/that …” form is also extracted
+verbatim
 into `send_message` when no read participated, stripping only separate voice
 navigation controls such as “then switch me there” or “don't switch me.” This
 prevents the fast model from corrupting or shortening user-supplied work while

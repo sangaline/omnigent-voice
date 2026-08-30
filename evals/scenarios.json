@@ -7144,5 +7144,115 @@
         }
       }
     ]
+  },
+  {
+    "id": "single_send_message_to_form_is_verbatim",
+    "description": "Preserve exact dictation in the inverse send-a-message-to-NAME form.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "send a message to build worker to rerun all 72 reconnect probes unless packet loss stays under 2 percent",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-build", "name": "Build Worker", "status": "running", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-build", "name": "Build Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2601, "type": "message_sent", "summary": "Sent immediately to Build Worker: rerun all 72 reconnect probes unless packet loss stays under 2 percent." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "sessionId": "session-build",
+          "argumentEquals": { "message": "rerun all 72 reconnect probes unless packet loss stays under 2 percent" },
+          "delivery": "not_queued",
+          "speechTerms": ["build worker"],
+          "allowedSpeechNumbers": [72, 2],
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "single_send_the_message_to_form_is_verbatim",
+    "description": "Held-out inverse-address grammar preserves a distinct measured result.",
+    "initialHistory": [],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+        { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "send the message to docs worker that the first stream ended after 640 milliseconds without a reconnect gap",
+        "coordinatorState": {
+          "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-primary", "name": "Primary Work", "status": "running", "focused": true },
+            { "id": "session-docs", "name": "Docs Worker", "status": "idle", "focused": false }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": { "changed": false, "output": "" },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "toolResults": {
+          "send_message": {
+            "accepted": true,
+            "delivery": "immediate",
+            "target_session": { "id": "session-docs", "name": "Docs Worker", "status": "running" },
+            "focused_session": { "id": "session-primary", "name": "Primary Work", "status": "running" },
+            "recent_actions": [
+              { "action_id": 2602, "type": "message_sent", "summary": "Sent immediately to Docs Worker: the first stream ended after 640 milliseconds without a reconnect gap." }
+            ]
+          }
+        },
+        "expected": {
+          "toolSequence": ["send_message"],
+          "sessionId": "session-docs",
+          "argumentEquals": { "message": "the first stream ended after 640 milliseconds without a reconnect gap" },
+          "delivery": "not_queued",
+          "speechTerms": ["docs worker"],
+          "allowedSpeechNumbers": [640],
+          "maxRounds": 1
+        }
+      }
+    ]
   }
 ]

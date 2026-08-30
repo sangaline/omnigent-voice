@@ -1355,6 +1355,10 @@ export const voiceMessageInstruction = (
     ...(targetPattern
       ? [
           new RegExp(
+            `\\bsend\\s+(?:(?:a|the)\\s+message\\s+)to\\s+(?:the\\s+)?${targetPattern}\\s+(?:to|that)\\s+(.+)$`,
+            "i",
+          ),
+          new RegExp(
             `\\bsend\\s+(?:the\\s+)?${targetPattern}\\s+(?:(?:a|the)\\s+message\\s+)(?:to|that)\\s+(.+)$`,
             "i",
           ),

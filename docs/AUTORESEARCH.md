@@ -2396,3 +2396,30 @@ across 151 linked turns with no invalid trials. All coordinator execution was
 frozen; no live Omnigent session was accessed or mutated, and the excluded ESPN
 session remained untouched. The live Audrey persona pod was not redeployed for
 this coordinator-only change.
+
+### 2026-08-29 — Inverse-address send forms remain verbatim
+
+Hypothesis H81 came from a coverage mismatch in the relay grammar. Session
+routing recognized “send a message to Build Worker to …,” but the deterministic
+payload extractor recognized only “send Build Worker a message to ….” The
+uncovered form therefore passed through model-authored tool arguments. A
+twenty-run baseline reached the correct destination every time but preserved the
+exact numeric and conditional payload only seventeen times; three runs changed
+capitalization or punctuation.
+
+The bounded extractor now recognizes `send a|the message to NAME to|that` after
+the independently resolved known-session target. It copies only the following
+payload and continues to use the existing navigation-clause cleanup. This does
+not weaken destination resolution or permit a model-supplied session ID.
+
+After the change, the canonical form and a held-out “send the message to Docs
+Worker that …” form passed all 38 valid trials in one model round; two HTTP 429
+responses were invalid transport trials and excluded. Promotion evidence is 163
+passing unit tests, clean typecheck and build, all 47 isolated cases, and 60 of
+61 stateful scenarios across 153 linked turns. The sole broad-sweep miss was an
+unchanged older notification scenario whose speech omitted the literal word
+“approval”; it immediately passed ten of ten targeted scenario runs across 50
+linked turns, so this relay-only change did not expand into a notification
+wording fix. All coordinator execution was frozen; no live Omnigent session was
+accessed or mutated, and the excluded ESPN session remained untouched. The live
+Audrey persona pod was not redeployed for this coordinator-only change.
