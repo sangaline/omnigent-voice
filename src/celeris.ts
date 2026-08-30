@@ -1090,6 +1090,27 @@ export const voiceStartInstruction = (input: string): string | undefined => {
   return instruction || undefined;
 };
 
+const cleanVoiceMessageInstruction = (captured: string): string | undefined => {
+  const instruction = captured
+    .replace(
+      /\s*,?\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:(?:do\s+not|don't|dont|never)\s+)?(?:switch|focus|move)\s+(?:me|us)(?:\s+(?:(?:over\s+)?there|to\s+(?:(?:that|this|the\s+(?:first|second|third|last|other))\s+(?:one|session|agent))))?[.!?]*$/i,
+      "",
+    )
+    .replace(
+      /\s+(?:(?:uh|um)\s+)*(?:(?:do\s+not|don't|dont|never)\s+)(?:(?:switch|focus)(?:\s+(?:me|us))?|move\s+(?:me|us))(?:\s+(?:(?:over\s+)?there|to\s+(?:(?:that|this|the\s+(?:first|second|third|last|other))\s+(?:one|session|agent))))?[.!?]*$/i,
+      "",
+    )
+    .replace(
+      /\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:if\s+(?:anything(?:\s+else)?(?:\s+new)?|any\s+updates?)\s+(?:came|comes|arrived|arrives)\s+in\b.*|(?:tell|let)\s+me\b.*\b(?:came|arrived|updates?)\b.*)$/i,
+      "",
+    )
+    .replace(/\s+(?:and|then)\s*$/i, "")
+    .trim()
+    .replace(/[.!?]+$/, "")
+    .trim();
+  return instruction || undefined;
+};
+
 export const voiceMessageInstruction = (
   input: string,
   targetName?: string | undefined,
@@ -1099,10 +1120,15 @@ export const voiceMessageInstruction = (
     : undefined;
   const patterns = [
     /\bqueue\s+(?:it|that|them)\s+(?:a\s+message\s+)?to\s+(.+)$/i,
+    /\b(?:tell|ask)\s+(?:(?:that|this|the\s+(?:first|second|third|last|other))\s+one)\s+(?:to\s+)?(.+)$/i,
     ...(targetPattern
       ? [
           new RegExp(
             `\\b(?:tell|ask)\\s+(?:the\\s+)?${targetPattern}\\s+to\\s+(.+)$`,
+            "i",
+          ),
+          new RegExp(
+            `\\b(?:tell|ask)\\s+(?:the\\s+)?${targetPattern}\\s+(?!(?:what|whether|if|how|why|who|where|when)\\b)(.+)$`,
             "i",
           ),
           new RegExp(
@@ -1118,19 +1144,49 @@ export const voiceMessageInstruction = (
     .map((pattern) => pattern.exec(input)?.[1]?.trim())
     .find((value): value is string => Boolean(value));
   if (!captured) return undefined;
-  const instruction = captured
-    .replace(
-      /\s*,?\s+(?:and|but|then)\s+(?:(?:do\s+not|don't|dont|never)\s+)?(?:switch|focus|move)\s+(?:me|us)(?:\s+(?:over\s+)?there)?[.!?]*$/i,
-      "",
+  return cleanVoiceMessageInstruction(captured);
+};
+
+export const voiceMultipleMessageInstructions = (
+  input: string,
+  targets: readonly VoiceSessionTarget[],
+): Map<string, string> => {
+  const addresses: Array<{
+    target: VoiceSessionTarget;
+    start: number;
+    contentStart: number;
+  }> = [];
+  for (const target of targets) {
+    const targetPattern = words(target.name).join("\\s+");
+    if (!targetPattern) continue;
+    const pattern = new RegExp(
+      `\\b(?:(?:tell|ask|have|steer)\\s+(?:the\\s+)?${targetPattern}\\s+to\\s+|message\\s+(?:the\\s+)?${targetPattern}\\s+(?:to|that)\\s+|queue\\s+(?:the\\s+)?${targetPattern}\\s+(?:(?:a|the)\\s+message\\s+)?to\\s+)`,
+      "i",
+    );
+    const match = pattern.exec(input);
+    if (match?.index === undefined) continue;
+    addresses.push({
+      target,
+      start: match.index,
+      contentStart: match.index + match[0].length,
+    });
+  }
+  addresses.sort((left, right) => left.start - right.start);
+  const instructions = new Map<string, string>();
+  for (let index = 0; index < addresses.length; index += 1) {
+    const address = addresses[index]!;
+    const nextStart = addresses[index + 1]?.start ?? input.length;
+    const instruction = cleanVoiceMessageInstruction(
+      input.slice(address.contentStart, nextStart),
     )
-    .replace(
-      /\s+(?:and|but|then)\s+(?:(?:uh|um)\s+)*(?:if\s+(?:anything(?:\s+else)?(?:\s+new)?|any\s+updates?)\s+(?:came|comes|arrived|arrives)\s+in\b.*|(?:tell|let)\s+me\b.*\b(?:came|arrived|updates?)\b.*)$/i,
-      "",
-    )
-    .trim()
-    .replace(/[.!?]+$/, "")
-    .trim();
-  return instruction || undefined;
+      ?.replace(
+        /\s+(?:now|after\s+(?:this|the|its)\s+(?:current\s+)?turn|once\s+(?:this|the|its)\s+(?:current\s+)?turn\s+(?:finishes|ends))$/i,
+        "",
+      )
+      .trim();
+    if (instruction) instructions.set(address.target.id, instruction);
+  }
+  return instructions;
 };
 
 export const voiceSelfReportRelayMessage = (input: string): string | undefined => {
@@ -1345,6 +1401,7 @@ interface CompactedNativeOutput {
   output: string;
   selection?:
     | "latest_assistant_conclusion_after_native_activity"
+    | "latest_final_assistant_continuation_after_streaming"
     | "latest_streaming_assistant_suffix_after_native_activity"
     | "bounded_native_activity_without_new_assistant_conclusion";
 }
@@ -1389,6 +1446,7 @@ const compactOutputDeltaForModel = (value: unknown): unknown => {
     const {
       voice_assistant_output: _voiceAssistantOutput,
       voice_assistant_output_state: voiceAssistantOutputState,
+      voice_assistant_output_scope: voiceAssistantOutputScope,
       ...modelDelta
     } = delta;
     return {
@@ -1397,6 +1455,8 @@ const compactOutputDeltaForModel = (value: unknown): unknown => {
       voice_selection:
         voiceAssistantOutputState === "streaming"
           ? "latest_streaming_assistant_suffix_after_native_activity"
+          : voiceAssistantOutputScope === "continued"
+            ? "latest_final_assistant_continuation_after_streaming"
           : "latest_assistant_conclusion_after_native_activity",
     };
   }
@@ -2205,6 +2265,29 @@ export const directFocusedOutputSpeech = (
     }
     return `${focused} is still responding. So far: ${streamingOutput}`;
   }
+  const finalTypedOutput =
+    delta?.changed === true &&
+      delta.voice_assistant_output_state === "final" &&
+      typeof delta.voice_assistant_output === "string"
+      ? delta.voice_assistant_output
+          .trim()
+          .replace(/^assistant(?:\s*\(continued\))?:\s*/i, "")
+      : "";
+  const finalTypedScope = delta?.voice_assistant_output_scope;
+  if (finalTypedOutput) {
+    if (
+      !focused ||
+      finalTypedOutput.length > 240 ||
+      finalTypedOutput.includes("```") ||
+      /https?:\/\//i.test(finalTypedOutput) ||
+      finalTypedOutput.split("\n").length > 3
+    ) {
+      return undefined;
+    }
+    return finalTypedScope === "continued"
+      ? `${focused} finished that response. The final part says: ${finalTypedOutput}`
+      : `${focused} update: ${finalTypedOutput}`;
+  }
   const output = delta?.changed === true && typeof delta.output === "string"
     ? delta.output.trim().replace(/^assistant:\s*/i, "")
     : "";
@@ -2702,6 +2785,10 @@ export class CelerisConversation {
       input,
       messageRouting.target?.name,
     );
+    const multipleMessageInstructions = voiceMultipleMessageInstructions(
+      input,
+      messageRouting.targets ?? [],
+    );
     const attributionRelayMessage =
       voiceSelfReportRelayMessage(input) ??
       voiceAttributionRelayMessage(
@@ -2955,7 +3042,10 @@ export class CelerisConversation {
           }
           if (
             call.function.name === "send_message" &&
-            (attributionRelayMessage || messageInstruction) &&
+            (attributionRelayMessage ||
+              messageInstruction ||
+              (resolvedMultipleMessageTarget &&
+                multipleMessageInstructions.has(resolvedMultipleMessageTarget.id))) &&
             !readsInSameCompletion &&
             !executedAcrossRounds.some(
               ({ name }) => name === "get_output" || name === "poll_output",
@@ -2963,7 +3053,12 @@ export class CelerisConversation {
           ) {
             args = {
               ...args,
-              message: attributionRelayMessage ?? messageInstruction,
+              message:
+                attributionRelayMessage ??
+                messageInstruction ??
+                (resolvedMultipleMessageTarget
+                  ? multipleMessageInstructions.get(resolvedMultipleMessageTarget.id)
+                  : undefined),
             };
           }
           if (

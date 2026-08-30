@@ -1865,3 +1865,43 @@ tests, clean typecheck and build, all 46 isolated cases after retrying one
 rate-limited invalid trial, and all 36 stateful scenarios across 119 linked
 turns. No coordinator action or live-session read occurred, and the excluded
 ESPN session remained untouched.
+
+### 2026-08-29 — Final live continuations and exact multi-target relays
+
+Hypothesis H63: once a human turn consumes the prefix of a live assistant
+message, the final cursor delta needs explicit scope in addition to its
+`final` state. The baseline direct path read the remaining value literally as
+“assistant continued” and presented it as an ordinary update. The coordinator
+now marks assistant evidence as `full`, `continued`, or `streaming_suffix`.
+A short safe finalized continuation is rendered as the named response's final
+part; the new linked regression moved from zero of three baseline runs to five
+of five candidate runs in 0–4 ms and zero model rounds.
+
+The full gate then exposed a separate stochastic pattern in exact user relays.
+Target resolution and focus safety were correct, but Celeris occasionally
+shortened “rerun the flaky reconnect test with debug logs” to a generic
+reconnect request. A captured failing trace omitted “flaky”; earlier runs had
+also omitted “rerun.” Natural deictic and ordinal forms such as “tell that one
+rerun …” now use the same deterministic exact-clause preservation as an
+explicitly named destination. The repaired notification-pronoun flow passed ten
+of ten linked runs across thirty turns.
+
+Two more full-gate failures showed that this was a general relay boundary, not
+a phrase-specific prompt problem. “Tell Side Beta rerun …” without the spoken
+word “to” lost its verb in a compound send-and-switch, and one of two different
+destination messages lost both “write” and “latency numbers.” The harness now
+accepts the common no-`to` ASR form, separates every explicitly addressed
+destination clause, and injects its exact user-supplied instruction. Delivery
+timing and navigation phrases remain typed control: `now`, after-current-turn,
+and “don't switch me” do not become work sent to the coding agent. Read-derived
+relays remain model-composed and still pass the source-evidence guards.
+
+Each newly unstable linked flow passed ten of ten after the general change:
+compound partial failure, two explicit destinations, and mixed immediate/queued
+destinations. Promotion evidence is 146 passing unit tests, clean typecheck and
+build, all 46 isolated trials, and all 37 stateful scenarios across 120 linked
+turns. Three scenarios in the final aggregate run were invalidated only by HTTP
+429 responses and each passed on its immediate isolated rerun; no invalid trial
+was counted as a quality pass. All model evaluations used frozen coordinator
+state, no live Omnigent session was read or mutated, and the excluded ESPN
+session remained untouched.

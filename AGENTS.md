@@ -198,7 +198,12 @@ item persistence. Output arriving later remains buffered for the next turn.
 Native output deltas can contain a large chronological prefix of terminal and
 tool activity before the newest assistant text. Coordinator entries therefore
 carry a typed `voice_assistant_output` and `voice_assistant_output_state` of
-`streaming` or `final`. Immediately before a snapshot, notification, or tool
+`streaming` or `final`, plus `voice_assistant_output_scope` of `full`,
+`continued`, or `streaming_suffix`. A final `continued` value means an earlier
+human turn already consumed the prefix of that same live response. Short safe
+values are spoken as the named response's final part rather than exposing the
+internal continuation label or presenting the suffix as the complete answer.
+Immediately before a snapshot, notification, or tool
 result enters Celeris, the harness prefers that typed value, bounds it to 2,000
 characters, and replaces the duplicate native prefix with `voice_selection`.
 Legacy/frozen payloads use a structural fallback only when their last native
@@ -440,7 +445,10 @@ turn, maps “first,” “second,” “third,” and “last” to the corresp
 server-owned session ID, and injects that target into `send_message` while
 sticky focus remains unchanged. An unqualified “that one” after multiple
 sessions fails closed instead of guessing; once another human turn intervenes,
-the narrow deterministic reference expires.
+the narrow deterministic reference expires. When the current human supplies
+the complete instruction, the same route copies its exact clause into the tool
+call, including natural ASR forms such as “tell that one rerun …”; the fast
+model may select the action but cannot shorten the dictated work.
 ASR discourse repairs such as “no wait” do not select queued delivery; only an
 explicit request to queue or wait for the current turn does. For a true output
 visibility check, the response combines the action ledger's delivery evidence
@@ -452,7 +460,11 @@ harness injects that target without changing focus. If the human gives a clear,
 separate instruction to each of several known destinations, the voice schema
 exposes only those names as a required enum and the harness resolves each to a
 server-owned ID, deduplicates attempts, and requires every destination before
-speech. Per-destination delivery is also harness-owned in this form: a target's
+speech. Each named clause is extracted up to the next addressed destination and
+copied exactly into that target's tool call. `now`, after-current-turn timing,
+and trailing voice-navigation controls are kept in delivery/routing semantics
+instead of leaking into the destination's message. Per-destination delivery is
+also harness-owned in this form: a target's
 explicit queue, wait, or after-current-turn clause forces `queued`, while every
 other target is forced to the normal `immediate` default. Clause boundaries
 prevent one destination's after-turn language from leaking onto another, and
@@ -479,7 +491,8 @@ omitted facts or terms and must reissue the send without rereading, copying the
 missing source phrasing. This is a bounded evidence guard, not a deterministic
 sender: the model still composes the comparison and the real coordinator must
 confirm it. Clear dictated forms such as
-“queue it a message to …” and “tell Side Worker to …” copy the exact task clause
+“queue it a message to …,” “tell Side Worker to …,” and the common ASR form
+“tell Side Worker rerun …” copy the exact task clause
 into `send_message` when no read participated, stripping only separate voice
 navigation controls such as “then switch me there” or “don't switch me.” This
 prevents the fast model from corrupting or shortening user-supplied work while

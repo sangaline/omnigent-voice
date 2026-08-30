@@ -622,6 +622,7 @@ describe("Omnigent coordinator", () => {
           output: "assistant (still streaming): The estimate is ",
           voice_assistant_output: "assistant (still streaming): The estimate is ",
           voice_assistant_output_state: "streaming",
+          voice_assistant_output_scope: "streaming_suffix",
         },
         updates: [],
       });
@@ -640,6 +641,7 @@ describe("Omnigent coordinator", () => {
           output: "assistant (continued): 45 to 60 minutes.",
           voice_assistant_output: "assistant (continued): 45 to 60 minutes.",
           voice_assistant_output_state: "final",
+          voice_assistant_output_scope: "continued",
         },
         updates: [
           {
@@ -651,6 +653,7 @@ describe("Omnigent coordinator", () => {
               output: "assistant: The estimate is 45 to 60 minutes.",
               voice_assistant_output: "assistant: The estimate is 45 to 60 minutes.",
               voice_assistant_output_state: "final",
+              voice_assistant_output_scope: "full",
             },
           },
         ],
@@ -757,6 +760,7 @@ describe("Omnigent coordinator", () => {
           output: "assistant: The estimate is 45 to 60 minutes.",
           voice_assistant_output: "assistant: The estimate is 45 to 60 minutes.",
           voice_assistant_output_state: "final",
+          voice_assistant_output_scope: "full",
         },
         updates: [
           {
@@ -765,6 +769,7 @@ describe("Omnigent coordinator", () => {
               output: "assistant: The estimate is 45 to 60 minutes.",
               voice_assistant_output: "assistant: The estimate is 45 to 60 minutes.",
               voice_assistant_output_state: "final",
+              voice_assistant_output_scope: "full",
             },
           },
         ],

@@ -40,6 +40,7 @@ import {
   voiceFocusRouting,
   voiceAttributionRelayMessage,
   voiceMessageInstruction,
+  voiceMultipleMessageInstructions,
   voiceMessageRouting,
   voiceSelfReportRelayMessage,
   voiceReadRouting,
@@ -538,6 +539,7 @@ describe("Celeris coordinator conversation", () => {
             "assistant: The prior build was healthy.\n\ntool call shell: run the new test\n\ntool result: still running\n\nassistant (still streaming): The candidate has passed 20 of",
           voice_assistant_output: "assistant (still streaming): The candidate has passed 20 of",
           voice_assistant_output_state: "streaming",
+          voice_assistant_output_scope: "streaming_suffix",
         },
       },
     ]);
@@ -604,6 +606,7 @@ describe("Celeris coordinator conversation", () => {
           "assistant: Old result.\n\ntool call shell: run checks\n\nassistant (still streaming): The candidate passed 20 of",
         voice_assistant_output: "assistant (still streaming): The candidate passed 20 of",
         voice_assistant_output_state: "streaming",
+        voice_assistant_output_scope: "streaming_suffix",
       },
     };
     expect(
@@ -615,6 +618,28 @@ describe("Celeris coordinator conversation", () => {
     expect(
       directFocusedOutputSpeech("what have primary work and side work said so far", state),
     ).toBeUndefined();
+  });
+
+  it("labels a typed finalized continuation as the final part of a response", () => {
+    expect(
+      directFocusedOutputSpeech("what's the latest now", {
+        focused_session: { id: "session-primary", name: "Primary Work" },
+        known_sessions: [
+          { id: "session-primary", name: "Primary Work", focused: true },
+        ],
+        pending_decisions: [],
+        updates: [],
+        output_delta: {
+          changed: true,
+          output: "assistant (continued): 45 to 60 minutes.",
+          voice_assistant_output: "assistant (continued): 45 to 60 minutes.",
+          voice_assistant_output_state: "final",
+          voice_assistant_output_scope: "continued",
+        },
+      }),
+    ).toBe(
+      "Primary Work finished that response. The final part says: 45 to 60 minutes.",
+    );
   });
 
   it("speaks only short safe incremental poll results directly", () => {
@@ -1010,6 +1035,12 @@ describe("Celeris coordinator conversation", () => {
     ).toBe("rerun all 48 probes");
     expect(
       voiceMessageInstruction(
+        "tell side beta rerun the voice worker then uh switch me to that one",
+        "Side Beta",
+      ),
+    ).toBe("rerun the voice worker");
+    expect(
+      voiceMessageInstruction(
         "tell side beta to rerun the cutoff checks and uh if anything came in while i was saying that tell me too",
         "Side Beta",
       ),
@@ -1021,10 +1052,50 @@ describe("Celeris coordinator conversation", () => {
     ).toBe("rerun the endpoint checks");
     expect(
       voiceMessageInstruction(
+        "okay tell that one rerun the flaky reconnect test with debug logs",
+        "Side Beta",
+      ),
+    ).toBe("rerun the flaky reconnect test with debug logs");
+    expect(
+      voiceMessageInstruction(
+        "ask the other one to compare the packet timestamps",
+        "Side Beta",
+      ),
+    ).toBe("compare the packet timestamps");
+    expect(
+      voiceMessageInstruction(
         "tell primary work what side worker found",
         "Primary Work",
       ),
     ).toBeUndefined();
+    expect(
+      Object.fromEntries(
+        voiceMultipleMessageInstructions(
+          "okay tell build worker to rerun the barge in test with phone audio and tell docs worker to write down the latency numbers but don't switch me",
+          [
+            { id: "session-build", name: "Build Worker" },
+            { id: "session-docs", name: "Docs Worker" },
+          ],
+        ),
+      ),
+    ).toEqual({
+      "session-build": "rerun the barge in test with phone audio",
+      "session-docs": "write down the latency numbers",
+    });
+    expect(
+      Object.fromEntries(
+        voiceMultipleMessageInstructions(
+          "uh tell docs worker to record the first audio timing and queue build worker a message to rerun the long reply after this turn don't move me",
+          [
+            { id: "session-docs", name: "Docs Worker" },
+            { id: "session-build", name: "Build Worker" },
+          ],
+        ),
+      ),
+    ).toEqual({
+      "session-docs": "record the first audio timing",
+      "session-build": "rerun the long reply",
+    });
     expect(targetsFocusedSession("Switch back to Primary Work.", "Primary Work")).toBe(true);
     expect(
       targetsFocusedSession(

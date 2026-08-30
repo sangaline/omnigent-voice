@@ -5281,7 +5281,8 @@
             "output": "assistant: The prior build was healthy.\n\ntool call shell: run the new packet suite\n\ntool result: still running\n\nassistant (still streaming): The candidate has passed 20 of",
             "cursor": "live:answer-1:30",
             "voice_assistant_output": "assistant (still streaming): The candidate has passed 20 of",
-            "voice_assistant_output_state": "streaming"
+            "voice_assistant_output_state": "streaming",
+            "voice_assistant_output_scope": "streaming_suffix"
           },
           "updates": [],
           "update_cursor": 0
@@ -5311,7 +5312,8 @@
               "output": "assistant: The prior build was healthy.\n\ntool call shell: run the new packet suite\n\ntool result: 24 checks completed\n\nassistant: The candidate passed all 24 checks with zero dropped events.",
               "cursor": "live:answer-1",
               "voice_assistant_output": "assistant: The candidate passed all 24 checks with zero dropped events.",
-              "voice_assistant_output_state": "final"
+              "voice_assistant_output_state": "final",
+              "voice_assistant_output_scope": "full"
             }
           }
         ],
@@ -5323,6 +5325,59 @@
           ],
           "speechForbiddenTerms": ["20", "prior build", "tool call", "tool result", "still streaming"],
           "maxSpeechWords": 24,
+          "maxRounds": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "final_stream_continuation_is_labeled_as_a_final_part",
+    "description": "When a prior turn consumed the beginning of a live assistant message, present the newly finalized continuation as the final part rather than reading an internal label or calling it the whole answer.",
+    "initialHistory": [
+      { "role": "user", "content": "what has voice work said so far" },
+      { "role": "assistant", "content": "Voice Work is still responding. So far: The estimate is" }
+    ],
+    "initialCoordinatorState": {
+      "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+      "known_sessions": [
+        { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+      ],
+      "pending_decisions": [],
+      "recent_actions": [],
+      "output_delta": { "changed": false, "output": "" },
+      "updates": [],
+      "update_cursor": 0
+    },
+    "turns": [
+      {
+        "type": "user",
+        "input": "okay and what's the latest now",
+        "coordinatorState": {
+          "focused_session": { "id": "session-voice", "name": "Voice Work", "status": "running" },
+          "known_sessions": [
+            { "id": "session-voice", "name": "Voice Work", "status": "running", "focused": true }
+          ],
+          "pending_decisions": [],
+          "recent_actions": [],
+          "output_delta": {
+            "changed": true,
+            "output": "assistant (continued): 45 to 60 minutes.",
+            "cursor": "live:answer-2",
+            "voice_assistant_output": "assistant (continued): 45 to 60 minutes.",
+            "voice_assistant_output_state": "final",
+            "voice_assistant_output_scope": "continued"
+          },
+          "updates": [],
+          "update_cursor": 0
+        },
+        "expected": {
+          "toolSequence": [],
+          "forbiddenTools": ["get_output", "poll_output", "focus_session"],
+          "speechTerms": ["voice work", "45", "60"],
+          "speechAnyTerms": [
+            ["final part", "finished that response", "completed that response"]
+          ],
+          "speechForbiddenTerms": ["assistant continued", "still streaming", "tool call", "tool result"],
           "maxRounds": 1
         }
       }

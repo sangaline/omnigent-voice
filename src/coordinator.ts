@@ -1419,10 +1419,15 @@ export class OmnigentCoordinator {
       .filter(({ text }) => Boolean(text));
     let voiceAssistantOutput: string | undefined;
     let voiceAssistantOutputState: "final" | "streaming" | undefined;
+    let voiceAssistantOutputScope: "full" | "continued" | "streaming_suffix" | undefined;
     const latestRendered = rendered.at(-1);
     if (latestRendered?.entry.kind === "assistant") {
       voiceAssistantOutput = latestRendered.text;
       voiceAssistantOutputState = "final";
+      voiceAssistantOutputScope =
+        cursor === "contextIndex" && latestRendered.entry.contextText !== undefined
+        ? "continued"
+        : "full";
     }
     let liveCursor: string | undefined;
     if (cursor === "contextIndex") {
@@ -1437,6 +1442,7 @@ export class OmnigentCoordinator {
         });
         voiceAssistantOutput = streamingText;
         voiceAssistantOutputState = "streaming";
+        voiceAssistantOutputScope = "streaming_suffix";
         liveCursor = `live:${live.key}:${live.text.length}`;
       }
     }
@@ -1449,6 +1455,7 @@ export class OmnigentCoordinator {
         ? {
             voice_assistant_output: voiceAssistantOutput,
             voice_assistant_output_state: voiceAssistantOutputState,
+            voice_assistant_output_scope: voiceAssistantOutputScope,
           }
         : {}),
     };
@@ -1473,6 +1480,7 @@ export class OmnigentCoordinator {
         ? {
             voice_assistant_output: latestEntry.text,
             voice_assistant_output_state: "final",
+            voice_assistant_output_scope: "full",
           }
         : {}),
     };
