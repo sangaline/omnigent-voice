@@ -2423,3 +2423,33 @@ linked turns, so this relay-only change did not expand into a notification
 wording fix. All coordinator execution was frozen; no live Omnigent session was
 accessed or mutated, and the excluded ESPN session remained untouched. The live
 Audrey persona pod was not redeployed for this coordinator-only change.
+
+### 2026-08-29 — Decision scenarios use the production event shape
+
+Hypothesis H82 investigated H81's sole broad-sweep miss rather than dismissing
+it as model variance. One proactive Side Beta decision notification omitted the
+literal word “approval,” although the action state and later deictic reference
+were correct. The unchanged five-turn scenario then passed ten of ten immediate
+reruns, confirming stochastic wording but not explaining why a typed decision
+had used Celeris at all.
+
+Source inspection found that the scenario's decision event was the only one in
+the corpus without structured `prompts`. The coordinator always publishes the
+current prompt registry with a real `decision_needed` event. Its direct renderer
+requires that production shape so it can preserve confirmation versus form
+semantics and the exact question. The stale summary-only fixture therefore
+forced a model round that production would not use.
+
+The fixture now carries its prompt ID, confirmation mode, and exact restart
+question. The scenario loader also rejects any future decision notification
+without at least one production-shaped prompt containing an ID, message, and
+mode; a deliberately malformed probe failed before making a model request. The
+corrected scenario passed five of five runs across 25 linked turns. Its decision
+notice was exact in zero model rounds and measured 0 milliseconds in every run.
+
+Promotion evidence is 163 passing unit tests, clean typecheck and build, all 47
+isolated cases, and all 61 stateful scenarios across 153 linked turns with no
+invalid trials. This cycle changed evaluation fidelity rather than production
+runtime behavior. All coordinator execution was frozen; no live Omnigent
+session was accessed or mutated, and the excluded ESPN session remained
+untouched. The live Audrey persona pod was not redeployed.

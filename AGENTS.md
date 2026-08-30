@@ -802,6 +802,11 @@ snapshots and tool results. This is the regression gate for notification
 references, sticky focus, incremental output, explicit focus changes, and
 archive restoration. A scenario passes only if every valid turn passes; never
 replace it with isolated case invocations when evaluating stateful behavior.
+The loader rejects `decision_needed` notification fixtures without at least one
+production-shaped prompt containing a prompt ID, message, and mode. Real
+coordinator events always carry those structured prompts, and summary-only
+fixtures would bypass the deterministic zero-round decision renderer and test a
+stochastic shape the runtime does not emit.
 Use `--json --include-trace` only with sanitized or otherwise private scenario
 data when raw completion shapes are needed to diagnose an empty model turn.
 The frozen coordinator filters `updates` against the MCP consumer cursor on

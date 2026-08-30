@@ -344,15 +344,23 @@
           {
             "event_id": 22,
             "type": "decision_needed",
-            "session_id": "session-beta",
-            "name": "Side Beta",
-            "summary": "Side Beta needs approval before restarting the test worker."
+          "session_id": "session-beta",
+          "name": "Side Beta",
+          "summary": "Side Beta needs approval before restarting the test worker.",
+          "prompts": [
+            {
+              "prompt_id": "prompt-beta-restart",
+              "message": "Restart the test worker?",
+              "mode": "confirmation",
+              "schema": null
+            }
+          ]
           }
         ],
         "expected": {
           "toolSequence": [],
           "speechTerms": ["side beta", "approval", "restart"],
-          "maxRounds": 1
+        "maxRounds": 0
         }
       },
       {

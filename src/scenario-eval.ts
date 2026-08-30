@@ -87,6 +87,29 @@ const scenariosPath = option("--scenarios") ?? "evals/scenarios.json";
 const allScenarios = JSON.parse(
   readFileSync(scenariosPath, "utf8"),
 ) as VoiceEvalScenario[];
+for (const scenario of allScenarios) {
+  for (const [turnIndex, turn] of scenario.turns.entries()) {
+    if (turn.type !== "notification") continue;
+    for (const update of turn.updates) {
+      if (update.type !== "decision_needed") continue;
+      const prompts = Array.isArray(update.prompts) ? update.prompts : [];
+      const productionShaped = prompts.length > 0 && prompts.every((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+        const prompt = value as JsonObject;
+        return (
+          typeof prompt.prompt_id === "string" && prompt.prompt_id.length > 0 &&
+          typeof prompt.message === "string" && prompt.message.length > 0 &&
+          typeof prompt.mode === "string" && prompt.mode.length > 0
+        );
+      });
+      if (!productionShaped) {
+        throw new Error(
+          `Scenario ${scenario.id} turn ${turnIndex + 1} has a decision_needed notification without production-shaped prompts`,
+        );
+      }
+    }
+  }
+}
 const selectedId = option("--case");
 const scenarios = selectedId
   ? allScenarios.filter((scenario) => scenario.id === selectedId)
