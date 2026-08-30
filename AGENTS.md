@@ -41,8 +41,10 @@ Celeris never waits for a coding agent to complete work before acknowledging it.
 the exact Discord, streaming ASR, endpointing, interruption, Pocket/Piper TTS,
 hot dialogue, and private logging path, but the process does not instantiate
 `OmnigentClient`, `OmnigentCoordinator`, or an MCP client.
-`PERSONA_SYSTEM_PROMPT` overrides the
-sanitized built-in personality; `PERSONA_MAX_RESPONSE_CHARACTERS` and
+`PERSONA_SYSTEM_PROMPT` overrides the sanitized built-in Audrey personality;
+the built-in identity must never name or imply an underlying model. Production
+keeps the prompt in its own runtime Secret so personality edits do not require
+rebuilding the image. `PERSONA_MAX_RESPONSE_CHARACTERS` and
 `PERSONA_TEMPERATURE` tune voice-sized output. This mode is separate from
 PersonaPlex and from `VOICE_RUNTIME=kame`: production persona currently uses
 the staged Celeris/Pocket pipeline. A leaked Celeris control marker such as
@@ -69,6 +71,13 @@ actions. `PERSONA_MEMORY_ANALYSIS_MODEL` and `PERSONA_ADVISER_MODEL` may differ;
 an external provider receives the completed private dialogue and must be an
 explicit deployment choice. Local Ollama remains a valid OpenAI-compatible
 alternative. See `docs/PERSONA.md`.
+
+The first production memory deployment uses Pareto `z-ai/glm-5.3` for the one
+structured post-turn analysis and `deepseek/deepseek-v4-flash` only for an
+explicit conversational escalation. This is intentional: measured Celeris
+first-content latency remained substantially lower and more consistent, so it
+stays on every normal turn. The analysis request is capped at 384 completion
+tokens, advice at 192, and logs contain only aggregate duration/token usage.
 
 The bundled runtime models are the int8 0.6B Nemotron English streaming
 transducer with 560 ms chunks, dynamically quantized Pocket TTS 3.0.2 with the

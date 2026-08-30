@@ -59,6 +59,10 @@ external provider receives the completed user and assistant text, so treat its
 configuration as an explicit privacy decision. Keep its API key in a runtime
 secret. `PERSONA_MEMORY_ANALYSIS_MODEL` may use a precise structured-output
 model while `PERSONA_ADVISER_MODEL` uses a faster conversational model.
+Only one structured analysis request runs per completed turn. The normal reply
+does not ask the external adviser for response candidates, and an explicit
+adviser call is the only path that incurs a second provider request. Logs retain
+aggregate timing and token counts but never the provider request text.
 
 The same adviser is exposed to Celeris through one narrow `ask_adviser` tool.
 Celeris answers ordinary turns directly. For a genuinely difficult creative or
