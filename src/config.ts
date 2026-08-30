@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 export interface Config {
   conversationMode: "coordinator" | "persona";
   voiceRuntime: "staged" | "kame";
@@ -81,6 +83,10 @@ export interface Config {
   kameInputDelayMs: number;
   logLevel: "debug" | "info" | "warn" | "error";
   logFile?: string | undefined;
+  voiceRecordingEnabled: boolean;
+  voiceRecordingDirectory?: string | undefined;
+  voiceRecordingRetentionDays: number;
+  voiceRecordingMaxBytes: number;
 }
 
 const required = (env: NodeJS.ProcessEnv, name: string): string => {
@@ -196,6 +202,22 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
   const ttsRuntime = optional(env, "TTS_RUNTIME") ?? "piper";
   if (ttsRuntime !== "piper" && ttsRuntime !== "pocket") {
     throw new Error("TTS_RUNTIME must be piper or pocket");
+  }
+  const voiceRecordingEnabled = boolean(env, "VOICE_RECORDING_ENABLED", false);
+  const voiceRecordingDirectory = voiceRecordingEnabled
+    ? required(env, "VOICE_RECORDING_DIRECTORY")
+    : optional(env, "VOICE_RECORDING_DIRECTORY");
+  if (voiceRecordingDirectory && !isAbsolute(voiceRecordingDirectory)) {
+    throw new Error("VOICE_RECORDING_DIRECTORY must be an absolute path");
+  }
+  const voiceRecordingMaxMiB = positiveInteger(
+    env,
+    "VOICE_RECORDING_MAX_MIB",
+    2_048,
+  );
+  const voiceRecordingMaxBytes = voiceRecordingMaxMiB * 1024 * 1024;
+  if (!Number.isSafeInteger(voiceRecordingMaxBytes)) {
+    throw new Error("VOICE_RECORDING_MAX_MIB is too large");
   }
   const kameBridgePath = optional(env, "KAME_BRIDGE_PATH");
   const kameConfigPath = optional(env, "KAME_CONFIG_PATH");
@@ -411,5 +433,13 @@ export const loadConfig = (env: NodeJS.ProcessEnv): Config => {
     kameInputDelayMs: nonnegativeInteger(env, "KAME_INPUT_DELAY_MS", 640),
     logLevel: logLevel as Config["logLevel"],
     logFile: optional(env, "LOG_FILE"),
+    voiceRecordingEnabled,
+    voiceRecordingDirectory,
+    voiceRecordingRetentionDays: positiveInteger(
+      env,
+      "VOICE_RECORDING_RETENTION_DAYS",
+      14,
+    ),
+    voiceRecordingMaxBytes,
   };
 };

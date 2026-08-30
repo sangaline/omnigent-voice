@@ -59,6 +59,19 @@ exact assistant text whose audio begins playing. These logs are intentionally
 sensitive and belong only on private runtime storage; they are never built into
 the image.
 
+Optional debugging recordings are disabled by default. Set
+`VOICE_RECORDING_ENABLED=true` and provide an absolute
+`VOICE_RECORDING_DIRECTORY` on private runtime storage to retain mono PCM WAV
+files. Human recordings contain the 16 kHz signal actually supplied to local
+ASR, including meaningful unrecognized turns. Coordinator recordings contain
+the native Pocket/Piper or KAME samples accepted for Discord playback. Each
+`voice.recording.saved` JSON event links the private filename, role, outcome,
+duration, and generated turn ID to the transcript/playback events. Retention is
+bounded by `VOICE_RECORDING_RETENTION_DAYS` and `VOICE_RECORDING_MAX_MIB`.
+Interrupted coordinator files can contain a short generated tail that Discord
+buffered but the caller did not hear. Treat the WAV files as more sensitive
+than transcripts: never commit, publish, or bake them into an image.
+
 The coordinator exposes ten tools: list and explicitly focus sessions, read
 recent output, poll only stable new output, send an immediate or deliberately
 queued message, archive or rename a session, answer a structured prompt, start

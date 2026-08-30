@@ -51,6 +51,20 @@
 
 ## Voice follow-ups after the current deployment
 
+- Add a linked regression for the live ASR-style rename failure: “could we just
+  call this Omnigent,” followed by “yes please,” “you do it,” and an audit. The
+  current harness failed to recognize `call it NAME` as a rename, exposed
+  unrelated reads, executed dozens of `get_output` calls, forgot the pending
+  title across confirmations, and finally accepted an ASR-corrupted title.
+  Rename consent must become deterministic pending state, unrelated read tools
+  must be unavailable, and a materially different short title should require
+  confirmation rather than mutating the focused session.
+- Add a linked regression for the live garbled focus/read/send chain: a spoken
+  switch misrecognized as past tense must not silently become a read, and a
+  later “send it” must resolve to the last authoritative session reference or
+  fail closed. Corrective speech must never repeat a prior send without a new
+  explicit instruction.
+
 - Live-test that a long Celeris answer stops at a complete sentence and that a
   “what trailed off?” follow-up sees exactly the speech Discord played.
 - Review the next retained voice sample for missed coordinator updates,

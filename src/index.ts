@@ -15,15 +15,26 @@ import {
 } from "./persona-memory.js";
 import { LocalSpeech } from "./speech.js";
 import { KameS2SRuntime } from "./s2s.js";
+import { VoiceRecordingStore } from "./voice-recordings.js";
 
 const config = loadConfig(process.env);
 const logger = new Logger(config.logLevel, config.logFile);
+const recordings = config.voiceRecordingEnabled
+  ? new VoiceRecordingStore({
+      directory: config.voiceRecordingDirectory!,
+      retentionDays: config.voiceRecordingRetentionDays,
+      maxBytes: config.voiceRecordingMaxBytes,
+      logger,
+    })
+  : undefined;
+if (recordings) await recordings.initialize();
 
 logger.info("startup", {
   celerisEnabled: Boolean(config.celerisApiKey),
   conversationMode: config.conversationMode,
   persistentLogEnabled: Boolean(config.logFile),
   voiceRuntime: config.voiceRuntime,
+  voiceRecordingEnabled: Boolean(recordings),
 });
 
 const speech = await LocalSpeech.create({
@@ -210,6 +221,7 @@ const bot = new DiscordVoiceBot({
     ? "Sorry, I lost my train of thought for a moment."
     : undefined,
   s2s,
+  recordings,
 });
 
 await bot.start();
@@ -220,6 +232,7 @@ const shutdown = async (signal: string): Promise<void> => {
   await speech.stop();
   await endpoint?.stop();
   await s2s?.stop();
+  await recordings?.close();
   await personaMemory?.close();
   coordinator?.stop();
   await tools?.close();

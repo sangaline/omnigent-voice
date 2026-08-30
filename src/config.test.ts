@@ -135,3 +135,35 @@ describe("conversation mode configuration", () => {
     ).toThrow("PERSONA_TEMPERATURE must be a number between 0 and 2");
   });
 });
+
+describe("private voice recording configuration", () => {
+  it("keeps recordings off unless an absolute private runtime directory is supplied", () => {
+    const disabled = loadConfig(requiredEnvironment());
+    expect(disabled.voiceRecordingEnabled).toBe(false);
+    expect(disabled.voiceRecordingDirectory).toBeUndefined();
+
+    expect(() => loadConfig({
+      ...requiredEnvironment(),
+      VOICE_RECORDING_ENABLED: "true",
+    })).toThrow("Missing required environment variable: VOICE_RECORDING_DIRECTORY");
+    expect(() => loadConfig({
+      ...requiredEnvironment(),
+      VOICE_RECORDING_ENABLED: "true",
+      VOICE_RECORDING_DIRECTORY: "recordings",
+    })).toThrow("VOICE_RECORDING_DIRECTORY must be an absolute path");
+  });
+
+  it("accepts bounded retention settings for an enabled private directory", () => {
+    const config = loadConfig({
+      ...requiredEnvironment(),
+      VOICE_RECORDING_ENABLED: "true",
+      VOICE_RECORDING_DIRECTORY: "/private/recordings",
+      VOICE_RECORDING_RETENTION_DAYS: "7",
+      VOICE_RECORDING_MAX_MIB: "512",
+    });
+    expect(config.voiceRecordingEnabled).toBe(true);
+    expect(config.voiceRecordingDirectory).toBe("/private/recordings");
+    expect(config.voiceRecordingRetentionDays).toBe(7);
+    expect(config.voiceRecordingMaxBytes).toBe(512 * 1024 * 1024);
+  });
+});
