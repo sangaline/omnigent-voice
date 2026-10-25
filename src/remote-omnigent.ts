@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { JsonObject } from "./omnigent.js";
 
 const isObject = (value: unknown): value is JsonObject =>
@@ -6,6 +7,7 @@ const isObject = (value: unknown): value is JsonObject =>
 export interface CliLoginStart {
   ticket: string;
   loginUrl: string;
+  upstreamCodeVerifier: string;
 }
 
 export interface CliLoginGrant {
@@ -30,9 +32,13 @@ export class OmnigentGrantClient {
   public async startCliLogin(): Promise<CliLoginStart> {
     const url = new URL("/auth/cli-login", this.options.baseUrl);
     url.searchParams.set("grant_client_id", "omnigent-mcp");
+    const upstreamCodeVerifier = randomBytes(32).toString("base64url");
+    const challenge = createHash("sha256").update(upstreamCodeVerifier).digest("base64url");
     const response = await this.fetcher(url, {
       method: "POST",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ code_challenge: challenge, code_challenge_method: "S256" }),
+      redirect: "error",
     });
     const payload = await this.json(response);
     if (!response.ok || typeof payload.ticket !== "string" || typeof payload.login_url !== "string") {
@@ -42,13 +48,19 @@ export class OmnigentGrantClient {
     if (loginUrl.origin !== this.options.baseUrl.origin || loginUrl.pathname !== "/auth/login") {
       throw new Error("Omnigent returned an unsafe CLI login URL");
     }
-    return { ticket: payload.ticket, loginUrl: `${loginUrl.pathname}${loginUrl.search}` };
+    return { ticket: payload.ticket, loginUrl: `${loginUrl.pathname}${loginUrl.search}`, upstreamCodeVerifier };
   }
 
-  public async pollCliLogin(ticket: string): Promise<CliLoginGrant | "pending"> {
+  public async pollCliLogin(ticket: string, upstreamCodeVerifier: string): Promise<CliLoginGrant | "pending"> {
+    if (!/^[A-Za-z0-9._~-]{43,128}$/.test(upstreamCodeVerifier)) {
+      throw new Error("Omnigent CLI login requires a valid PKCE verifier");
+    }
     const url = new URL("/auth/cli-poll", this.options.baseUrl);
     url.searchParams.set("ticket", ticket);
-    const response = await this.fetcher(url, { headers: { accept: "application/json" } });
+    const response = await this.fetcher(url, {
+      headers: { accept: "application/json", "X-Omnigent-Code-Verifier": upstreamCodeVerifier },
+      redirect: "error",
+    });
     const payload = await this.json(response);
     if (response.status === 202) return "pending";
     if (!response.ok) {

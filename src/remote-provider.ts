@@ -46,7 +46,7 @@ export class RemoteOAuthProvider implements OAuthServerProvider {
     }
     const login = await this.omnigent.startCliLogin();
     const transactionSecret = opaqueSecret("omv_tx");
-    this.store.createAuthorization(transactionSecret, client, params, login.ticket);
+    this.store.createAuthorization(transactionSecret, client, params, login);
 
     const loginUrl = new URL(login.loginUrl, this.publicOrigin);
     const callback = new URL("/mcp/oauth/callback", this.publicOrigin);
@@ -123,7 +123,10 @@ export class RemoteOAuthProvider implements OAuthServerProvider {
     if (transaction.status !== "pending") {
       throw new InvalidGrantError("Authorization transaction was already completed");
     }
-    const grant = await this.omnigent.pollCliLogin(transaction.ticket);
+    if (!transaction.upstreamCodeVerifier) {
+      throw new InvalidGrantError("Restart this authorization to establish upstream PKCE proof");
+    }
+    const grant = await this.omnigent.pollCliLogin(transaction.ticket, transaction.upstreamCodeVerifier);
     if (grant === "pending") {
       throw new InvalidGrantError("Omnigent login has not completed");
     }

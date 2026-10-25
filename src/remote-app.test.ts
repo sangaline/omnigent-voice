@@ -3,10 +3,13 @@ import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRemoteMcpApplication, type RemoteMcpApplication } from "./remote-app.js";
 import type { RemoteMcpConfig } from "./remote-config.js";
+import { SecretBox, secretHash } from "./remote-crypto.js";
+import { RemoteStore } from "./remote-store.js";
 
 interface FakeAccount {
   accountId: string;
@@ -20,6 +23,7 @@ class FakeOmnigent {
   public readonly accounts: FakeAccount[] = [];
   public readonly revoked: string[] = [];
   private readonly ticketAccounts = new Map<string, FakeAccount>();
+  public readonly ticketChallenges = new Map<string, string>();
   private ticketCounter = 0;
 
   public enqueue(account: FakeAccount): void {
@@ -29,14 +33,30 @@ class FakeOmnigent {
   public fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
     if (url.pathname === "/auth/cli-login" && init?.method === "POST") {
+      const proof = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+      if (url.searchParams.get("grant_client_id") !== "omnigent-mcp"
+          || new Headers(init.headers).get("content-type") !== "application/json"
+          || proof.code_challenge_method !== "S256"
+          || typeof proof.code_challenge !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(proof.code_challenge)) {
+        return Response.json({ error: "PKCE challenge required" }, { status: 400 });
+      }
       const account = this.accounts.shift();
       if (!account) return Response.json({ error: "no test account" }, { status: 500 });
       const ticket = `private-ticket-${++this.ticketCounter}`;
       this.ticketAccounts.set(ticket, account);
+      this.ticketChallenges.set(ticket, String(proof.code_challenge));
       return Response.json({ ticket, login_url: `/auth/login?ticket=${ticket}` });
     }
     if (url.pathname === "/auth/cli-poll") {
-      const account = this.ticketAccounts.get(url.searchParams.get("ticket") ?? "");
+      const ticket = url.searchParams.get("ticket") ?? "";
+      const verifier = new Headers(init?.headers).get("X-Omnigent-Code-Verifier");
+      if (!verifier || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) {
+        return Response.json({ error: "PKCE verifier required" }, { status: 400 });
+      }
+      if (createHash("sha256").update(verifier).digest("base64url") !== this.ticketChallenges.get(ticket)) {
+        return Response.json({ error: "PKCE proof mismatch" }, { status: 403 });
+      }
+      const account = this.ticketAccounts.get(ticket);
       if (!account) return Response.json({ error: "gone" }, { status: 410 });
       return Response.json({
         token: "unused-session-token",
@@ -87,6 +107,7 @@ interface RunningApp {
   url: string;
   directory: string;
   databasePath: string;
+  config: RemoteMcpConfig;
   fake: FakeOmnigent;
 }
 
@@ -137,6 +158,7 @@ const start = async (): Promise<RunningApp> => {
     url: `http://127.0.0.1:${address.port}`,
     directory,
     databasePath,
+    config,
     fake,
   };
   running.push(value);
@@ -181,6 +203,8 @@ const authorize = async (
   expect(loginLocation.origin).toBe("https://unit.example");
   expect(loginLocation.pathname).toBe("/auth/login");
   const upstreamTicket = loginLocation.searchParams.get("ticket") ?? "";
+  expect(app.fake.ticketChallenges.get(upstreamTicket)).not.toBe(challenge);
+  expect(loginLocation.searchParams.has("code_verifier")).toBe(false);
   const returnTo = new URL(loginLocation.searchParams.get("return_to") ?? "", "https://unit.example");
   const transaction = returnTo.searchParams.get("transaction") ?? "";
   expect(transaction).toMatch(/^omv_tx_/);
@@ -409,7 +433,49 @@ describe("remote MCP OAuth gateway", () => {
     expect((await callTool(app, String(rotated.access_token), "whoami")).response.status).toBe(401);
   });
 
-  it("never stores raw tickets, codes, or gateway/upstream tokens", async () => {
+  it("requires legacy pending logins to restart without invalidating established grants", async () => {
+    const app = await start();
+    const connection = await authorize(app, account("legacy-pending"));
+    const transactionHash = secretHash(connection.transaction);
+    const database = new DatabaseSync(app.databasePath);
+    try {
+      const legacyTicket = new SecretBox(app.config.encryptionKey)
+        .seal(connection.upstreamTicket, `transaction:${transactionHash}:ticket`);
+      database.prepare("UPDATE auth_transactions SET ticket_ciphertext = ?, status = 'pending' WHERE transaction_hash = ?")
+        .run(legacyTicket, transactionHash);
+    } finally {
+      database.close();
+    }
+    await expect(app.application.provider.completeOmnigentLogin(connection.transaction))
+      .rejects.toThrow("Restart this authorization to establish upstream PKCE proof");
+    expect((await callTool(app, connection.accessToken, "whoami")).response.status).toBe(200);
+  });
+
+  it("retains encrypted upstream PKCE proof when the store is reopened", async () => {
+    const app = await start();
+    const connection = await authorize(app, account("pkce-reopen"));
+    const original = app.application.provider.authorization(connection.transaction);
+    const reopened = new RemoteStore({
+      path: app.databasePath,
+      secretBox: new SecretBox(app.config.encryptionKey),
+      resourceUrl: app.config.resourceUrl,
+      accessTokenTtlSeconds: app.config.accessTokenTtlSeconds,
+      refreshTokenTtlSeconds: app.config.refreshTokenTtlSeconds,
+      authorizationTtlSeconds: app.config.authorizationTtlSeconds,
+    });
+    try {
+      const restored = reopened.getAuthorization(secretHash(connection.transaction));
+      expect(restored.upstreamCodeVerifier).toBe(original.upstreamCodeVerifier);
+      expect(restored.upstreamCodeVerifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(createHash("sha256").update(restored.upstreamCodeVerifier!).digest("base64url"))
+        .toBe(app.fake.ticketChallenges.get(connection.upstreamTicket));
+      expect(restored.ticket).toBe(connection.upstreamTicket);
+    } finally {
+      reopened.close();
+    }
+  });
+
+  it("never stores raw tickets, PKCE verifiers, codes, or gateway/upstream tokens", async () => {
     const app = await start();
     const connection = await authorize(app, account("storage"));
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -421,6 +487,7 @@ describe("remote MCP OAuth gateway", () => {
     for (const secret of [
       connection.transaction,
       connection.upstreamTicket,
+      app.application.provider.authorization(connection.transaction).upstreamCodeVerifier!,
       connection.authorizationCode,
       connection.accessToken,
       connection.refreshToken,

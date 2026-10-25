@@ -16,7 +16,7 @@ import type {
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { opaqueSecret, SecretBox, secretHash } from "./remote-crypto.js";
-import type { CliLoginGrant } from "./remote-omnigent.js";
+import type { CliLoginGrant, CliLoginStart } from "./remote-omnigent.js";
 
 type Row = Record<string, unknown>;
 
@@ -84,6 +84,7 @@ export interface PendingAuthorization {
   codeChallenge: string;
   resource: string;
   ticket: string;
+  upstreamCodeVerifier?: string;
   expiresAt: number;
   status: string;
   accountId?: string;
@@ -166,7 +167,7 @@ export class RemoteStore implements OAuthRegisteredClientsStore {
     transactionSecret: string,
     client: OAuthClientInformationFull,
     params: AuthorizationParams,
-    ticket: string,
+    login: CliLoginStart,
   ): PendingAuthorization {
     const transactionHash = secretHash(transactionSecret);
     const now = Math.floor(Date.now() / 1000);
@@ -188,7 +189,10 @@ export class RemoteStore implements OAuthRegisteredClientsStore {
       JSON.stringify(scopes),
       params.codeChallenge,
       resource,
-      this.options.secretBox.seal(ticket, `transaction:${transactionHash}:ticket`),
+      this.options.secretBox.seal(
+        JSON.stringify({ ticket: login.ticket, upstreamCodeVerifier: login.upstreamCodeVerifier }),
+        `transaction:${transactionHash}:ticket`,
+      ),
       now,
       now + this.options.authorizationTtlSeconds,
     );
@@ -202,6 +206,22 @@ export class RemoteStore implements OAuthRegisteredClientsStore {
     if (expiresAt <= Math.floor(Date.now() / 1000)) {
       throw new InvalidGrantError("Authorization transaction expired");
     }
+    const storedLogin = this.options.secretBox.open(
+      asString(row.ticket_ciphertext, "ticket_ciphertext"),
+      `transaction:${transactionHash}:ticket`,
+    );
+    // Existing in-flight tickets remain readable, but cannot bypass upstream PKCE.
+    let login: { ticket: string; upstreamCodeVerifier?: string } = { ticket: storedLogin };
+    if (storedLogin.startsWith("{")) {
+      const parsed: unknown = JSON.parse(storedLogin);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
+          || !("ticket" in parsed) || typeof parsed.ticket !== "string"
+          || !("upstreamCodeVerifier" in parsed) || typeof parsed.upstreamCodeVerifier !== "string"
+          || !/^[A-Za-z0-9._~-]{43,128}$/.test(parsed.upstreamCodeVerifier)) {
+        throw new InvalidGrantError("Stored upstream PKCE proof is invalid");
+      }
+      login = { ticket: parsed.ticket, upstreamCodeVerifier: parsed.upstreamCodeVerifier };
+    }
     const state = optionalString(row.state);
     const accountId = optionalString(row.account_id);
     const oidcIssuer = optionalString(row.oidc_issuer);
@@ -214,10 +234,7 @@ export class RemoteStore implements OAuthRegisteredClientsStore {
       scopes: parseScopes(row.scopes_json),
       codeChallenge: asString(row.code_challenge, "code_challenge"),
       resource: asString(row.resource, "resource"),
-      ticket: this.options.secretBox.open(
-        asString(row.ticket_ciphertext, "ticket_ciphertext"),
-        `transaction:${transactionHash}:ticket`,
-      ),
+      ...login,
       expiresAt,
       status: asString(row.status, "status"),
       ...(accountId ? { accountId } : {}),
