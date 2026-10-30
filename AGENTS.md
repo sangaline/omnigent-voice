@@ -1132,3 +1132,10 @@ link or deployment metadata.
   Python bytecode embeds the absolute compilation path; the pre-rollout image
   scan must reject personal paths even when no credential value is present.
 - Update this file when runtime assumptions or operational procedures change.
+
+## Security rebuilds
+
+Pin all Node build and runtime stages to the same reviewed Node 24 security image digest.
+Refresh production dependency locks and the runtime Debian packages when rebuilding for security fixes.
+Keep native compilation bounded with `BUILD_JOBS`, and keep the bundled public models and authentication behavior unchanged.
+Run type checking, the full test suite, the production build, dependency auditing, and an image vulnerability scan before rollout.

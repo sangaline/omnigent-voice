@@ -1,3 +1,5 @@
+ARG NODE_IMAGE=docker.io/library/node:24.22.1-trixie-slim@sha256:89c5244bc22a9bc3287d89ebc7e49b9cb5bb84cd40e6175ac3421d5a9f68b95a
+
 FROM debian:trixie-slim AS models
 
 RUN apt-get update \
@@ -42,6 +44,8 @@ RUN set -eu; \
 
 FROM debian:trixie-slim AS native
 
+ARG BUILD_JOBS=4
+
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential ca-certificates cmake git glslc libsentencepiece-dev \
@@ -64,7 +68,7 @@ RUN git -C /src/moshi apply /tmp/moshi-kame.patch \
       -DGGML_NATIVE=OFF \
       -DGGML_VULKAN=ON \
       -DVulkan_GLSLC_EXECUTABLE=/usr/bin/glslc \
-    && cmake --build /src/ggml/build --parallel \
+    && cmake --build /src/ggml/build --parallel ${BUILD_JOBS} \
     && cmake -S /src/moshi -B /src/moshi/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DMOSHI_BUILD_TOOLS=OFF \
@@ -72,7 +76,7 @@ RUN git -C /src/moshi apply /tmp/moshi-kame.patch \
       -DGGML_LIBRARY_DIR=/src/ggml/build/src \
       -DSentencePiece_INCLUDE_DIR=/usr/include \
       -DSentencePiece_LIBRARY_DIR=/usr/lib/x86_64-linux-gnu \
-    && cmake --build /src/moshi/build --parallel
+    && cmake --build /src/moshi/build --parallel ${BUILD_JOBS}
 
 COPY native/kame_bridge.cpp /src/kame_bridge.cpp
 COPY native/kame_quantize.cpp /src/kame_quantize.cpp
@@ -97,7 +101,7 @@ RUN c++ -std=c++20 -O3 /src/kame_bridge.cpp \
     && cp -a /src/ggml/build/src/libggml.so* /src/ggml/build/src/libggml-base.so* /out/ \
     && cp -a /src/ggml/build/bin/libggml-cpu.so /src/ggml/build/bin/libggml-vulkan.so /out/
 
-FROM node:24-trixie-slim AS build
+FROM ${NODE_IMAGE} AS build
 
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json ./
@@ -107,7 +111,7 @@ RUN npm run build \
     && find dist -type f -name '*.test.js' -delete \
     && rm dist/eval.js dist/evaluation.js dist/replay.js dist/scenario-eval.js
 
-FROM node:24-trixie-slim AS dependencies
+FROM ${NODE_IMAGE} AS dependencies
 
 ENV NODE_ENV=production
 WORKDIR /app
@@ -120,7 +124,7 @@ FROM python:3.13-slim-trixie AS endpoint-python
 RUN pip install --no-cache-dir --target /opt/smart-turn-python \
       numpy==2.5.2 onnxruntime==1.29.0
 
-FROM node:24-trixie-slim AS pocket-python
+FROM ${NODE_IMAGE} AS pocket-python
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -131,7 +135,7 @@ RUN python3 -m venv /opt/pocket-tts \
     && /opt/pocket-tts/bin/pip install --no-cache-dir \
       --index-url https://download.pytorch.org/whl/cpu \
       torch==2.13.0+cpu \
-    && /opt/pocket-tts/bin/pip install --no-cache-dir pocket-tts==3.0.2
+    && /opt/pocket-tts/bin/pip install --no-cache-dir pocket-tts==3.0.2 certifi==2026.10.18 filelock==4.2.1
 
 ENV HF_HOME=/opt/pocket-cache \
     POCKET_TTS_NO_BEARTYPE=1
@@ -152,13 +156,23 @@ RUN /opt/pocket-tts/bin/python -c \
       -mindepth 1 ! -name torch_shm_manager -delete \
     && find /opt/pocket-tts -type d -name __pycache__ -prune -exec rm -rf '{}' +
 
-FROM node:24-trixie-slim
+FROM ${NODE_IMAGE}
 
 RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       libgomp1 libsentencepiece0 libvulkan1 mesa-vulkan-drivers \
       python3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Patch the `undici` dependency bundled with `npm` until upstream includes the fix.
+RUN npm install --global npm@11.21.1 \
+    && npm install --prefix /tmp/npm-security \
+      --omit=dev --ignore-scripts --no-save --package-lock=false undici@6.29.1 \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici \
+    && cp -a /tmp/npm-security/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/undici \
+    && rm -rf /tmp/npm-security \
+    && npm cache clean --force
 
 ENV NODE_ENV=production \
     SHERPA_ASR_MODEL_DIR=/opt/models/asr \
