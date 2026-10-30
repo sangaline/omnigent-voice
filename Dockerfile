@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=docker.io/library/node:24.22.1-trixie-slim@sha256:89c5244bc22a9bc3287d89ebc7e49b9cb5bb84cd40e6175ac3421d5a9f68b95a
+ARG NODE_IMAGE=docker.io/library/node:26.13.0-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39
 
 FROM debian:trixie-slim AS models
 
@@ -119,10 +119,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev \
     && npm cache clean --force
 
-FROM python:3.13-slim-trixie AS endpoint-python
+FROM docker.io/library/python:3.13.18-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS endpoint-python
 
 RUN pip install --no-cache-dir --target /opt/smart-turn-python \
-      numpy==2.5.2 onnxruntime==1.29.0
+      numpy==2.5.4 onnxruntime==1.31.1
 
 FROM ${NODE_IMAGE} AS pocket-python
 
@@ -134,8 +134,8 @@ RUN apt-get update \
 RUN python3 -m venv /opt/pocket-tts \
     && /opt/pocket-tts/bin/pip install --no-cache-dir \
       --index-url https://download.pytorch.org/whl/cpu \
-      torch==2.13.0+cpu \
-    && /opt/pocket-tts/bin/pip install --no-cache-dir pocket-tts==3.0.2 certifi==2026.10.18 filelock==4.2.1
+      torch==2.15.0+cpu \
+    && /opt/pocket-tts/bin/pip install --no-cache-dir pocket-tts==3.0.2 certifi==2026.10.23 filelock==4.2.5
 
 ENV HF_HOME=/opt/pocket-cache \
     POCKET_TTS_NO_BEARTYPE=1
@@ -166,7 +166,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Patch the `undici` dependency bundled with `npm` until upstream includes the fix.
-RUN npm install --global npm@11.21.1 \
+RUN npm install --global npm@12.2.1 \
     && npm install --prefix /tmp/npm-security \
       --omit=dev --ignore-scripts --no-save --package-lock=false undici@6.29.1 \
     && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici \

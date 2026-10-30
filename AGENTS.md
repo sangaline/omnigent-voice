@@ -1135,7 +1135,10 @@ link or deployment metadata.
 
 ## Security rebuilds
 
-Pin all Node build and runtime stages to the same reviewed Node 24 security image digest.
+Pin all Node build and runtime stages to the same reviewed Node 26 LTS security image digest.
 Refresh production dependency locks and the runtime Debian packages when rebuilding for security fixes.
 Keep native compilation bounded with `BUILD_JOBS`, and keep the bundled public models and authentication behavior unchanged.
 Run type checking, the full test suite, the production build, dependency auditing, and an image vulnerability scan before rollout.
+
+Keep Sherpa on the latest compatible 1.x release until Piper uses the external phonemization required by Sherpa 2; the existing frontend produces no audio with Sherpa 2.0.1.
+Keep Pocket TTS 3.0.2 until its bundled checkpoint and persisted voice states are explicitly migrated; Pocket TTS 4 changes the default checkpoint and cannot start from the existing offline model cache.
